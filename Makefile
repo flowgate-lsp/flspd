@@ -1,5 +1,5 @@
 PKG := github.com/flowgate-lsp/flspd
-TAG := $(shell git describe --tags --dirty)
+TAG := $(shell cat VERSION)
 
 release-all: release-flspd release-cli
 
