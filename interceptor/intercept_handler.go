@@ -8,15 +8,14 @@ import (
 	"math/big"
 	"time"
 
-	"github.com/breez/lspd/chain"
-	"github.com/breez/lspd/common"
-	"github.com/breez/lspd/config"
-	"github.com/breez/lspd/format"
-	"github.com/breez/lspd/history"
-	"github.com/breez/lspd/lightning"
-	"github.com/breez/lspd/notifications"
 	"github.com/flokiorg/go-flokicoin/wire"
-	"golang.org/x/exp/slices"
+	"github.com/flowgate-lsp/flspd/chain"
+	"github.com/flowgate-lsp/flspd/common"
+	"github.com/flowgate-lsp/flspd/config"
+	"github.com/flowgate-lsp/flspd/format"
+	"github.com/flowgate-lsp/flspd/history"
+	"github.com/flowgate-lsp/flspd/lightning"
+	"github.com/flowgate-lsp/flspd/notifications"
 	"golang.org/x/sync/singleflight"
 )
 
@@ -280,16 +279,14 @@ func (i *Interceptor) Intercept(req common.InterceptRequest) common.InterceptRes
 					)
 				}
 
-				useLegacyOnionBlob := slices.Contains(i.config.LegacyOnionTokens, token)
 				return common.InterceptResult{
-					Action:             common.INTERCEPT_RESUME_WITH_ONION,
-					Destination:        destination,
-					ChannelPoint:       channelPoint,
-					Scid:               *scid,
-					PaymentSecret:      paymentSecret,
-					AmountMsat:         uint64(amt),
-					TotalAmountMsat:    uint64(outgoingAmountMsat),
-					UseLegacyOnionBlob: useLegacyOnionBlob,
+					Action:          common.INTERCEPT_RESUME_WITH_ONION,
+					Destination:     destination,
+					ChannelPoint:    channelPoint,
+					Scid:            *scid,
+					PaymentSecret:   paymentSecret,
+					AmountMsat:      uint64(amt),
+					TotalAmountMsat: uint64(outgoingAmountMsat),
 				}, nil
 			}
 
@@ -419,7 +416,7 @@ func (i *Interceptor) openChannel(paymentHash, destination []byte, incomingAmoun
 		log.Printf("paymenthash %x, client.OpenChannelSync(%x, %v) error: %v", paymentHash, destination, capacity, err)
 		return nil, err
 	}
-	sendOpenChannelEmailNotification(
+	sendOpenChannelDiscordNotification(
 		paymentHash,
 		incomingAmountMsat,
 		destination,
