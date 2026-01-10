@@ -1,3 +1,5 @@
 .vscode
 /flspd
 /flspd_revenue_cli
+dist/
+
