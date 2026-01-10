@@ -1,0 +1,33 @@
+name: Promote Latest
+
+on:
+  workflow_dispatch:
+
+permissions:
+  packages: write
+
+jobs:
+  promote-docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Read Version
+        id: version
+        run: echo "version=$(cat VERSION)" >> $GITHUB_OUTPUT
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Promote Docker Image
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          IMAGE_NAME=ghcr.io/${{ github.repository }}
+          
+          echo "Promoting $IMAGE_NAME:$VERSION to latest..."
+          docker buildx imagetools create -t ${IMAGE_NAME}:latest ${IMAGE_NAME}:${VERSION}
+          echo "Successfully promoted to latest."

@@ -1,0 +1,123 @@
+name: Release Build
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Read Version
+        id: version
+        run: echo "version=$(cat VERSION)" >> $GITHUB_OUTPUT
+
+      - name: Check Release Notes
+        run: |
+          VERSION=$(cat VERSION)
+          if [ ! -f "releasenotes/${VERSION}.md" ]; then
+            echo "Error: Release notes for ${VERSION} not found at releasenotes/${VERSION}.md"
+            exit 1
+          fi
+
+  build-binaries:
+    needs: prepare
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        goos: [linux]
+        goarch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'  # Use recent Go version
+          
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
+        run: |
+          VERSION=${{ needs.prepare.outputs.version }}
+          LDFLAGS="-s -w -X github.com/flowgate-lsp/flspd/build.tag=${VERSION}"
+          
+          mkdir -p dist
+          go build -trimpath -ldflags "$LDFLAGS" -o dist/flspd cmd/flspd/main.go cmd/flspd/run.go cmd/flspd/genkey.go cmd/flspd/migrate.go cmd/flspd/grpc_server.go cmd/flspd/channel_opener_server.go 			
+          go build -trimpath -ldflags "$LDFLAGS" -o dist/flspd_revenue_cli cmd/flspd_revenue_cli/main.go cmd/flspd_revenue_cli/revenue.go
+          
+          # I realized the standard build is actually `go build ./cmd/flspd`, not listing files individually unless necessary.
+          # The Makefile uses `go build ... $(PKG)/cmd/flspd`. I should stick to that pattern.
+          rm -rf dist/*
+          go build -trimpath -ldflags "$LDFLAGS" -o dist/flspd ./cmd/flspd
+          go build -trimpath -ldflags "$LDFLAGS" -o dist/flspd_revenue_cli ./cmd/flspd_revenue_cli
+          
+          cd dist
+          tar -czvf flspd_${{ matrix.goos }}_${{ matrix.goarch }}_${VERSION}.tar.gz flspd flspd_revenue_cli
+          
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: flspd_${{ matrix.goos }}_${{ matrix.goarch }}
+          path: dist/*.tar.gz
+
+  build-docker:
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and Push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ghcr.io/${{ github.repository }}:${{ needs.prepare.outputs.version }}
+          build-args: |
+            TAG=${{ needs.prepare.outputs.version }}
+            COMMIT=${{ github.sha }}
+
+  create-release:
+    needs: [prepare, build-binaries, build-docker]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Download Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ needs.prepare.outputs.version }} # Use raw version or v<version>? User said VERSION creates tag. If VERSION is v1.0.0, tag is v1.0.0.
+          name: Release ${{ needs.prepare.outputs.version }}
+          body_path: releasenotes/${{ needs.prepare.outputs.version }}.md
+          files: assets/*.tar.gz
+          draft: false
+          prerelease: false
