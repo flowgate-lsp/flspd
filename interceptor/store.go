@@ -2,7 +2,7 @@ package interceptor
 
 import (
 	"github.com/breez/lspd/common"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/flokiorg/go-flokicoin/wire"
 )
 
 type InterceptStore interface {

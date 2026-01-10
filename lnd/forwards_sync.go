@@ -8,7 +8,7 @@ import (
 
 	"github.com/breez/lspd/history"
 	"github.com/breez/lspd/lightning"
-	"github.com/lightningnetwork/lnd/lnrpc"
+	"github.com/flokiorg/flnd/lnrpc"
 )
 
 type ForwardSync struct {

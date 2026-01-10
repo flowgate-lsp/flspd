@@ -9,8 +9,8 @@ import (
 	"github.com/breez/lspd/itest/lntest"
 	"github.com/breez/lspd/notifications"
 	lspd "github.com/breez/lspd/rpc"
-	"github.com/btcsuite/btcd/btcec/v2"
 	ecies "github.com/ecies/go/v2"
+	btcec "github.com/flokiorg/go-flokicoin/crypto"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
@@ -47,7 +47,7 @@ func NewLndLspdNode(h *lntest.TestHarness, m *lntest.Miner, mem *mempoolApi, nam
 		Cert:     string(lightningNode.TlsCert()),
 		Macaroon: hex.EncodeToString(lightningNode.Macaroon()),
 	}
-	lspBase, err := newLspd(h, mem, name, nodeConfig, lnd, nil)
+	lspBase, err := newLspd(h, mem, name, nodeConfig, lnd)
 	if err != nil {
 		h.T.Fatalf("failed to initialize lspd")
 	}

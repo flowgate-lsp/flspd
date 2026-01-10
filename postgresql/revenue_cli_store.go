@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/breez/lspd/lightning"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/flokiorg/go-flokicoin/wire"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 

@@ -15,7 +15,7 @@ import (
 	"github.com/breez/lspd/history"
 	"github.com/breez/lspd/lightning"
 	"github.com/breez/lspd/notifications"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/flokiorg/go-flokicoin/wire"
 	"golang.org/x/exp/slices"
 	"golang.org/x/sync/singleflight"
 )

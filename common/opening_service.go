@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/breez/lspd/format"
-	"github.com/btcsuite/btcd/btcec/v2"
-	"github.com/btcsuite/btcd/btcec/v2/ecdsa"
+	btcec "github.com/flokiorg/go-flokicoin/crypto"
+	"github.com/flokiorg/go-flokicoin/crypto/ecdsa"
 )
 
 type OpeningService interface {
@@ -123,11 +123,11 @@ func createPromise(lspPrivateKey *btcec.PrivateKey, params *OpeningFeeParams) (*
 		return nil, err
 	}
 	// Sign the hash with the private key of the LSP id.
-	sig, err := ecdsa.SignCompact(lspPrivateKey, hash[:], true)
-	if err != nil {
-		log.Printf("createPromise: SignCompact error: %v", err)
-		return nil, err
-	}
+	sig := ecdsa.SignCompact(lspPrivateKey, hash[:], true)
+	// if err != nil {
+	// 	log.Printf("createPromise: SignCompact error: %v", err)
+	// 	return nil, err
+	// }
 	promise := hex.EncodeToString(sig)
 	return &promise, nil
 }

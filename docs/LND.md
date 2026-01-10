@@ -7,7 +7,7 @@
 
 ### Installation
 #### LND
-Follow LND installation instructions [here](https://github.com/lightningnetwork/lnd/blob/master/docs/INSTALL.md). 
+Follow LND installation instructions [here](https://github.com/flokiorg/flnd/blob/master/docs/INSTALL.md). 
 
 #### lspd
 Needs to be build from source:

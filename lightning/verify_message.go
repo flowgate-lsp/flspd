@@ -4,8 +4,8 @@ import (
 	"crypto/sha256"
 	"fmt"
 
-	"github.com/btcsuite/btcd/btcec/v2"
-	"github.com/btcsuite/btcd/btcec/v2/ecdsa"
+	btcec "github.com/flokiorg/go-flokicoin/crypto"
+	"github.com/flokiorg/go-flokicoin/crypto/ecdsa"
 	"github.com/tv42/zbase32"
 )
 

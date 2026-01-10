@@ -8,7 +8,7 @@ import (
 
 	"github.com/breez/lspd/common"
 	"github.com/breez/lspd/lightning"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/flokiorg/go-flokicoin/wire"
 	"github.com/jackc/pgtype"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"

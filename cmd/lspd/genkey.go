@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 
-	"github.com/btcsuite/btcd/btcec/v2"
+	btcec "github.com/flokiorg/go-flokicoin/crypto"
 	"github.com/urfave/cli"
 )
 

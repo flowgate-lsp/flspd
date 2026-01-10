@@ -3,7 +3,7 @@ package lightning
 import (
 	"time"
 
-	"github.com/btcsuite/btcd/wire"
+	"github.com/flokiorg/go-flokicoin/wire"
 )
 
 type GetInfoResult struct {

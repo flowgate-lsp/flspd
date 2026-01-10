@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/flokiorg/go-flokicoin/chaincfg/chainhash"
+	"github.com/flokiorg/go-flokicoin/wire"
 )
 
 func NewOutPoint(fundingTxID []byte, index uint32) (*wire.OutPoint, error) {

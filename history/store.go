@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/breez/lspd/lightning"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/flokiorg/go-flokicoin/wire"
 )
 
 type ChannelUpdate struct {

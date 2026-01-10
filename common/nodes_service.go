@@ -6,8 +6,8 @@ import (
 
 	"github.com/breez/lspd/config"
 	"github.com/breez/lspd/lightning"
-	"github.com/btcsuite/btcd/btcec/v2"
 	ecies "github.com/ecies/go/v2"
+	btcec "github.com/flokiorg/go-flokicoin/crypto"
 	"golang.org/x/sync/singleflight"
 )
 

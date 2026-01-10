@@ -7,11 +7,11 @@ import (
 	"testing"
 
 	"github.com/breez/lspd/itest/lntest"
-	"github.com/btcsuite/btcd/btcec/v2"
-	"github.com/btcsuite/btcd/btcec/v2/ecdsa"
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/lightningnetwork/lnd/lnwire"
-	"github.com/lightningnetwork/lnd/zpay32"
+	"github.com/flokiorg/flnd/lnwire"
+	"github.com/flokiorg/flnd/zpay32"
+	"github.com/flokiorg/go-flokicoin/chaincfg"
+	btcec "github.com/flokiorg/go-flokicoin/crypto"
+	"github.com/flokiorg/go-flokicoin/crypto/ecdsa"
 )
 
 type BreezClient interface {
@@ -85,7 +85,7 @@ func AddHopHint(n BreezClient, invoice string, lsp LspNode, chanid lntest.ShortC
 	lntest.CheckError(n.Harness().T, err)
 
 	if amountMsat != nil {
-		milliSat := lnwire.MilliSatoshi(*amountMsat)
+		milliSat := lnwire.MilliLoki(*amountMsat)
 		rawInvoice.MilliSat = &milliSat
 	}
 

@@ -16,11 +16,11 @@ func TestOpenChannel(t *testing.T) {
 	miner.Start()
 
 	log.Print("Initializing Alice")
-	alice := NewClnNode(harness, miner, "Alice")
+	alice := NewLndNode(harness, miner, "Alice")
 	alice.Start()
 
 	log.Print("Initializing Bob")
-	bob := NewClnNode(harness, miner, "Bob")
+	bob := NewLndNode(harness, miner, "Bob")
 	bob.Start()
 
 	log.Print("Funding alice")

@@ -20,10 +20,10 @@ import (
 	"github.com/breez/lspd/lightning"
 	"github.com/breez/lspd/notifications"
 	lspd "github.com/breez/lspd/rpc"
-	"github.com/btcsuite/btcd/btcec/v2"
-	"github.com/btcsuite/btcd/btcec/v2/ecdsa"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	ecies "github.com/ecies/go/v2"
+	btcec "github.com/flokiorg/go-flokicoin/crypto"
+	"github.com/flokiorg/go-flokicoin/crypto/ecdsa"
 	"github.com/stretchr/testify/assert"
 	"github.com/tv42/zbase32"
 	"google.golang.org/grpc/metadata"
@@ -79,7 +79,7 @@ type lspBaseRuntime struct {
 	cleanups []*lntest.Cleanup
 }
 
-func newLspd(h *lntest.TestHarness, mem *mempoolApi, name string, nodeConfig *config.NodeConfig, lnd *config.LndConfig, cln *config.ClnConfig, envExt ...string) (*lspBase, error) {
+func newLspd(h *lntest.TestHarness, mem *mempoolApi, name string, nodeConfig *config.NodeConfig, lnd *config.LndConfig, envExt ...string) (*lspBase, error) {
 	scriptDir := h.GetDirectory(fmt.Sprintf("lspd-%s", name))
 	log.Printf("%s: Creating LSPD in dir %s", name, scriptDir)
 
@@ -127,7 +127,6 @@ func newLspd(h *lntest.TestHarness, mem *mempoolApi, name string, nodeConfig *co
 		AdditionalChannelCapacity: 100000,
 		MaxInactiveDuration:       3888000,
 		Lnd:                       lnd,
-		Cln:                       cln,
 	}
 
 	if nodeConfig != nil {

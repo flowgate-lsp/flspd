@@ -1,6 +1,6 @@
 package common
 
-import "github.com/lightningnetwork/lnd/tlv"
+import "github.com/flokiorg/flnd/tlv"
 
 var ExtraFeeTlvType tlv.Type = 65536
 

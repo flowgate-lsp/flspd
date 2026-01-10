@@ -7,7 +7,7 @@ import (
 
 	"github.com/breez/lspd/itest/lntest"
 	"github.com/breez/lspd/itest/lntest/lnd"
-	"github.com/lightningnetwork/lnd/lnwire"
+	"github.com/flokiorg/flnd/lnwire"
 )
 
 var lndMobileExecutable = flag.String(

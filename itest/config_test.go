@@ -22,7 +22,7 @@ func TestConfigParameters(t *testing.T) {
 	mem := NewMempoolApi(h)
 	mem.Start()
 
-	lsp := NewClnLspdNode(h, m, mem, "lsp", nil)
+	lsp := NewLndLspdNode(h, m, mem, "lsp", nil)
 	lsp.Start()
 
 	log.Printf("Waiting %v to allow lsp server to activate.", htlcInterceptorDelay)

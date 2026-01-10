@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/lightningnetwork/lnd/lnwire"
+	"github.com/flokiorg/flnd/lnwire"
 )
 
 type ShortChannelID uint64

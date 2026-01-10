@@ -10,13 +10,13 @@ import (
 	"github.com/breez/lspd/common"
 	"github.com/breez/lspd/config"
 	"github.com/breez/lspd/lightning"
-	"github.com/btcsuite/btcd/btcec/v2"
+	"github.com/flokiorg/flnd/lnrpc"
+	"github.com/flokiorg/flnd/lnrpc/routerrpc"
+	"github.com/flokiorg/flnd/lnwire"
+	"github.com/flokiorg/flnd/record"
+	"github.com/flokiorg/flnd/routing/route"
+	btcec "github.com/flokiorg/go-flokicoin/crypto"
 	sphinx "github.com/lightningnetwork/lightning-onion"
-	"github.com/lightningnetwork/lnd/lnrpc"
-	"github.com/lightningnetwork/lnd/lnrpc/routerrpc"
-	"github.com/lightningnetwork/lnd/lnwire"
-	"github.com/lightningnetwork/lnd/record"
-	"github.com/lightningnetwork/lnd/routing/route"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -204,9 +204,9 @@ func (i *LndHtlcInterceptor) constructOnion(
 	var addr [32]byte
 	copy(addr[:], interceptResult.PaymentSecret)
 	hop := route.Hop{
-		AmtToForward:     lnwire.MilliSatoshi(interceptResult.AmountMsat),
+		AmtToForward:     lnwire.MilliLoki(interceptResult.AmountMsat),
 		OutgoingTimeLock: reqOutgoingExpiry,
-		MPP:              record.NewMPP(lnwire.MilliSatoshi(interceptResult.TotalAmountMsat), addr),
+		MPP:              record.NewMPP(lnwire.MilliLoki(interceptResult.TotalAmountMsat), addr),
 		CustomRecords:    make(record.CustomSet),
 	}
 

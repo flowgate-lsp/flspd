@@ -18,9 +18,7 @@ func TestLspd(t *testing.T) {
 		return
 	}
 	testCases := allTestCases
-	runTests(t, testCases, "LND-lsp-CLN-client", lndLspFunc, clnClientFunc)
 	runTests(t, testCases, "LND-lsp-LND-client", legacyOnionLndLspFunc, lndClientFunc)
-	runTests(t, testCases, "CLN-lsp-CLN-client", clnLspFunc, clnClientFunc)
 }
 
 func legacyOnionLndLspFunc(h *lntest.TestHarness, m *lntest.Miner, mem *mempoolApi, c *config.NodeConfig) LspNode {
@@ -37,16 +35,8 @@ func lndLspFunc(h *lntest.TestHarness, m *lntest.Miner, mem *mempoolApi, c *conf
 	return NewLndLspdNode(h, m, mem, "lsp", c)
 }
 
-func clnLspFunc(h *lntest.TestHarness, m *lntest.Miner, mem *mempoolApi, c *config.NodeConfig) LspNode {
-	return NewClnLspdNode(h, m, mem, "lsp", c)
-}
-
 func lndClientFunc(h *lntest.TestHarness, m *lntest.Miner) BreezClient {
 	return newLndBreezClient(h, m, "breez-client")
-}
-
-func clnClientFunc(h *lntest.TestHarness, m *lntest.Miner) BreezClient {
-	return newClnBreezClient(h, m, "breez-client")
 }
 
 func runTests(
