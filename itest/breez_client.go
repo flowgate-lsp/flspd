@@ -6,15 +6,15 @@ import (
 	"math/rand"
 	"testing"
 
-	"github.com/breez/lspd/itest/lntest"
 	"github.com/flokiorg/flnd/lnwire"
 	"github.com/flokiorg/flnd/zpay32"
 	"github.com/flokiorg/go-flokicoin/chaincfg"
 	btcec "github.com/flokiorg/go-flokicoin/crypto"
 	"github.com/flokiorg/go-flokicoin/crypto/ecdsa"
+	"github.com/flowgate-lsp/flspd/itest/lntest"
 )
 
-type BreezClient interface {
+type LspClient interface {
 	Name() string
 	Harness() *lntest.TestHarness
 	Node() lntest.LightningNode
@@ -38,7 +38,7 @@ type invoice struct {
 	paymentPreimage []byte
 }
 
-func GenerateInvoices(n BreezClient, req generateInvoicesRequest) (invoice, invoice) {
+func GenerateInvoices(n LspClient, req generateInvoicesRequest) (invoice, invoice) {
 	return generateInvoices(n, req, lntest.ShortChannelID{
 		BlockHeight: 1,
 		TxIndex:     0,
@@ -46,7 +46,7 @@ func GenerateInvoices(n BreezClient, req generateInvoicesRequest) (invoice, invo
 	}, lspCltvDelta)
 }
 
-func generateInvoices(n BreezClient, req generateInvoicesRequest, scid lntest.ShortChannelID, cltvDelta uint16) (invoice, invoice) {
+func generateInvoices(n LspClient, req generateInvoicesRequest, scid lntest.ShortChannelID, cltvDelta uint16) (invoice, invoice) {
 	preimage, err := GenerateRandomBytes(32)
 	lntest.CheckError(n.Harness().T, err)
 
@@ -80,7 +80,7 @@ func ContainsHopHint(t *testing.T, invoice string) bool {
 	return len(rawInvoice.RouteHints) > 0
 }
 
-func AddHopHint(n BreezClient, invoice string, lsp LspNode, chanid lntest.ShortChannelID, amountMsat *uint64, cltvDelta uint16) string {
+func AddHopHint(n LspClient, invoice string, lsp LspNode, chanid lntest.ShortChannelID, amountMsat *uint64, cltvDelta uint16) string {
 	rawInvoice, err := zpay32.Decode(invoice, &chaincfg.RegressionNetParams)
 	lntest.CheckError(n.Harness().T, err)
 
@@ -110,7 +110,8 @@ func AddHopHint(n BreezClient, invoice string, lsp LspNode, chanid lntest.ShortC
 	newInvoice, err := rawInvoice.Encode(zpay32.MessageSigner{
 		SignCompact: func(msg []byte) ([]byte, error) {
 			hash := sha256.Sum256(msg)
-			sig, err := ecdsa.SignCompact(n.Node().PrivateKey(), hash[:], true)
+			sig := ecdsa.SignCompact(n.Node().PrivateKey(), hash[:], true)
+			var err error
 			log.Printf(
 				"sign outer invoice. msg: '%x', hash: '%x', sig: '%x', err: %v",
 				msg,

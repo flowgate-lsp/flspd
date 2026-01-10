@@ -4,8 +4,8 @@ import (
 	"log"
 	"time"
 
-	"github.com/breez/lspd/itest/lntest"
-	lspd "github.com/breez/lspd/rpc"
+	"github.com/flowgate-lsp/flspd/itest/lntest"
+	lspd "github.com/flowgate-lsp/flspd/rpc"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -27,23 +27,23 @@ func testOpenZeroConfChannelOnReceive(p *testParams) {
 	outerAmountMsat := uint64(2100000)
 	innerAmountMsat := calculateInnerAmountMsat(p.lsp, outerAmountMsat, nil)
 	description := "Please pay me"
-	innerInvoice, outerInvoice := GenerateInvoices(p.BreezClient(),
+	innerInvoice, outerInvoice := GenerateInvoices(p.LspClient(),
 		generateInvoicesRequest{
 			innerAmountMsat: innerAmountMsat,
 			outerAmountMsat: outerAmountMsat,
 			description:     description,
 			lsp:             p.lsp,
 		})
-	p.BreezClient().SetHtlcAcceptor(innerAmountMsat)
+	p.LspClient().SetHtlcAcceptor(innerAmountMsat)
 
 	log.Print("Connecting bob to lspd")
-	p.BreezClient().Node().ConnectPeer(p.lsp.LightningNode())
+	p.LspClient().Node().ConnectPeer(p.lsp.LightningNode())
 
 	log.Printf("Registering payment with lsp")
 	RegisterPayment(p.lsp, &lspd.PaymentInformation{
 		PaymentHash:        innerInvoice.paymentHash,
 		PaymentSecret:      innerInvoice.paymentSecret,
-		Destination:        p.BreezClient().Node().NodeId(),
+		Destination:        p.LspClient().Node().NodeId(),
 		IncomingAmountMsat: int64(outerAmountMsat),
 		OutgoingAmountMsat: int64(innerAmountMsat),
 	}, false)
@@ -53,13 +53,13 @@ func testOpenZeroConfChannelOnReceive(p *testParams) {
 	<-time.After(htlcInterceptorDelay)
 	log.Printf("Alice paying")
 	payResp := alice.Pay(outerInvoice.bolt11)
-	bobInvoice := p.BreezClient().Node().GetInvoice(payResp.PaymentHash)
+	bobInvoice := p.LspClient().Node().GetInvoice(payResp.PaymentHash)
 
 	assert.Equal(p.t, payResp.PaymentPreimage, bobInvoice.PaymentPreimage)
 	assert.Equal(p.t, innerAmountMsat, bobInvoice.AmountReceivedMsat)
 
 	// Make sure capacity is correct
-	chans := p.BreezClient().Node().GetChannels()
+	chans := p.LspClient().Node().GetChannels()
 	assert.Equal(p.t, 1, len(chans))
 	c := chans[0]
 	AssertChannelCapacity(p.t, outerAmountMsat, c.CapacityMsat)
@@ -81,7 +81,7 @@ func testOpenZeroConfSingleHtlc(p *testParams) {
 	outerAmountMsat := uint64(2100000)
 	innerAmountMsat := calculateInnerAmountMsat(p.lsp, outerAmountMsat, nil)
 	description := "Please pay me"
-	innerInvoice, outerInvoice := GenerateInvoices(p.BreezClient(),
+	innerInvoice, outerInvoice := GenerateInvoices(p.LspClient(),
 		generateInvoicesRequest{
 			innerAmountMsat: innerAmountMsat,
 			outerAmountMsat: outerAmountMsat,
@@ -89,15 +89,15 @@ func testOpenZeroConfSingleHtlc(p *testParams) {
 			lsp:             p.lsp,
 		})
 
-	p.BreezClient().SetHtlcAcceptor(innerAmountMsat)
+	p.LspClient().SetHtlcAcceptor(innerAmountMsat)
 	log.Print("Connecting bob to lspd")
-	p.BreezClient().Node().ConnectPeer(p.lsp.LightningNode())
+	p.LspClient().Node().ConnectPeer(p.lsp.LightningNode())
 
 	log.Printf("Registering payment with lsp")
 	RegisterPayment(p.lsp, &lspd.PaymentInformation{
 		PaymentHash:        innerInvoice.paymentHash,
 		PaymentSecret:      innerInvoice.paymentSecret,
-		Destination:        p.BreezClient().Node().NodeId(),
+		Destination:        p.LspClient().Node().NodeId(),
 		IncomingAmountMsat: int64(outerAmountMsat),
 		OutgoingAmountMsat: int64(innerAmountMsat),
 	}, false)
@@ -106,16 +106,16 @@ func testOpenZeroConfSingleHtlc(p *testParams) {
 	log.Printf("Waiting %v to allow htlc interceptor to activate.", htlcInterceptorDelay)
 	<-time.After(htlcInterceptorDelay)
 	log.Printf("Alice paying")
-	route := constructRoute(p.lsp.LightningNode(), p.BreezClient().Node(), channelId, lntest.NewShortChanIDFromString("1x0x0"), outerAmountMsat)
+	route := constructRoute(p.lsp.LightningNode(), p.LspClient().Node(), channelId, lntest.NewShortChanIDFromString("1x0x0"), outerAmountMsat)
 	payResp, err := alice.PayViaRoute(outerAmountMsat, outerInvoice.paymentHash, outerInvoice.paymentSecret, route)
 	lntest.CheckError(p.t, err)
-	bobInvoice := p.BreezClient().Node().GetInvoice(payResp.PaymentHash)
+	bobInvoice := p.LspClient().Node().GetInvoice(payResp.PaymentHash)
 
 	assert.Equal(p.t, payResp.PaymentPreimage, bobInvoice.PaymentPreimage)
 	assert.Equal(p.t, innerAmountMsat, bobInvoice.AmountReceivedMsat)
 
 	// Make sure capacity is correct
-	chans := p.BreezClient().Node().GetChannels()
+	chans := p.LspClient().Node().GetChannels()
 	assert.Equal(p.t, 1, len(chans))
 	c := chans[0]
 	AssertChannelCapacity(p.t, outerAmountMsat, c.CapacityMsat)

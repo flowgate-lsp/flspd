@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package lnrpc;
 
-option go_package = "github.com/breez/lspd/itest/lntest/lnd";
+option go_package = "github.com/flowgate-lsp/flspd/itest/lntest/lnd";
 
 /*
  * Comments in this file will be directly parsed into the API

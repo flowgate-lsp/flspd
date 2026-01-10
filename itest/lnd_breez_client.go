@@ -5,16 +5,16 @@ import (
 	"flag"
 	"sync"
 
-	"github.com/breez/lspd/itest/lntest"
-	"github.com/breez/lspd/itest/lntest/lnd"
 	"github.com/flokiorg/flnd/lnwire"
+	"github.com/flowgate-lsp/flspd/itest/lntest"
+	"github.com/flowgate-lsp/flspd/itest/lntest/lnd"
 )
 
 var lndMobileExecutable = flag.String(
 	"lndmobileexec", "", "full path to lnd mobile binary",
 )
 
-type lndBreezClient struct {
+type lndLspClient struct {
 	name    string
 	harness *lntest.TestHarness
 	node    *lntest.LndNode
@@ -22,14 +22,14 @@ type lndBreezClient struct {
 	mtx     sync.Mutex
 }
 
-func newLndBreezClient(h *lntest.TestHarness, m *lntest.Miner, name string) BreezClient {
+func newLndLspClient(h *lntest.TestHarness, m *lntest.Miner, name string) LspClient {
 	lnd := lntest.NewLndNodeFromBinary(h, m, name, *lndMobileExecutable,
 		"--protocol.zero-conf",
 		"--protocol.option-scid-alias",
 		"--bitcoin.defaultchanconfs=0",
 	)
 
-	c := &lndBreezClient{
+	c := &lndLspClient{
 		name:    name,
 		harness: h,
 		node:    lnd,
@@ -38,19 +38,19 @@ func newLndBreezClient(h *lntest.TestHarness, m *lntest.Miner, name string) Bree
 	return c
 }
 
-func (c *lndBreezClient) Name() string {
+func (c *lndLspClient) Name() string {
 	return c.name
 }
 
-func (c *lndBreezClient) Harness() *lntest.TestHarness {
+func (c *lndLspClient) Harness() *lntest.TestHarness {
 	return c.harness
 }
 
-func (c *lndBreezClient) Node() lntest.LightningNode {
+func (c *lndLspClient) Node() lntest.LightningNode {
 	return c.node
 }
 
-func (c *lndBreezClient) Start() {
+func (c *lndLspClient) Start() {
 	c.mtx.Lock()
 	defer c.mtx.Unlock()
 
@@ -65,7 +65,7 @@ func (c *lndBreezClient) Start() {
 	go c.startChannelAcceptor(ctx)
 }
 
-func (c *lndBreezClient) Stop() error {
+func (c *lndLspClient) Stop() error {
 	c.mtx.Lock()
 	defer c.mtx.Unlock()
 
@@ -78,15 +78,15 @@ func (c *lndBreezClient) Stop() error {
 	return c.node.Stop()
 }
 
-func (c *lndBreezClient) ResetHtlcAcceptor() {
+func (c *lndLspClient) ResetHtlcAcceptor() {
 
 }
 
-func (c *lndBreezClient) SetHtlcAcceptor(totalMsat uint64) {
-	// No need for a htlc acceptor in the LND breez client
+func (c *lndLspClient) SetHtlcAcceptor(totalMsat uint64) {
+	// No need for a htlc acceptor in the LND client
 }
 
-func (c *lndBreezClient) startChannelAcceptor(ctx context.Context) error {
+func (c *lndLspClient) startChannelAcceptor(ctx context.Context) error {
 	client, err := c.node.LightningClient().ChannelAcceptor(ctx)
 	if err != nil {
 		c.harness.T.Fatalf("%s: failed to create channel acceptor: %v", c.name, err)

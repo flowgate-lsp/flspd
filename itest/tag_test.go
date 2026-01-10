@@ -3,14 +3,14 @@ package itest
 import (
 	"log"
 
-	"github.com/breez/lspd/itest/lntest"
-	lspd "github.com/breez/lspd/rpc"
+	"github.com/flowgate-lsp/flspd/itest/lntest"
+	lspd "github.com/flowgate-lsp/flspd/rpc"
 	"github.com/stretchr/testify/assert"
 )
 
 func registerPaymentWithTag(p *testParams) {
 	expected := "{\"apiKey\": \"11111111111111\"}"
-	i := p.BreezClient().Node().CreateBolt11Invoice(&lntest.CreateInvoiceOptions{
+	i := p.LspClient().Node().CreateBolt11Invoice(&lntest.CreateInvoiceOptions{
 		AmountMsat: 25000000,
 	})
 
@@ -18,7 +18,7 @@ func registerPaymentWithTag(p *testParams) {
 	RegisterPayment(p.lsp, &lspd.PaymentInformation{
 		PaymentHash:        i.PaymentHash,
 		PaymentSecret:      i.PaymentSecret,
-		Destination:        p.BreezClient().Node().NodeId(),
+		Destination:        p.LspClient().Node().NodeId(),
 		IncomingAmountMsat: int64(25000000),
 		OutgoingAmountMsat: int64(21000000),
 		Tag:                expected,

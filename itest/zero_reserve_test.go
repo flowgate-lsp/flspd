@@ -4,8 +4,8 @@ import (
 	"log"
 	"time"
 
-	"github.com/breez/lspd/itest/lntest"
-	lspd "github.com/breez/lspd/rpc"
+	"github.com/flowgate-lsp/flspd/itest/lntest"
+	lspd "github.com/flowgate-lsp/flspd/rpc"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -25,23 +25,23 @@ func testZeroReserve(p *testParams) {
 	outerAmountMsat := uint64(2100000)
 	innerAmountMsat := calculateInnerAmountMsat(p.lsp, outerAmountMsat, nil)
 	description := "Please pay me"
-	innerInvoice, outerInvoice := GenerateInvoices(p.BreezClient(),
+	innerInvoice, outerInvoice := GenerateInvoices(p.LspClient(),
 		generateInvoicesRequest{
 			innerAmountMsat: innerAmountMsat,
 			outerAmountMsat: outerAmountMsat,
 			description:     description,
 			lsp:             p.lsp,
 		})
-	p.BreezClient().SetHtlcAcceptor(innerAmountMsat)
+	p.LspClient().SetHtlcAcceptor(innerAmountMsat)
 
 	log.Print("Connecting bob to lspd")
-	p.BreezClient().Node().ConnectPeer(p.lsp.LightningNode())
+	p.LspClient().Node().ConnectPeer(p.lsp.LightningNode())
 
 	log.Printf("Registering payment with lsp")
 	RegisterPayment(p.lsp, &lspd.PaymentInformation{
 		PaymentHash:        innerInvoice.paymentHash,
 		PaymentSecret:      innerInvoice.paymentSecret,
-		Destination:        p.BreezClient().Node().NodeId(),
+		Destination:        p.LspClient().Node().NodeId(),
 		IncomingAmountMsat: int64(outerAmountMsat),
 		OutgoingAmountMsat: int64(innerAmountMsat),
 	}, false)
@@ -50,11 +50,11 @@ func testZeroReserve(p *testParams) {
 	log.Printf("Waiting %v to allow htlc interceptor to activate.", htlcInterceptorDelay)
 	<-time.After(htlcInterceptorDelay)
 	log.Printf("Alice paying")
-	route := constructRoute(p.lsp.LightningNode(), p.BreezClient().Node(), channelId, lntest.NewShortChanIDFromString("1x0x0"), outerAmountMsat)
+	route := constructRoute(p.lsp.LightningNode(), p.LspClient().Node(), channelId, lntest.NewShortChanIDFromString("1x0x0"), outerAmountMsat)
 	alice.PayViaRoute(outerAmountMsat, outerInvoice.paymentHash, outerInvoice.paymentSecret, route)
 
 	// Make sure balance is correct
-	chans := p.BreezClient().Node().GetChannels()
+	chans := p.LspClient().Node().GetChannels()
 	assert.Equal(p.t, 1, len(chans))
 
 	c := chans[0]
@@ -66,5 +66,5 @@ func testZeroReserve(p *testParams) {
 		AmountMsat: innerAmountMsat - 1,
 	})
 	<-time.After(time.Second * 1)
-	p.BreezClient().Node().Pay(lspInvoice.Bolt11)
+	p.LspClient().Node().Pay(lspInvoice.Bolt11)
 }

@@ -15,16 +15,15 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/breez/lspd/config"
-	"github.com/breez/lspd/itest/lntest"
-	"github.com/breez/lspd/lightning"
-	"github.com/breez/lspd/notifications"
-	lspd "github.com/breez/lspd/rpc"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	ecies "github.com/ecies/go/v2"
 	btcec "github.com/flokiorg/go-flokicoin/crypto"
 	"github.com/flokiorg/go-flokicoin/crypto/ecdsa"
-	"github.com/stretchr/testify/assert"
+	"github.com/flowgate-lsp/flspd/config"
+	"github.com/flowgate-lsp/flspd/itest/lntest"
+	"github.com/flowgate-lsp/flspd/lightning"
+	"github.com/flowgate-lsp/flspd/notifications"
+	lspd "github.com/flowgate-lsp/flspd/rpc"
 	"github.com/tv42/zbase32"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/proto"
@@ -134,9 +133,6 @@ func newLspd(h *lntest.TestHarness, mem *mempoolApi, name string, nodeConfig *co
 			conf.MinConfs = nodeConfig.MinConfs
 		}
 
-		if nodeConfig.LegacyOnionTokens != nil {
-			conf.LegacyOnionTokens = nodeConfig.LegacyOnionTokens
-		}
 	}
 
 	env := []string{
@@ -401,12 +397,12 @@ func RegisterPayment(l LspNode, paymentInfo *lspd.PaymentInformation, continueOn
 	return err
 }
 
-func SubscribeNotifications(l LspNode, b BreezClient, url string, continueOnError bool) error {
+func SubscribeNotifications(l LspNode, b LspClient, url string, continueOnError bool) error {
 	msg := append(lightning.SignedMsgPrefix, []byte(url)...)
 	first := sha256.Sum256([]byte(msg))
 	second := sha256.Sum256(first[:])
-	sig, err := ecdsa.SignCompact(b.Node().PrivateKey(), second[:], true)
-	assert.NoError(b.Harness().T, err)
+	sig := ecdsa.SignCompact(b.Node().PrivateKey(), second[:], true)
+	// assert.NoError(b.Harness().T, err)
 	request := notifications.SubscribeNotificationsRequest{
 		Url:       url,
 		Signature: zbase32.EncodeToString(sig),
@@ -433,12 +429,12 @@ func SubscribeNotifications(l LspNode, b BreezClient, url string, continueOnErro
 	return err
 }
 
-func UnsubscribeNotifications(l LspNode, b BreezClient, url string, continueOnError bool) error {
+func UnsubscribeNotifications(l LspNode, b LspClient, url string, continueOnError bool) error {
 	msg := append(lightning.SignedMsgPrefix, []byte(url)...)
 	first := sha256.Sum256([]byte(msg))
 	second := sha256.Sum256(first[:])
-	sig, err := ecdsa.SignCompact(b.Node().PrivateKey(), second[:], true)
-	assert.NoError(b.Harness().T, err)
+	sig := ecdsa.SignCompact(b.Node().PrivateKey(), second[:], true)
+	// assert.NoError(b.Harness().T, err)
 	request := notifications.UnsubscribeNotificationsRequest{
 		Url:       url,
 		Signature: zbase32.EncodeToString(sig),

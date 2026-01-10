@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/breez/lspd/config"
-	"github.com/breez/lspd/itest/lntest"
-	"github.com/breez/lspd/notifications"
-	lspd "github.com/breez/lspd/rpc"
 	ecies "github.com/ecies/go/v2"
 	btcec "github.com/flokiorg/go-flokicoin/crypto"
+	"github.com/flowgate-lsp/flspd/config"
+	"github.com/flowgate-lsp/flspd/itest/lntest"
+	"github.com/flowgate-lsp/flspd/notifications"
+	lspd "github.com/flowgate-lsp/flspd/rpc"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )

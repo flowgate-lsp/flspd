@@ -5,8 +5,8 @@ import (
 	"log"
 	"time"
 
-	"github.com/breez/lspd/itest/lntest"
-	lspd "github.com/breez/lspd/rpc"
+	"github.com/flowgate-lsp/flspd/itest/lntest"
+	lspd "github.com/flowgate-lsp/flspd/rpc"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -26,23 +26,23 @@ func testProbing(p *testParams) {
 	outerAmountMsat := uint64(2100000)
 	innerAmountMsat := calculateInnerAmountMsat(p.lsp, outerAmountMsat, nil)
 	description := "Please pay me"
-	innerInvoice, outerInvoice := GenerateInvoices(p.BreezClient(),
+	innerInvoice, outerInvoice := GenerateInvoices(p.LspClient(),
 		generateInvoicesRequest{
 			innerAmountMsat: innerAmountMsat,
 			outerAmountMsat: outerAmountMsat,
 			description:     description,
 			lsp:             p.lsp,
 		})
-	p.BreezClient().SetHtlcAcceptor(innerAmountMsat)
+	p.LspClient().SetHtlcAcceptor(innerAmountMsat)
 
 	log.Print("Connecting bob to lspd")
-	p.BreezClient().Node().ConnectPeer(p.lsp.LightningNode())
+	p.LspClient().Node().ConnectPeer(p.lsp.LightningNode())
 
 	log.Printf("Registering payment with lsp")
 	RegisterPayment(p.lsp, &lspd.PaymentInformation{
 		PaymentHash:        innerInvoice.paymentHash,
 		PaymentSecret:      innerInvoice.paymentSecret,
-		Destination:        p.BreezClient().Node().NodeId(),
+		Destination:        p.LspClient().Node().NodeId(),
 		IncomingAmountMsat: int64(outerAmountMsat),
 		OutgoingAmountMsat: int64(innerAmountMsat),
 	}, false)
@@ -57,15 +57,15 @@ func testProbing(p *testParams) {
 	fakePaymentHash := h.Sum(nil)
 
 	log.Printf("Alice paying with fake payment hash with Bob online %x", fakePaymentHash)
-	route := constructRoute(p.lsp.LightningNode(), p.BreezClient().Node(), channelId, lntest.NewShortChanIDFromString("1x0x0"), outerAmountMsat)
+	route := constructRoute(p.lsp.LightningNode(), p.LspClient().Node(), channelId, lntest.NewShortChanIDFromString("1x0x0"), outerAmountMsat)
 	_, err := alice.PayViaRoute(outerAmountMsat, fakePaymentHash, outerInvoice.paymentSecret, route)
 
 	// Expect incorrect or unknown payment details if the peer is online
 	assert.Contains(p.t, err.Error(), "WIRE_INCORRECT_OR_UNKNOWN_PAYMENT_DETAILS")
 
 	// Kill the mobile client
-	log.Printf("Stopping breez client")
-	p.BreezClient().Stop()
+	log.Printf("Stopping client")
+	p.LspClient().Stop()
 
 	log.Printf("Alice paying with fake payment hash with Bob offline %x", fakePaymentHash)
 	_, err = alice.PayViaRoute(outerAmountMsat, fakePaymentHash, outerInvoice.paymentSecret, route)

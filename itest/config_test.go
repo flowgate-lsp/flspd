@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/breez/lspd/itest/lntest"
-	lspd "github.com/breez/lspd/rpc"
+	"github.com/flowgate-lsp/flspd/itest/lntest"
+	lspd "github.com/flowgate-lsp/flspd/rpc"
 	"github.com/stretchr/testify/assert"
 )
 

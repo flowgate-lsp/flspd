@@ -5,7 +5,7 @@ import (
 	"log"
 	"testing"
 
-	lspd "github.com/breez/lspd/rpc"
+	lspd "github.com/flowgate-lsp/flspd/rpc"
 	"github.com/stretchr/testify/assert"
 )
 

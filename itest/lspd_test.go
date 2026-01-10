@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/breez/lspd/config"
-	"github.com/breez/lspd/itest/lntest"
+	"github.com/flowgate-lsp/flspd/config"
+	"github.com/flowgate-lsp/flspd/itest/lntest"
 )
 
 var defaultTimeout time.Duration = time.Second * 120
@@ -27,7 +27,6 @@ func legacyOnionLndLspFunc(h *lntest.TestHarness, m *lntest.Miner, mem *mempoolA
 		cfg = &config.NodeConfig{}
 	}
 
-	cfg.LegacyOnionTokens = []string{"hello"}
 	return lndLspFunc(h, m, mem, cfg)
 }
 
@@ -35,8 +34,8 @@ func lndLspFunc(h *lntest.TestHarness, m *lntest.Miner, mem *mempoolApi, c *conf
 	return NewLndLspdNode(h, m, mem, "lsp", c)
 }
 
-func lndClientFunc(h *lntest.TestHarness, m *lntest.Miner) BreezClient {
-	return newLndBreezClient(h, m, "breez-client")
+func lndClientFunc(h *lntest.TestHarness, m *lntest.Miner) LspClient {
+	return newLndLspClient(h, m, "client")
 }
 
 func runTests(

@@ -19,20 +19,13 @@ type NodeConfig struct {
 	// configured node, so it's obvious which node an rpc call is meant for.
 	Tokens []string `json:"tokens"`
 
-	// If the used token is in the LegacyOnionTokens array, the forwarded htlc
-	// will have the legacy onion format. As per the time of writing breezmobile
-	// requires the legacy onion format.
-	LegacyOnionTokens []string `json:"legacyOnionTokens"`
-
 	// The network location of the lightning node, e.g. `12.34.56.78:9012` or
 	// `localhost:10011`. The host is returned in the ChannelInformation api
 	// endpoint so clients can connect to the node.
 	Host string `json:"host"`
 
 	// Public channel amount is a reserved amount for public channels. If a
-	// zero conf channel is opened, it will never have this exact amount. This
-	// configuration option is Breez specific and can be ignored by others
-	// running lspd.
+	// zero conf channel is opened, it will never have this exact amount.
 	PublicChannelAmount int64 `json:"publicChannelAmount,string,omitempty"`
 
 	// Number of blocks after which an opened channel is considered confirmed.

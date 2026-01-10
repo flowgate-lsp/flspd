@@ -6,7 +6,7 @@ import (
 	"net"
 	"net/http"
 
-	"github.com/breez/lspd/itest/lntest"
+	"github.com/flowgate-lsp/flspd/itest/lntest"
 )
 
 type RecommendedFeesResponse struct {

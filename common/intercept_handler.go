@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/breez/lspd/lightning"
 	"github.com/flokiorg/go-flokicoin/wire"
+	"github.com/flowgate-lsp/flspd/lightning"
 )
 
 type InterceptAction int
@@ -62,16 +62,15 @@ func (r *InterceptRequest) String() string {
 }
 
 type InterceptResult struct {
-	Action             InterceptAction
-	FailureCode        InterceptFailureCode
-	Destination        []byte
-	AmountMsat         uint64
-	FeeMsat            *uint64
-	TotalAmountMsat    uint64
-	ChannelPoint       *wire.OutPoint
-	Scid               lightning.ShortChannelID
-	PaymentSecret      []byte
-	UseLegacyOnionBlob bool
+	Action          InterceptAction
+	FailureCode     InterceptFailureCode
+	Destination     []byte
+	AmountMsat      uint64
+	FeeMsat         *uint64
+	TotalAmountMsat uint64
+	ChannelPoint    *wire.OutPoint
+	Scid            lightning.ShortChannelID
+	PaymentSecret   []byte
 }
 
 func (r *InterceptResult) String() string {
@@ -84,7 +83,7 @@ func (r *InterceptResult) String() string {
 		cp = r.ChannelPoint.String()
 	}
 	return fmt.Sprintf(
-		"action: %v, code: %v, destination: %x, amt: %d, fee: %s, total_amt: %d, channelpoint: %s, scid: %s, use_legacy_blob: %t",
+		"action: %v, code: %v, destination: %x, amt: %d, fee: %s, total_amt: %d, channelpoint: %s, scid: %s",
 		r.Action,
 		r.FailureCode,
 		r.Destination,
@@ -93,7 +92,6 @@ func (r *InterceptResult) String() string {
 		r.TotalAmountMsat,
 		cp,
 		r.Scid.ToString(),
-		r.UseLegacyOnionBlob,
 	)
 }
 

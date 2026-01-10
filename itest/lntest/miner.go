@@ -169,16 +169,16 @@ func (m *Miner) Start() {
 }
 
 func (m *Miner) initializeFirstRun() error {
-	l := true
-	d := false
-	_, err := m.runtime.rpc.CreateWallet(&gbitcoin.CreateWalletRequest{
-		WalletName:    "default",
-		LoadOnStartup: &l,
-		Descriptors:   &d,
-	})
-	if err != nil {
-		log.Printf("miner: Create wallet failed. Ignoring error: %v", err)
-	}
+	// l := true
+	// d := false
+	// _, err := m.runtime.rpc.CreateWallet(&gbitcoin.CreateWalletRequest{
+	// 	WalletName:    "default",
+	// 	LoadOnStartup: &l,
+	// 	Descriptors:   &d,
+	// })
+	// if err != nil {
+	// 	log.Printf("miner: Create wallet failed. Ignoring error: %v", err)
+	// }
 
 	// Go ahead and run 101 blocks
 	log.Printf("Get new address")

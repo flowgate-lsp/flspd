@@ -4,7 +4,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/breez/lspd/itest/lntest"
+	"github.com/flowgate-lsp/flspd/itest/lntest"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -13,7 +13,7 @@ func testRegularForward(p *testParams) {
 	alice.Start()
 	alice.Fund(10000000)
 	p.lsp.LightningNode().Fund(10000000)
-	p.BreezClient().Node().Fund(100000)
+	p.LspClient().Node().Fund(100000)
 
 	log.Print("Opening channel between Alice and the lsp")
 	channelAL := alice.OpenChannel(p.lsp.LightningNode(), &lntest.OpenChannelOptions{
@@ -21,8 +21,8 @@ func testRegularForward(p *testParams) {
 		IsPublic:  true,
 	})
 
-	log.Print("Opening channel between lsp and Breez client")
-	channelLB := p.lsp.LightningNode().OpenChannel(p.BreezClient().Node(), &lntest.OpenChannelOptions{
+	log.Print("Opening channel between lsp and client")
+	channelLB := p.lsp.LightningNode().OpenChannel(p.LspClient().Node(), &lntest.OpenChannelOptions{
 		AmountSat: 200000,
 		IsPublic:  false,
 	})
@@ -31,7 +31,7 @@ func testRegularForward(p *testParams) {
 	alice.WaitForChannelReady(channelAL)
 	log.Print("Waiting for channel between LSP and Bob to be ready.")
 	p.lsp.LightningNode().WaitForChannelReady(channelLB)
-	p.BreezClient().Node().WaitForChannelReady(channelLB)
+	p.LspClient().Node().WaitForChannelReady(channelLB)
 
 	// TODO: Fix race waiting for htlc interceptor.
 	log.Printf("Waiting %v to allow htlc interceptor to activate.", htlcInterceptorDelay)
@@ -39,7 +39,7 @@ func testRegularForward(p *testParams) {
 
 	log.Printf("Adding bob's invoice")
 	amountMsat := uint64(2100000)
-	bobInvoice := p.BreezClient().Node().CreateBolt11Invoice(&lntest.CreateInvoiceOptions{
+	bobInvoice := p.LspClient().Node().CreateBolt11Invoice(&lntest.CreateInvoiceOptions{
 		AmountMsat:      amountMsat,
 		IncludeHopHints: true,
 	})
@@ -47,7 +47,7 @@ func testRegularForward(p *testParams) {
 
 	invoiceWithHint := bobInvoice.Bolt11
 	if !ContainsHopHint(p.t, bobInvoice.Bolt11) {
-		chans := p.BreezClient().Node().GetChannels()
+		chans := p.LspClient().Node().GetChannels()
 		assert.Len(p.t, chans, 1)
 
 		var id lntest.ShortChannelID
@@ -58,13 +58,13 @@ func testRegularForward(p *testParams) {
 		} else {
 			id = chans[0].ShortChannelID
 		}
-		invoiceWithHint = AddHopHint(p.BreezClient(), bobInvoice.Bolt11, p.Lsp(), id, nil, 144)
+		invoiceWithHint = AddHopHint(p.LspClient(), bobInvoice.Bolt11, p.Lsp(), id, nil, 144)
 	}
 	log.Printf("invoice with hint: %v", invoiceWithHint)
 
 	log.Printf("Alice paying")
 	payResp := alice.Pay(invoiceWithHint)
-	invoiceResult := p.BreezClient().Node().GetInvoice(bobInvoice.PaymentHash)
+	invoiceResult := p.LspClient().Node().GetInvoice(bobInvoice.PaymentHash)
 
 	assert.Equal(p.t, payResp.PaymentPreimage, invoiceResult.PaymentPreimage)
 	assert.Equal(p.t, amountMsat, invoiceResult.AmountReceivedMsat)
