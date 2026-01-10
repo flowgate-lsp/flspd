@@ -2,4 +2,7 @@
 /flspd
 /flspd_revenue_cli
 dist/
+*.test
+lspd
+lspd_revenue_cli
 
