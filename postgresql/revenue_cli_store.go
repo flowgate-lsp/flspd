@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/breez/lspd/lightning"
 	"github.com/flokiorg/go-flokicoin/wire"
+	"github.com/flowgate-lsp/flspd/lightning"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 

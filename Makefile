@@ -1,4 +1,4 @@
-PKG := github.com/breez/lspd
+PKG := github.com/flowgate-lsp/flspd
 TAG := $(shell git describe --tags --dirty)
 
 release-all: release-lspd release-cli

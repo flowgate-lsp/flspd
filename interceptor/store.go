@@ -1,8 +1,8 @@
 package interceptor
 
 import (
-	"github.com/breez/lspd/common"
 	"github.com/flokiorg/go-flokicoin/wire"
+	"github.com/flowgate-lsp/flspd/common"
 )
 
 type InterceptStore interface {

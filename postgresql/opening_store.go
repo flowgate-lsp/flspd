@@ -6,7 +6,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/breez/lspd/common"
+	"github.com/flowgate-lsp/flspd/common"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 

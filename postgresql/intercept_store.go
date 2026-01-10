@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/breez/lspd/common"
-	"github.com/breez/lspd/lightning"
 	"github.com/flokiorg/go-flokicoin/wire"
+	"github.com/flowgate-lsp/flspd/common"
+	"github.com/flowgate-lsp/flspd/lightning"
 	"github.com/jackc/pgtype"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"

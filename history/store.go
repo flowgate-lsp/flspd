@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/breez/lspd/lightning"
 	"github.com/flokiorg/go-flokicoin/wire"
+	"github.com/flowgate-lsp/flspd/lightning"
 )
 
 type ChannelUpdate struct {

@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/GoWebProd/uuid7"
-	"github.com/breez/lspd/history"
+	"github.com/flowgate-lsp/flspd/history"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )

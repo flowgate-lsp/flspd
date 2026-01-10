@@ -1,22 +1,16 @@
 package lnd
 
 import (
-	"bytes"
 	"context"
 	"log"
 	"sync"
 	"time"
 
-	"github.com/breez/lspd/common"
-	"github.com/breez/lspd/config"
-	"github.com/breez/lspd/lightning"
 	"github.com/flokiorg/flnd/lnrpc"
 	"github.com/flokiorg/flnd/lnrpc/routerrpc"
-	"github.com/flokiorg/flnd/lnwire"
-	"github.com/flokiorg/flnd/record"
-	"github.com/flokiorg/flnd/routing/route"
-	btcec "github.com/flokiorg/go-flokicoin/crypto"
-	sphinx "github.com/lightningnetwork/lightning-onion"
+	"github.com/flowgate-lsp/flspd/common"
+	"github.com/flowgate-lsp/flspd/config"
+	"github.com/flowgate-lsp/flspd/lightning"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -154,11 +148,8 @@ func (i *LndHtlcInterceptor) intercept() error {
 					fallthrough
 				default:
 					interceptorClient.Send(&routerrpc.ForwardHtlcInterceptResponse{
-						IncomingCircuitKey:      request.IncomingCircuitKey,
-						Action:                  routerrpc.ResolveHoldForwardAction_RESUME,
-						OutgoingAmountMsat:      request.OutgoingAmountMsat,
-						OutgoingRequestedChanId: request.OutgoingRequestedChanId,
-						OnionBlob:               request.OnionBlob,
+						IncomingCircuitKey: request.IncomingCircuitKey,
+						Action:             routerrpc.ResolveHoldForwardAction_RESUME,
 					})
 				}
 
@@ -184,88 +175,10 @@ func (i *LndHtlcInterceptor) mapFailureCode(original common.InterceptFailureCode
 	}
 }
 
-func (i *LndHtlcInterceptor) constructOnion(
-	interceptResult common.InterceptResult,
-	reqOutgoingExpiry uint32,
-	reqPaymentHash []byte,
-) ([]byte, error) {
-	pubKey, err := btcec.ParsePubKey(interceptResult.Destination)
-	if err != nil {
-		log.Printf("btcec.ParsePubKey(%x): %v", interceptResult.Destination, err)
-		return nil, err
-	}
-
-	sessionKey, err := btcec.NewPrivateKey()
-	if err != nil {
-		log.Printf("btcec.NewPrivateKey(): %v", err)
-		return nil, err
-	}
-
-	var addr [32]byte
-	copy(addr[:], interceptResult.PaymentSecret)
-	hop := route.Hop{
-		AmtToForward:     lnwire.MilliLoki(interceptResult.AmountMsat),
-		OutgoingTimeLock: reqOutgoingExpiry,
-		MPP:              record.NewMPP(lnwire.MilliLoki(interceptResult.TotalAmountMsat), addr),
-		CustomRecords:    make(record.CustomSet),
-	}
-
-	var b bytes.Buffer
-	err = hop.PackHopPayload(&b, uint64(0))
-	if err != nil {
-		log.Printf("hop.PackHopPayload(): %v", err)
-		return nil, err
-	}
-
-	payload, err := sphinx.NewTLVHopPayload(b.Bytes())
-	if err != nil {
-		log.Printf("sphinx.NewTLVHopPayload(): %v", err)
-		return nil, err
-	}
-
-	var sphinxPath sphinx.PaymentPath
-	sphinxPath[0] = sphinx.OnionHop{
-		NodePub:    *pubKey,
-		HopPayload: payload,
-	}
-	sphinxPacket, err := sphinx.NewOnionPacket(
-		&sphinxPath, sessionKey, reqPaymentHash,
-		sphinx.DeterministicPacketFiller,
-	)
-	if err != nil {
-		log.Printf("sphinx.NewOnionPacket(): %v", err)
-		return nil, err
-	}
-	var onionBlob bytes.Buffer
-	err = sphinxPacket.Encode(&onionBlob)
-	if err != nil {
-		log.Printf("sphinxPacket.Encode(): %v", err)
-		return nil, err
-	}
-
-	return onionBlob.Bytes(), nil
-}
-
 func (i *LndHtlcInterceptor) createOnionResponse(interceptResult common.InterceptResult, request *routerrpc.ForwardHtlcInterceptRequest) *routerrpc.ForwardHtlcInterceptResponse {
-	onionBlob := request.OnionBlob
-
-	if interceptResult.UseLegacyOnionBlob {
-		var err error
-		onionBlob, err = i.constructOnion(interceptResult, request.OutgoingExpiry, request.PaymentHash)
-		if err != nil {
-			return &routerrpc.ForwardHtlcInterceptResponse{
-				IncomingCircuitKey: request.IncomingCircuitKey,
-				Action:             routerrpc.ResolveHoldForwardAction_FAIL,
-				FailureCode:        lnrpc.Failure_TEMPORARY_CHANNEL_FAILURE,
-			}
-		}
-	}
-
 	return &routerrpc.ForwardHtlcInterceptResponse{
-		IncomingCircuitKey:      request.IncomingCircuitKey,
-		Action:                  routerrpc.ResolveHoldForwardAction_RESUME,
-		OutgoingAmountMsat:      interceptResult.AmountMsat,
-		OutgoingRequestedChanId: uint64(interceptResult.Scid),
-		OnionBlob:               onionBlob,
+		IncomingCircuitKey: request.IncomingCircuitKey,
+		Action:             routerrpc.ResolveHoldForwardAction_RESUME_MODIFIED,
+		OutAmountMsat:      interceptResult.AmountMsat,
 	}
 }

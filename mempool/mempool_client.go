@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/breez/lspd/chain"
+	"github.com/flowgate-lsp/flspd/chain"
 )
 
 type MempoolClient struct {

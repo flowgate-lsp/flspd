@@ -3,7 +3,7 @@ package lspd
 import (
 	context "context"
 
-	"github.com/breez/lspd/common"
+	"github.com/flowgate-lsp/flspd/common"
 	codes "google.golang.org/grpc/codes"
 	status "google.golang.org/grpc/status"
 )

@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-option go_package = "github.com/breez/lspd/notifications";
+option go_package = "github.com/flowgate-lsp/flspd/notifications";
 
 package notifications;
 

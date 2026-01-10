@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/breez/lspd/lightning"
-	lspdrpc "github.com/breez/lspd/rpc"
 	ecies "github.com/ecies/go/v2"
+	"github.com/flowgate-lsp/flspd/lightning"
+	lspdrpc "github.com/flowgate-lsp/flspd/rpc"
 	"google.golang.org/protobuf/proto"
 )
 

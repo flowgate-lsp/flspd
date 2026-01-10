@@ -10,13 +10,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/breez/lspd/config"
-	"github.com/breez/lspd/lightning"
 	"github.com/flokiorg/flnd/lnrpc"
 	"github.com/flokiorg/flnd/lnrpc/chainrpc"
 	"github.com/flokiorg/flnd/lnrpc/routerrpc"
 	"github.com/flokiorg/go-flokicoin/chaincfg/chainhash"
 	"github.com/flokiorg/go-flokicoin/wire"
+	"github.com/flowgate-lsp/flspd/config"
+	"github.com/flowgate-lsp/flspd/lightning"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
@@ -228,16 +228,17 @@ func (c *LndClient) GetInfo() (*lightning.GetInfoResult, error) {
 func (c *LndClient) IsConnected(destination []byte) (bool, error) {
 	pubkey := hex.EncodeToString(destination)
 
-	r, err := c.client.GetPeerConnected(context.Background(), &lnrpc.GetPeerConnectedRequest{
-		Pubkey: pubkey,
-	})
+	resp, err := c.client.ListPeers(context.Background(), &lnrpc.ListPeersRequest{})
 	if err != nil {
-		log.Printf("LND: client.GetPeerConnected() error: %v", err)
-		return false, fmt.Errorf("LND: client.GetPeerConnected() error: %w", err)
+		log.Printf("LND: client.ListPeers() error: %v", err)
+		return false, fmt.Errorf("LND: client.ListPeers() error: %w", err)
 	}
-	if r.Connected {
-		log.Printf("LND: destination online: %x", destination)
-		return true, nil
+
+	for _, peer := range resp.Peers {
+		if peer.PubKey == pubkey {
+			log.Printf("LND: destination online: %x", destination)
+			return true, nil
+		}
 	}
 
 	log.Printf("LND: destination offline: %x", destination)
@@ -359,19 +360,23 @@ func (c *LndClient) getWaitingCloseChannels(nodeID string) ([]*lnrpc.PendingChan
 
 func (c *LndClient) GetPeerId(scid *lightning.ShortChannelID) ([]byte, error) {
 	scidu64 := uint64(*scid)
-	peer, err := c.client.GetPeerIdByScid(context.Background(), &lnrpc.GetPeerIdByScidRequest{
-		Scid: scidu64,
-	})
+	resp, err := c.client.ListChannels(context.Background(), &lnrpc.ListChannelsRequest{})
 	if err != nil {
 		return nil, err
 	}
 
-	if peer.PeerId == "" {
-		return nil, nil
+	for _, ch := range resp.Channels {
+		if ch.ChanId == scidu64 || ch.ZeroConfConfirmedScid == scidu64 {
+			return hex.DecodeString(ch.RemotePubkey)
+		}
+		for _, alias := range ch.AliasScids {
+			if alias == scidu64 {
+				return hex.DecodeString(ch.RemotePubkey)
+			}
+		}
 	}
 
-	peerid, _ := hex.DecodeString(peer.PeerId)
-	return peerid, nil
+	return nil, nil
 }
 
 func (c *LndClient) WaitOnline(peerID []byte, deadline time.Time) error {

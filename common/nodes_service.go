@@ -4,10 +4,10 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/breez/lspd/config"
-	"github.com/breez/lspd/lightning"
 	ecies "github.com/ecies/go/v2"
 	btcec "github.com/flokiorg/go-flokicoin/crypto"
+	"github.com/flowgate-lsp/flspd/config"
+	"github.com/flowgate-lsp/flspd/lightning"
 	"golang.org/x/sync/singleflight"
 )
 

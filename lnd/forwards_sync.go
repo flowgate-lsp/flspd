@@ -6,9 +6,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/breez/lspd/history"
-	"github.com/breez/lspd/lightning"
 	"github.com/flokiorg/flnd/lnrpc"
+	"github.com/flowgate-lsp/flspd/history"
+	"github.com/flowgate-lsp/flspd/lightning"
 )
 
 type ForwardSync struct {

@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/breez/lspd/common"
+	"github.com/flowgate-lsp/flspd/common"
 )
 
 type ChannelSync struct {
