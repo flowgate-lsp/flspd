@@ -4,7 +4,7 @@
 // - protoc             v4.25.2
 // source: lspd.proto
 
-package lspd
+package rpc
 
 import (
 	context "context"

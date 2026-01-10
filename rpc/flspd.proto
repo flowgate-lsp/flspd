@@ -1,11 +1,11 @@
 syntax = "proto3";
 
 option java_multiple_files = true;
-option java_package = "io.grpc.lspd.service";
-option java_outer_classname = "LspdProto";
-option go_package = "github.com/flowgate-lsp/flspd";
+option java_package = "io.grpc.flspd.service";
+option java_outer_classname = "FlspdProto";
+option go_package = "github.com/flowgate-lsp/flspd/rpc";
 
-package lspd;
+package flspd;
 
 service ChannelOpener {
   rpc ChannelInformation(ChannelInformationRequest)
