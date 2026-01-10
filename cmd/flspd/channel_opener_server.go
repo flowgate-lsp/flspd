@@ -9,13 +9,12 @@ import (
 	"log"
 	"time"
 
-	"github.com/breez/lspd/btceclegacy"
-	"github.com/breez/lspd/common"
-	"github.com/breez/lspd/format"
-	"github.com/breez/lspd/interceptor"
-	lspdrpc "github.com/breez/lspd/rpc"
 	ecies "github.com/ecies/go/v2"
 	btcec "github.com/flokiorg/go-flokicoin/crypto"
+	"github.com/flowgate-lsp/flspd/common"
+	"github.com/flowgate-lsp/flspd/format"
+	"github.com/flowgate-lsp/flspd/interceptor"
+	lspdrpc "github.com/flowgate-lsp/flspd/rpc"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/flokiorg/flnd/lnwire"
@@ -91,11 +90,7 @@ func (s *channelOpenerServer) RegisterPayment(
 	data, err := ecies.Decrypt(node.EciesPrivateKey, in.Blob)
 	if err != nil {
 		log.Printf("ecies.Decrypt(%x) error: %v", in.Blob, err)
-		data, err = btceclegacy.Decrypt(node.PrivateKey, in.Blob)
-		if err != nil {
-			log.Printf("btcec.Decrypt(%x) error: %v", in.Blob, err)
-			return nil, fmt.Errorf("btcec.Decrypt(%x) error: %w", in.Blob, err)
-		}
+		return nil, fmt.Errorf("ecies.Decrypt(%x) error: %w", in.Blob, err)
 	}
 
 	var pi lspdrpc.PaymentInformation
@@ -169,44 +164,38 @@ func (s *channelOpenerServer) RegisterPayment(
 	return &lspdrpc.RegisterPaymentReply{}, nil
 }
 
-func getSignedEncryptedData(n *common.Node, in *lspdrpc.Encrypted) (string, []byte, bool, error) {
-	usedEcies := true
+func getSignedEncryptedData(n *common.Node, in *lspdrpc.Encrypted) (string, []byte, error) {
 	signedBlob, err := ecies.Decrypt(n.EciesPrivateKey, in.Data)
 	if err != nil {
 		log.Printf("ecies.Decrypt(%x) error: %v", in.Data, err)
-		usedEcies = false
-		signedBlob, err = btceclegacy.Decrypt(n.PrivateKey, in.Data)
-		if err != nil {
-			log.Printf("btcec.Decrypt(%x) error: %v", in.Data, err)
-			return "", nil, usedEcies, fmt.Errorf("btcec.Decrypt(%x) error: %w", in.Data, err)
-		}
+		return "", nil, fmt.Errorf("ecies.Decrypt(%x) error: %w", in.Data, err)
 	}
 	var signed lspdrpc.Signed
 	err = proto.Unmarshal(signedBlob, &signed)
 	if err != nil {
 		log.Printf("proto.Unmarshal(%x) error: %v", signedBlob, err)
-		return "", nil, usedEcies, fmt.Errorf("proto.Unmarshal(%x) error: %w", signedBlob, err)
+		return "", nil, fmt.Errorf("proto.Unmarshal(%x) error: %w", signedBlob, err)
 	}
 	pubkey, err := btcec.ParsePubKey(signed.Pubkey)
 	if err != nil {
 		log.Printf("unable to parse pubkey: %v", err)
-		return "", nil, usedEcies, fmt.Errorf("unable to parse pubkey: %w", err)
+		return "", nil, fmt.Errorf("unable to parse pubkey: %w", err)
 	}
 	wireSig, err := lnwire.NewSigFromECDSARawSignature(signed.Signature)
 	if err != nil {
-		return "", nil, usedEcies, fmt.Errorf("failed to decode signature: %v", err)
+		return "", nil, fmt.Errorf("failed to decode signature: %v", err)
 	}
 	sig, err := wireSig.ToSignature()
 	if err != nil {
-		return "", nil, usedEcies, fmt.Errorf("failed to convert from wire format: %v",
+		return "", nil, fmt.Errorf("failed to convert from wire format: %v",
 			err)
 	}
 	// The signature is over the sha256 hash of the message.
 	digest := chainhash.HashB(signed.Data)
 	if !sig.Verify(digest, pubkey) {
-		return "", nil, usedEcies, fmt.Errorf("invalid signature")
+		return "", nil, fmt.Errorf("invalid signature")
 	}
-	return hex.EncodeToString(signed.Pubkey), signed.Data, usedEcies, nil
+	return hex.EncodeToString(signed.Pubkey), signed.Data, nil
 }
 
 func (s *channelOpenerServer) CheckChannels(ctx context.Context, in *lspdrpc.Encrypted) (*lspdrpc.Encrypted, error) {
@@ -215,7 +204,7 @@ func (s *channelOpenerServer) CheckChannels(ctx context.Context, in *lspdrpc.Enc
 		return nil, err
 	}
 
-	nodeID, data, usedEcies, err := getSignedEncryptedData(node, in)
+	nodeID, data, err := getSignedEncryptedData(node, in)
 	if err != nil {
 		log.Printf("getSignedEncryptedData error: %v", err)
 		return nil, fmt.Errorf("getSignedEncryptedData error: %v", err)
@@ -240,25 +229,12 @@ func (s *channelOpenerServer) CheckChannels(ctx context.Context, in *lspdrpc.Enc
 		log.Printf("proto.Marshall() error: %v", err)
 		return nil, fmt.Errorf("proto.Marshal() error: %w", err)
 	}
-	pubkey, err := btcec.ParsePubKey(checkChannelsRequest.EncryptPubkey)
-	if err != nil {
-		log.Printf("unable to parse pubkey: %v", err)
-		return nil, fmt.Errorf("unable to parse pubkey: %w", err)
-	}
 
 	var encrypted []byte
-	if usedEcies {
-		encrypted, err = ecies.Encrypt(node.EciesPublicKey, dataReply)
-		if err != nil {
-			log.Printf("ecies.Encrypt() error: %v", err)
-			return nil, fmt.Errorf("ecies.Encrypt() error: %w", err)
-		}
-	} else {
-		encrypted, err = btceclegacy.Encrypt(pubkey, dataReply)
-		if err != nil {
-			log.Printf("btcec.Encrypt() error: %v", err)
-			return nil, fmt.Errorf("btcec.Encrypt() error: %w", err)
-		}
+	encrypted, err = ecies.Encrypt(node.EciesPublicKey, dataReply)
+	if err != nil {
+		log.Printf("ecies.Encrypt() error: %v", err)
+		return nil, fmt.Errorf("ecies.Encrypt() error: %w", err)
 	}
 
 	return &lspdrpc.Encrypted{Data: encrypted}, nil

@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"sort"
 
-	"github.com/breez/lspd/postgresql"
+	"github.com/flowgate-lsp/flspd/postgresql"
 	"github.com/urfave/cli"
 )
 

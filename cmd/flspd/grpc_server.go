@@ -8,10 +8,10 @@ import (
 	"net"
 	"strings"
 
-	"github.com/breez/lspd/common"
-	"github.com/breez/lspd/notifications"
-	lspdrpc "github.com/breez/lspd/rpc"
 	"github.com/caddyserver/certmagic"
+	"github.com/flowgate-lsp/flspd/common"
+	"github.com/flowgate-lsp/flspd/notifications"
+	lspdrpc "github.com/flowgate-lsp/flspd/rpc"
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"

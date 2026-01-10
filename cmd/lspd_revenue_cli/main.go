@@ -4,7 +4,7 @@ import (
 	"log"
 	"os"
 
-	"github.com/breez/lspd/build"
+	"github.com/flowgate-lsp/flspd/build"
 	"github.com/urfave/cli"
 )
 

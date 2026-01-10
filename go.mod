@@ -1,4 +1,4 @@
-module github.com/breez/lspd
+module github.com/flowgate-lsp/flspd
 
 go 1.24.9
 

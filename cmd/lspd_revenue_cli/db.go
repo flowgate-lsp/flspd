@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 
-	"github.com/breez/lspd/postgresql"
+	"github.com/flowgate-lsp/flspd/postgresql"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/urfave/cli"
 )
