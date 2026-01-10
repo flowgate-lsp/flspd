@@ -62,5 +62,5 @@ go test -timeout 20m -v ./itest \
   --lndmobileexec /path/to/flnd \
   --bitcoindexec /path/to/lokid \
   --bitcoincliexec /path/to/lokicli \
-  --lspdexec /path/to/built/flspd
+  --flspdexec /path/to/built/flspd
 ```

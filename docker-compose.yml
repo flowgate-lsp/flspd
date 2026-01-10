@@ -13,24 +13,24 @@ services:
       - "9090:9090" # Host:Container port mapping
     environment:
       - LISTEN_ADDRESS=0.0.0.0:9090
-      - DATABASE_URL=postgres://lspd:lspdpassword@postgres:5432/lspd?sslmode=disable
+      - DATABASE_URL=postgres://flspd:flspdpassword@postgres:5432/flspd?sslmode=disable
       - AUTO_MIGRATE_DATABASE=true
       - MEMPOOL_PRIORITY=economy
       - MEMPOOL_API_BASE_URL=https://mempool.space/api/v1/
       # Define your nodes here. Note: Hostnames must match docker service names (e.g., "flnd")
-      - NODES=[ { "name": "LSP", "nodePubkey": "REPLACE_WITH_PUBKEY", "lspdPrivateKey": "REPLACE_WITH_PRIVKEY", "tokens": ["REPLACE_WITH_TOKEN"], "host": "127.0.0.1:9735", "targetConf": "6", "minConfs": "6", "minHtlcMsat": "600", "baseFeeMsat": "1000", "feeRate": "0.000001", "timeLockDelta": "144", "channelFeePermyriad": "40", "channelMinimumFeeMsat": "2000000", "additionalChannelCapacity": "100000", "maxInactiveDuration": "3888000", "lnd": { "address": "flnd:10009", "cert": "REPLACE_WITH_BASE64_CERT", "macaroon": "REPLACE_WITH_HEX_MACAROON" } } ]
+      - 'NODES=[ { "name": "LSP", "nodePubkey": "REPLACE_WITH_PUBKEY", "flspdPrivateKey": "REPLACE_WITH_PRIVKEY", "tokens": ["REPLACE_WITH_TOKEN"], "host": "127.0.0.1:9735", "targetConf": "6", "minConfs": "6", "minHtlcMsat": "600", "baseFeeMsat": "1000", "feeRate": "0.000001", "timeLockDelta": "144", "channelFeePermyriad": "40", "channelMinimumFeeMsat": "2000000", "additionalChannelCapacity": "100000", "maxInactiveDuration": "3888000", "lnd": { "address": "flnd:10009", "cert": "REPLACE_WITH_BASE64_CERT", "macaroon": "REPLACE_WITH_HEX_MACAROON" } } ]'
       - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL} # Pass from host environment
     depends_on:
       - postgres
 
   postgres:
     image: postgres:15-alpine
-    container_name: lspd-postgres
+    container_name: flspd-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_USER: lspd
-      POSTGRES_PASSWORD: lspdpassword
-      POSTGRES_DB: lspd
+      POSTGRES_USER: flspd
+      POSTGRES_PASSWORD: flspdpassword
+      POSTGRES_DB: flspd
     volumes:
       - postgres_data:/var/lib/postgresql/data
 volumes:

@@ -1,5 +1,3 @@
 .vscode
-/lspd
-/lspd_plugin
-/lspd_cln_plugin
-/lspd_revenue_cli
+/flspd
+/flspd_revenue_cli
