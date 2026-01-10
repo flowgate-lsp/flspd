@@ -2,9 +2,10 @@ package history
 
 import (
 	"context"
-	"log"
 	"sync"
 	"time"
+
+	"github.com/rs/zerolog/log"
 
 	"github.com/flowgate-lsp/flspd/common"
 )
@@ -51,10 +52,10 @@ func (s *ChannelSync) channelsSynchronizeOnce(ctx context.Context) {
 
 func (s *ChannelSync) channelsSynchronizeNodeOnce(ctx context.Context, node *common.Node) {
 	lastUpdate := time.Now()
-	log.Printf("ChannelsSynchronizeNodeOnce(%x) - Begin %v", node.NodeId, lastUpdate)
+	log.Info().Msgf("ChannelsSynchronizeNodeOnce(%x) - Begin %v", node.NodeId, lastUpdate)
 	channels, err := node.Client.ListChannels()
 	if err != nil {
-		log.Printf("ChannelsSynchronizeNodeOnce(%x)- ListChannels error: %v", node.NodeId, err)
+		log.Info().Msgf("ChannelsSynchronizeNodeOnce(%x)- ListChannels error: %v", node.NodeId, err)
 		return
 	}
 
@@ -74,9 +75,9 @@ func (s *ChannelSync) channelsSynchronizeNodeOnce(ctx context.Context, node *com
 	}
 	err = s.store.UpdateChannels(ctx, updates)
 	if err != nil {
-		log.Printf("ChannelsSynchronizeNodeOnce(%x) - store.UpdateChannels error: %v", node.NodeId, err)
+		log.Info().Msgf("ChannelsSynchronizeNodeOnce(%x) - store.UpdateChannels error: %v", node.NodeId, err)
 		return
 	}
 
-	log.Printf("ChannelsSynchronizeNodeOnce(%x) - Done %v", node.NodeId, lastUpdate)
+	log.Info().Msgf("ChannelsSynchronizeNodeOnce(%x) - Done %v", node.NodeId, lastUpdate)
 }

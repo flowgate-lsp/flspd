@@ -23,7 +23,7 @@ import (
 	"github.com/flowgate-lsp/flspd/itest/lntest"
 	"github.com/flowgate-lsp/flspd/lightning"
 	"github.com/flowgate-lsp/flspd/notifications"
-	lspd "github.com/flowgate-lsp/flspd/rpc"
+	rpc "github.com/flowgate-lsp/flspd/rpc"
 	"github.com/tv42/zbase32"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/proto"
@@ -31,7 +31,7 @@ import (
 
 var (
 	lspdExecutable = flag.String(
-		"lspdexec", "", "full path to lpsd plugin binary",
+		"flspdexec", "", "full path to flspd binary",
 	)
 )
 
@@ -47,7 +47,7 @@ type LspNode interface {
 	Harness() *lntest.TestHarness
 	PublicKey() *btcec.PublicKey
 	EciesPublicKey() *ecies.PublicKey
-	Rpc() lspd.ChannelOpenerClient
+	Rpc() rpc.ChannelOpenerClient
 	NotificationsRpc() notifications.NotificationsClient
 	NodeId() []byte
 	LightningNode() lntest.LightningNode
@@ -111,9 +111,10 @@ func newLspd(h *lntest.TestHarness, mem *mempoolApi, name string, nodeConfig *co
 	minConfs := uint32(1)
 	conf := &config.NodeConfig{
 		Name:                      name,
-		LspdPrivateKey:            hex.EncodeToString(lspdPrivateKeyBytes),
+		NodePubkey:                hex.EncodeToString(publ.SerializeCompressed()),
+		FlspdPrivateKey:           hex.EncodeToString(lspdPrivateKeyBytes),
 		Tokens:                    []string{"hello"},
-		Host:                      "host:port",
+		Host:                      "localhost:10011",
 		PublicChannelAmount:       1000183,
 		TargetConf:                6,
 		MinConfs:                  &minConfs,
@@ -145,8 +146,8 @@ func newLspd(h *lntest.TestHarness, mem *mempoolApi, name string, nodeConfig *co
 
 	env = append(env, envExt...)
 
-	scriptFilePath := filepath.Join(scriptDir, "start-lspd.sh")
-	logFilePath := filepath.Join(scriptDir, "lspd.log")
+	scriptFilePath := filepath.Join(scriptDir, "start-rpc.sh")
+	logFilePath := filepath.Join(scriptDir, "rpc.log")
 	h.RegisterLogfile(logFilePath, fmt.Sprintf("lspd-%s", name))
 
 	l := &lspBase{
@@ -362,10 +363,10 @@ func (l *lspBase) initialize(runtimeCleanups []*lntest.Cleanup, confFunc func(*c
 	l.cleanups = initializeCleanups
 }
 
-func ChannelInformation(l LspNode) *lspd.ChannelInformationReply {
+func ChannelInformation(l LspNode) *rpc.ChannelInformationReply {
 	info, err := l.Rpc().ChannelInformation(
 		l.Harness().Ctx,
-		&lspd.ChannelInformationRequest{},
+		&rpc.ChannelInformationRequest{},
 	)
 	if err != nil {
 		l.Harness().T.Fatalf("Failed to get ChannelInformation: %v", err)
@@ -374,7 +375,7 @@ func ChannelInformation(l LspNode) *lspd.ChannelInformationReply {
 	return info
 }
 
-func RegisterPayment(l LspNode, paymentInfo *lspd.PaymentInformation, continueOnError bool) error {
+func RegisterPayment(l LspNode, paymentInfo *rpc.PaymentInformation, continueOnError bool) error {
 	serialized, err := proto.Marshal(paymentInfo)
 	lntest.CheckError(l.Harness().T, err)
 
@@ -385,7 +386,7 @@ func RegisterPayment(l LspNode, paymentInfo *lspd.PaymentInformation, continueOn
 	log.Printf("Registering payment")
 	_, err = l.Rpc().RegisterPayment(
 		ctx,
-		&lspd.RegisterPaymentRequest{
+		&rpc.RegisterPaymentRequest{
 			Blob: encrypted,
 		},
 	)

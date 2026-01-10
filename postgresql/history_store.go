@@ -3,8 +3,9 @@ package postgresql
 import (
 	"context"
 	"fmt"
-	"log"
 	"time"
+
+	"github.com/rs/zerolog/log"
 
 	"github.com/GoWebProd/uuid7"
 	"github.com/flowgate-lsp/flspd/history"
@@ -142,7 +143,7 @@ func (s *HistoryStore) UpdateChannels(
 	if err != nil {
 		return fmt.Errorf("CopyFrom() error: %w", err)
 	}
-	log.Printf("UpdateChannels - count1: %v", count)
+	log.Info().Msgf("UpdateChannels - count1: %v", count)
 
 	cmdTag, err := tx.Exec(ctx, `
 	INSERT INTO channels
@@ -156,7 +157,7 @@ func (s *HistoryStore) UpdateChannels(
 	if err != nil {
 		return fmt.Errorf("INSERT INTO channels error: %w", err)
 	}
-	log.Printf("UpdateChannels - count2: %v", cmdTag.RowsAffected())
+	log.Info().Msgf("UpdateChannels - count2: %v", cmdTag.RowsAffected())
 
 	return tx.Commit(ctx)
 }
@@ -201,7 +202,7 @@ func (s *HistoryStore) InsertForwards(
 	if err != nil {
 		return fmt.Errorf("CopyFrom() error: %w", err)
 	}
-	log.Printf("InsertForwards node %x count1: %v", nodeid, count)
+	log.Info().Msgf("InsertForwards node %x count1: %v", nodeid, count)
 
 	cmdTag, err := tx.Exec(ctx, `
 	INSERT INTO forwarding_history
@@ -212,7 +213,7 @@ func (s *HistoryStore) InsertForwards(
 	if err != nil {
 		return fmt.Errorf("INSERT INTO forwarding_history error: %w", err)
 	}
-	log.Printf("InsertForwards node %x count2: %v", nodeid, cmdTag.RowsAffected())
+	log.Info().Msgf("InsertForwards node %x count2: %v", nodeid, cmdTag.RowsAffected())
 
 	return tx.Commit(ctx)
 }
@@ -257,7 +258,7 @@ func (s *HistoryStore) UpdateForwards(
 	if err != nil {
 		return fmt.Errorf("CopyFrom() error: %w", err)
 	}
-	log.Printf("UpdateForwards node %x count1: %v", nodeid, count)
+	log.Info().Msgf("UpdateForwards node %x count1: %v", nodeid, count)
 
 	cmdTag, err := tx.Exec(ctx, `
 	INSERT INTO forwarding_history
@@ -273,33 +274,9 @@ func (s *HistoryStore) UpdateForwards(
 	if err != nil {
 		return fmt.Errorf("INSERT INTO forwarding_history error: %w", err)
 	}
-	log.Printf("UpdateForwards node %x count2: %v", nodeid, cmdTag.RowsAffected())
+	log.Info().Msgf("UpdateForwards node %x count2: %v", nodeid, cmdTag.RowsAffected())
 
 	return tx.Commit(ctx)
-}
-
-func (s *HistoryStore) FetchClnForwardOffsets(
-	ctx context.Context,
-	nodeId []byte,
-) (uint64, uint64, error) {
-	row := s.pool.QueryRow(ctx, `
-		SELECT last_created_index, last_updated_index
-		FROM public.cln_forwarding_history_offsets
-		WHERE nodeid = $1
-		`,
-		nodeId)
-
-	var created int64
-	var updated int64
-	err := row.Scan(&created, &updated)
-	if err == pgx.ErrNoRows {
-		return 0, 0, nil
-	}
-	if err != nil {
-		return 0, 0, err
-	}
-
-	return uint64(created), uint64(updated), nil
 }
 
 func (s *HistoryStore) FetchLndForwardOffset(
@@ -326,24 +303,6 @@ func (s *HistoryStore) FetchLndForwardOffset(
 
 	tt := time.Unix(0, *t)
 	return &tt, nil
-}
-
-func (s *HistoryStore) SetClnForwardOffsets(
-	ctx context.Context,
-	nodeId []byte,
-	created uint64,
-	updated uint64,
-) error {
-	_, err := s.pool.Exec(ctx, `
-	INSERT INTO public.cln_forwarding_history_offsets (nodeid, last_created_index, last_updated_index)
-	VALUES($1, $2, $3)
-	ON CONFLICT (nodeid) DO UPDATE SET last_created_index = EXCLUDED.last_created_index, last_updated_index = EXCLUDED.last_updated_index
-	`,
-		nodeId,
-		int64(created),
-		int64(updated),
-	)
-	return err
 }
 
 func (s *HistoryStore) AddOpenChannelHtlc(ctx context.Context, htlc *history.OpenChannelHtlc) error {

@@ -4,14 +4,15 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
-	"log"
 	"net"
 	"strings"
 
 	"github.com/caddyserver/certmagic"
+	"github.com/rs/zerolog/log"
+
 	"github.com/flowgate-lsp/flspd/common"
 	"github.com/flowgate-lsp/flspd/notifications"
-	lspdrpc "github.com/flowgate-lsp/flspd/rpc"
+	rpc "github.com/flowgate-lsp/flspd/rpc"
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -25,7 +26,7 @@ type grpcServer struct {
 	certmagicDomain string
 	lis             net.Listener
 	s               *grpc.Server
-	c               lspdrpc.ChannelOpenerServer
+	c               rpc.ChannelOpenerServer
 	n               notifications.NotificationsServer
 }
 
@@ -33,7 +34,7 @@ func NewGrpcServer(
 	nodesService common.NodesService,
 	address string,
 	certmagicDomain string,
-	c lspdrpc.ChannelOpenerServer,
+	c rpc.ChannelOpenerServer,
 	n notifications.NotificationsServer,
 ) (*grpcServer, error) {
 
@@ -52,16 +53,16 @@ func (s *grpcServer) Start() error {
 		var err error
 		lis, err = net.Listen("tcp", s.address)
 		if err != nil {
-			log.Fatalf("failed to listen: %v", err)
+			log.Fatal().Msgf("failed to listen: %v", err)
 		}
 	} else {
 		tlsConfig, err := certmagic.TLS([]string{s.certmagicDomain})
 		if err != nil {
-			log.Fatalf("failed to run certmagic: %v", err)
+			log.Fatal().Msgf("failed to run certmagic: %v", err)
 		}
 		lis, err = tls.Listen("tcp", s.address, tlsConfig)
 		if err != nil {
-			log.Fatalf("failed to listen: %v", err)
+			log.Fatal().Msgf("failed to listen: %v", err)
 		}
 	}
 
@@ -79,13 +80,13 @@ func (s *grpcServer) Start() error {
 						continue
 					}
 
-					return handler(lspdrpc.WithNode(ctx, node, token), req)
+					return handler(rpc.WithNode(ctx, node, token), req)
 				}
 			}
 			return nil, status.Errorf(codes.PermissionDenied, "Not authorized")
 		}),
 	)
-	lspdrpc.RegisterChannelOpenerServer(srv, s.c)
+	rpc.RegisterChannelOpenerServer(srv, s.c)
 	notifications.RegisterNotificationsServer(srv, s.n)
 
 	s.s = srv

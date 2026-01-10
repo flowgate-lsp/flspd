@@ -5,7 +5,7 @@
 # Build artifacts
 bin/
 flspd
-lspd_revenue_cli
+flspd_revenue_cli
 
 # Docker
 Dockerfile

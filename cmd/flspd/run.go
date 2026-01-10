@@ -5,13 +5,14 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"os/signal"
 	"strconv"
 	"strings"
 	"sync"
 	"syscall"
+
+	"github.com/rs/zerolog/log"
 
 	ecies "github.com/ecies/go/v2"
 	btcec "github.com/flokiorg/go-flokicoin/crypto"
@@ -30,26 +31,27 @@ import (
 )
 
 func runLspd(cliCtx *cli.Context) error {
-	log.Printf(`Starting lspd, tag='%s', revision='%s'`, build.GetTag(), build.GetRevision())
+	common.InitLogger()
+	log.Info().Msgf(`Starting flspd, tag='%s', revision='%s'`, build.GetTag(), build.GetRevision())
 	n := os.Getenv("NODES")
 	var nodeConfigs []*config.NodeConfig
 	err := json.Unmarshal([]byte(n), &nodeConfigs)
 	if err != nil {
-		log.Fatalf("failed to unmarshal NODES env: %v", err)
+		log.Fatal().Msgf("failed to unmarshal NODES env: %v", err)
 	}
 
 	if len(nodeConfigs) == 0 {
-		log.Fatalf("need at least one node configured in NODES.")
+		log.Fatal().Msgf("need at least one node configured in NODES.")
 	}
 
 	nodes, err := initializeNodes(nodeConfigs)
 	if err != nil {
-		log.Fatalf("failed to initialize nodes: %v", err)
+		log.Fatal().Msgf("failed to initialize nodes: %v", err)
 	}
 
 	nodesService, err := common.NewNodesService(nodes)
 	if err != nil {
-		log.Fatalf("failed to create nodes service: %v", err)
+		log.Fatal().Msgf("failed to create nodes service: %v", err)
 	}
 
 	var feeStrategy chain.FeeStrategy
@@ -74,10 +76,10 @@ func runLspd(cliCtx *cli.Context) error {
 	if mempoolUrl != "" {
 		mempoolClient, err = mempool.NewMempoolClient(mempoolUrl)
 		if err != nil {
-			log.Fatalf("failed to initialize mempool client: %v", err)
+			log.Fatal().Msgf("failed to initialize mempool client: %v", err)
 		}
 
-		log.Printf("using mempool api for fee estimation: %v, fee strategy: %v:%v", mempoolUrl, envFeeStrategy, feeStrategy)
+		log.Info().Msgf("using mempool api for fee estimation: %v, fee strategy: %v:%v", mempoolUrl, envFeeStrategy, feeStrategy)
 	}
 
 	databaseUrl := os.Getenv("DATABASE_URL")
@@ -85,12 +87,12 @@ func runLspd(cliCtx *cli.Context) error {
 	if automigrate {
 		err = postgresql.Migrate(databaseUrl)
 		if err != nil {
-			log.Fatalf("Failed to migrate postgres database: %v", err)
+			log.Fatal().Msgf("Failed to migrate postgres database: %v", err)
 		}
 	}
 	pool, err := postgresql.PgConnect(databaseUrl)
 	if err != nil {
-		log.Fatalf("pgConnect() error: %v", err)
+		log.Fatal().Msgf("pgConnect() error: %v", err)
 	}
 
 	interceptStore := postgresql.NewPostgresInterceptStore(pool)
@@ -118,12 +120,12 @@ func runLspd(cliCtx *cli.Context) error {
 		}
 
 		if node.NodeConfig.Lnd == nil {
-			log.Fatalf("node has to be lnd")
+			log.Fatal().Msgf("node has to be lnd")
 		}
 
 		client, err := lnd.NewLndClient(node.NodeConfig.Lnd)
 		if err != nil {
-			log.Fatalf("failed to initialize LND client: %v", err)
+			log.Fatal().Msgf("failed to initialize LND client: %v", err)
 		}
 
 		client.StartListeners()
@@ -134,7 +136,7 @@ func runLspd(cliCtx *cli.Context) error {
 		combinedHandler := common.NewCombinedHandler(handler)
 		htlcInterceptor, err = lnd.NewLndHtlcInterceptor(node.NodeConfig, client, combinedHandler)
 		if err != nil {
-			log.Fatalf("failed to initialize LND interceptor: %v", err)
+			log.Fatal().Msgf("failed to initialize LND interceptor: %v", err)
 		}
 
 		interceptors = append(interceptors, htlcInterceptor)
@@ -146,7 +148,7 @@ func runLspd(cliCtx *cli.Context) error {
 	ns := notifications.NewNotificationsServer(notificationsStore)
 	s, err := NewGrpcServer(nodesService, address, certMagicDomain, cs, ns)
 	if err != nil {
-		log.Fatalf("failed to initialize grpc server: %v", err)
+		log.Fatal().Msgf("failed to initialize grpc server: %v", err)
 	}
 
 	var wg sync.WaitGroup
@@ -165,9 +167,9 @@ func runLspd(cliCtx *cli.Context) error {
 		go func() {
 			err := i.Start()
 			if err == nil {
-				log.Printf("Interceptor stopped.")
+				log.Info().Msgf("Interceptor stopped.")
 			} else {
-				log.Printf("FATAL. Interceptor stopped with error: %v", err)
+				log.Error().Msgf("FATAL. Interceptor stopped with error: %v", err)
 			}
 
 			wg.Done()
@@ -181,9 +183,9 @@ func runLspd(cliCtx *cli.Context) error {
 	go func() {
 		err := s.Start()
 		if err == nil {
-			log.Printf("GRPC server stopped.")
+			log.Info().Msgf("GRPC server stopped.")
 		} else {
-			log.Printf("FATAL. GRPC server stopped with error: %v", err)
+			log.Error().Msgf("FATAL. GRPC server stopped with error: %v", err)
 		}
 
 		wg.Done()
@@ -196,7 +198,7 @@ func runLspd(cliCtx *cli.Context) error {
 	signal.Notify(c, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		sig := <-c
-		log.Printf("Received stop signal %v. Stopping.", sig)
+		log.Info().Msgf("Received stop signal %v. Stopping.", sig)
 
 		// Stop everything gracefully on stop signal
 		s.Stop()
@@ -204,7 +206,7 @@ func runLspd(cliCtx *cli.Context) error {
 	}()
 
 	wg.Wait()
-	log.Printf("lspd exited")
+	log.Info().Msgf("flspd exited")
 	return nil
 }
 
@@ -215,9 +217,9 @@ func initializeNodes(configs []*config.NodeConfig) ([]*common.Node, error) {
 
 	nodes := []*common.Node{}
 	for _, config := range configs {
-		pk, err := hex.DecodeString(config.LspdPrivateKey)
+		pk, err := hex.DecodeString(config.FlspdPrivateKey)
 		if err != nil {
-			return nil, fmt.Errorf("hex.DecodeString(config.lspdPrivateKey=%v) error: %v", config.LspdPrivateKey, err)
+			return nil, fmt.Errorf("hex.DecodeString(config.flspdPrivateKey=%v) error: %v", config.FlspdPrivateKey, err)
 		}
 
 		eciesPrivateKey := ecies.NewPrivateKeyFromBytes(pk)

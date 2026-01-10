@@ -2,9 +2,10 @@ package lnd
 
 import (
 	"context"
-	"log"
 	"sync"
 	"time"
+
+	"github.com/rs/zerolog/log"
 
 	"github.com/flokiorg/flnd/lnrpc"
 	"github.com/flokiorg/flnd/lnrpc/routerrpc"
@@ -73,7 +74,7 @@ func (i *LndHtlcInterceptor) intercept() error {
 		if !inited {
 			i.initWg.Done()
 		}
-		log.Printf("LND intercept(): stopping. Waiting for in-progress interceptions to complete.")
+		log.Info().Msgf("LND intercept(): stopping. Waiting for in-progress interceptions to complete.")
 		i.doneWg.Wait()
 	}()
 
@@ -82,10 +83,10 @@ func (i *LndHtlcInterceptor) intercept() error {
 			return i.ctx.Err()
 		}
 
-		log.Printf("Connecting LND HTLC interceptor.")
+		log.Info().Msgf("Connecting LND HTLC interceptor.")
 		interceptorClient, err := i.client.routerClient.HtlcInterceptor(i.ctx)
 		if err != nil {
-			log.Printf("routerClient.HtlcInterceptor(): %v", err)
+			log.Info().Msgf("routerClient.HtlcInterceptor(): %v", err)
 			<-time.After(time.Second)
 			continue
 		}
@@ -113,12 +114,12 @@ func (i *LndHtlcInterceptor) intercept() error {
 				// the we exit silently.
 				status, ok := status.FromError(err)
 				if ok && status.Code() == codes.Canceled {
-					log.Printf("Got code canceled. Break.")
+					log.Info().Msgf("Got code canceled. Break.")
 					break
 				}
 
 				// Otherwise it an unexpected error, we fail the test.
-				log.Printf("unexpected error in interceptor.Recv() %v", err)
+				log.Info().Msgf("unexpected error in interceptor.Recv() %v", err)
 				break
 			}
 
@@ -138,7 +139,7 @@ func (i *LndHtlcInterceptor) intercept() error {
 				case common.INTERCEPT_RESUME_WITH_ONION:
 					interceptorClient.Send(i.createOnionResponse(interceptResult, request))
 				case common.INTERCEPT_FAIL_HTLC_WITH_CODE:
-					log.Printf("paymenthash %x, failing htlc with code '%x'", request.PaymentHash, interceptResult.FailureCode)
+					log.Info().Msgf("paymenthash %x, failing htlc with code '%x'", request.PaymentHash, interceptResult.FailureCode)
 					interceptorClient.Send(&routerrpc.ForwardHtlcInterceptResponse{
 						IncomingCircuitKey: request.IncomingCircuitKey,
 						Action:             routerrpc.ResolveHoldForwardAction_FAIL,
@@ -170,7 +171,7 @@ func (i *LndHtlcInterceptor) mapFailureCode(original common.InterceptFailureCode
 	case common.FAILURE_INCORRECT_OR_UNKNOWN_PAYMENT_DETAILS:
 		return lnrpc.Failure_INCORRECT_OR_UNKNOWN_PAYMENT_DETAILS
 	default:
-		log.Printf("Unknown failure code %v, default to temporary channel failure.", original)
+		log.Info().Msgf("Unknown failure code %v, default to temporary channel failure.", original)
 		return lnrpc.Failure_TEMPORARY_CHANNEL_FAILURE
 	}
 }

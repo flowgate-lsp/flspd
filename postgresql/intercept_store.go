@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 
 	"github.com/flokiorg/go-flokicoin/wire"
 	"github.com/flowgate-lsp/flspd/common"
@@ -12,6 +11,7 @@ import (
 	"github.com/jackc/pgtype"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/rs/zerolog/log"
 )
 
 type PostgresInterceptStore struct {
@@ -46,7 +46,7 @@ func (s *PostgresInterceptStore) PaymentInfo(htlcPaymentHash []byte) (string, *c
 	if fundingTxID != nil {
 		cp, err = lightning.NewOutPoint(fundingTxID, uint32(fundingTxOutnum.Int))
 		if err != nil {
-			log.Printf("invalid funding txid in database %x", fundingTxID)
+			log.Info().Msgf("invalid funding txid in database %x", fundingTxID)
 		}
 	}
 
@@ -54,7 +54,7 @@ func (s *PostgresInterceptStore) PaymentInfo(htlcPaymentHash []byte) (string, *c
 	if p != nil {
 		err = json.Unmarshal([]byte(*p), &extParams)
 		if err != nil {
-			log.Printf("Failed to unmarshal OpeningFeeParams '%s': %v", *p, err)
+			log.Info().Msgf("Failed to unmarshal OpeningFeeParams '%s': %v", *p, err)
 			return "", nil, nil, nil, nil, 0, 0, nil, nil, err
 		}
 	}
@@ -67,7 +67,7 @@ func (s *PostgresInterceptStore) SetFundingTx(paymentHash []byte, channelPoint *
 			SET funding_tx_id = $2, funding_tx_outnum = $3
 			WHERE payment_hash=$1`,
 		paymentHash, channelPoint.Hash[:], channelPoint.Index)
-	log.Printf("setFundingTx(%x, %s, %d): %s err: %v", paymentHash, channelPoint.Hash.String(), channelPoint.Index, commandTag, err)
+	log.Info().Msgf("setFundingTx(%x, %s, %d): %s err: %v", paymentHash, channelPoint.Hash.String(), channelPoint.Index, commandTag, err)
 	return err
 }
 
@@ -82,7 +82,7 @@ func (s *PostgresInterceptStore) RegisterPayment(token string, params *common.Op
 		var err error
 		p, err = json.Marshal(extendedParams{Token: token, Params: *params})
 		if err != nil {
-			log.Printf("Failed to marshal OpeningFeeParams: %v", err)
+			log.Info().Msgf("Failed to marshal OpeningFeeParams: %v", err)
 			return err
 		}
 	}
@@ -93,7 +93,7 @@ func (s *PostgresInterceptStore) RegisterPayment(token string, params *common.Op
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		ON CONFLICT DO NOTHING`,
 		destination, paymentHash, paymentSecret, incomingAmountMsat, outgoingAmountMsat, t, p)
-	log.Printf("registerPayment(%x, %x, %x, %v, %v, %v, %s) rows: %v err: %v",
+	log.Info().Msgf("registerPayment(%x, %x, %x, %v, %v, %v, %s) rows: %v err: %v",
 		destination, paymentHash, paymentSecret, incomingAmountMsat, outgoingAmountMsat, tag, p, commandTag.RowsAffected(), err)
 	if err != nil {
 		return fmt.Errorf("registerPayment(%x, %x, %x, %v, %v, %v, %s) error: %w",

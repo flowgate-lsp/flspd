@@ -5,10 +5,12 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
+
 	"strconv"
+
+	"github.com/rs/zerolog/log"
 )
 
 type discordWebhook struct {
@@ -56,7 +58,7 @@ func sendOpenChannelDiscordNotification(
 ) {
 	webhookUrl := os.Getenv("DISCORD_WEBHOOK_URL")
 	if webhookUrl == "" {
-		log.Println("DISCORD_WEBHOOK_URL is not set, skipping notification")
+		log.Info().Msg("DISCORD_WEBHOOK_URL is not set, skipping notification")
 		return
 	}
 
@@ -84,8 +86,8 @@ func sendOpenChannelDiscordNotification(
 
 	err := sendDiscordNotification(webhookUrl, payload)
 	if err != nil {
-		log.Printf("Error sending open channel discord notification: %v", err)
+		log.Info().Msgf("Error sending open channel discord notification: %v", err)
 	} else {
-		log.Println("Sent open channel discord notification")
+		log.Info().Msg("Sent open channel discord notification")
 	}
 }

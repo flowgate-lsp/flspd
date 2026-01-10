@@ -4,7 +4,7 @@ import (
 	"log"
 
 	"github.com/flowgate-lsp/flspd/itest/lntest"
-	lspd "github.com/flowgate-lsp/flspd/rpc"
+	rpc "github.com/flowgate-lsp/flspd/rpc"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -15,7 +15,7 @@ func registerPaymentWithTag(p *testParams) {
 	})
 
 	log.Printf("Registering payment with lsp")
-	RegisterPayment(p.lsp, &lspd.PaymentInformation{
+	RegisterPayment(p.lsp, &rpc.PaymentInformation{
 		PaymentHash:        i.PaymentHash,
 		PaymentSecret:      i.PaymentSecret,
 		Destination:        p.LspClient().Node().NodeId(),

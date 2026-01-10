@@ -1,6 +1,6 @@
 package common
 
-import "log"
+import "github.com/rs/zerolog/log"
 
 type CombinedHandler struct {
 	handlers []InterceptHandler
@@ -15,7 +15,7 @@ func NewCombinedHandler(handlers ...InterceptHandler) *CombinedHandler {
 func (c *CombinedHandler) Intercept(req InterceptRequest) InterceptResult {
 	for i, handler := range c.handlers {
 		res := handler.Intercept(req)
-		log.Printf(
+		log.Info().Msgf(
 			"Intercept {%s}. Interceptor %d returns {%s}",
 			req.String(),
 			i,

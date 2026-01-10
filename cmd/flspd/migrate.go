@@ -9,7 +9,7 @@ import (
 
 var migrateCommand = cli.Command{
 	Name:   "migrate",
-	Usage:  "Migrate the lspd database to the latest version.",
+	Usage:  "Migrate the flspd database to the latest version.",
 	Action: migrate,
 	Flags: []cli.Flag{
 		cli.StringFlag{

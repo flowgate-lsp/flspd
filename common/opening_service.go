@@ -5,13 +5,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"log"
 	"sort"
 	"time"
 
 	btcec "github.com/flokiorg/go-flokicoin/crypto"
 	"github.com/flokiorg/go-flokicoin/crypto/ecdsa"
 	"github.com/flowgate-lsp/flspd/format"
+	"github.com/rs/zerolog/log"
 )
 
 type OpeningService interface {
@@ -39,12 +39,12 @@ func (s *openingService) GetFeeParamsMenu(token string, privateKey *btcec.Privat
 	var menu []*OpeningFeeParams
 	settings, err := s.store.GetFeeParamsSettings(token)
 	if err != nil {
-		log.Printf("Failed to fetch fee params settings: %v", err)
+		log.Info().Msgf("Failed to fetch fee params settings: %v", err)
 		return nil, fmt.Errorf("failed to get opening_fee_params")
 	}
 
 	if len(settings) == 0 {
-		log.Printf("No fee params setings found in the db [token=%v]", token)
+		log.Info().Msgf("No fee params setings found in the db [token=%v]", token)
 	}
 
 	for _, setting := range settings {
@@ -59,7 +59,7 @@ func (s *openingService) GetFeeParamsMenu(token string, privateKey *btcec.Privat
 
 		promise, err := createPromise(privateKey, params)
 		if err != nil {
-			log.Printf("Failed to create promise: %v", err)
+			log.Info().Msgf("Failed to create promise: %v", err)
 			return nil, err
 		}
 
@@ -89,12 +89,12 @@ func (s *openingService) ValidateOpeningFeeParams(params *OpeningFeeParams, publ
 
 	t, err := time.Parse(format.TIME_FORMAT, params.ValidUntil)
 	if err != nil {
-		log.Printf("validateOpeningFeeParams: time.Parse(%v, %v) error: %v", format.TIME_FORMAT, params.ValidUntil, err)
+		log.Info().Msgf("validateOpeningFeeParams: time.Parse(%v, %v) error: %v", format.TIME_FORMAT, params.ValidUntil, err)
 		return false
 	}
 
 	if time.Now().UTC().After(t) {
-		log.Printf("validateOpeningFeeParams: promise not valid anymore: %v", t)
+		log.Info().Msgf("validateOpeningFeeParams: promise not valid anymore: %v", t)
 		return false
 	}
 
@@ -104,7 +104,7 @@ func (s *openingService) ValidateOpeningFeeParams(params *OpeningFeeParams, publ
 func (s *openingService) IsCurrentChainFeeCheaper(token string, params *OpeningFeeParams) bool {
 	settings, err := s.store.GetFeeParamsSettings(token)
 	if err != nil {
-		log.Printf("Failed to get fee params settings: %v", err)
+		log.Info().Msgf("Failed to get fee params settings: %v", err)
 		return false
 	}
 
@@ -140,7 +140,7 @@ func paramsHash(params *OpeningFeeParams) ([]byte, error) {
 	}
 	blob, err := json.Marshal(items)
 	if err != nil {
-		log.Printf("paramsHash error: %v", err)
+		log.Info().Msgf("paramsHash error: %v", err)
 		return nil, err
 	}
 	hash := sha256.Sum256(blob)
@@ -154,16 +154,16 @@ func verifyPromise(lspPublicKey *btcec.PublicKey, params *OpeningFeeParams) erro
 	}
 	sig, err := hex.DecodeString(params.Promise)
 	if err != nil {
-		log.Printf("verifyPromise: hex.DecodeString error: %v", err)
+		log.Info().Msgf("verifyPromise: hex.DecodeString error: %v", err)
 		return err
 	}
 	pub, _, err := ecdsa.RecoverCompact(sig, hash)
 	if err != nil {
-		log.Printf("verifyPromise: RecoverCompact(%x) error: %v", sig, err)
+		log.Info().Msgf("verifyPromise: RecoverCompact(%x) error: %v", sig, err)
 		return err
 	}
 	if !lspPublicKey.IsEqual(pub) {
-		log.Print("verifyPromise: not signed by us", err)
+		log.Info().Msgf("verifyPromise: not signed by us: %v", err)
 		return fmt.Errorf("invalid promise")
 	}
 	return nil

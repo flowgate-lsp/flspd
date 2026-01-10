@@ -2,8 +2,9 @@ package notifications
 
 import (
 	"context"
-	"log"
 	"time"
+
+	"github.com/rs/zerolog/log"
 )
 
 type CleanupService struct {
@@ -29,7 +30,7 @@ func (c *CleanupService) Start(ctx context.Context) {
 		before := time.Now().Add(-ExpiryDuration)
 		err := c.store.RemoveExpired(ctx, before)
 		if err != nil {
-			log.Printf("Failed to remove expired webhook urls before %v: %v", before, err)
+			log.Info().Msgf("Failed to remove expired webhook urls before %v: %v", before, err)
 		}
 		select {
 		case <-time.After(CleanupInterval):

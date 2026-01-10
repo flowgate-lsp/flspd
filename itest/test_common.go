@@ -5,7 +5,7 @@ import (
 	"log"
 	"testing"
 
-	lspd "github.com/flowgate-lsp/flspd/rpc"
+	rpc "github.com/flowgate-lsp/flspd/rpc"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -30,7 +30,7 @@ func AssertChannelCapacity(
 	assert.Equal(t, ((outerAmountMsat/1000)+100000)*1000, capacityMsat)
 }
 
-func calculateInnerAmountMsat(lsp LspNode, outerAmountMsat uint64, params *lspd.OpeningFeeParams) uint64 {
+func calculateInnerAmountMsat(lsp LspNode, outerAmountMsat uint64, params *rpc.OpeningFeeParams) uint64 {
 	var fee uint64
 	log.Printf("%+v", params)
 	if params == nil {

@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/flowgate-lsp/flspd/itest/lntest"
-	lspd "github.com/flowgate-lsp/flspd/rpc"
+	rpc "github.com/flowgate-lsp/flspd/rpc"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -37,11 +37,11 @@ func testOfflineNotificationPaymentRegistered(p *testParams) {
 			lsp:             p.lsp,
 		})
 
-	log.Print("Connecting bob to lspd")
+	log.Print("Connecting bob to flspd")
 	p.LspClient().Node().ConnectPeer(p.lsp.LightningNode())
 
 	log.Printf("Registering payment with lsp")
-	RegisterPayment(p.lsp, &lspd.PaymentInformation{
+	RegisterPayment(p.lsp, &rpc.PaymentInformation{
 		PaymentHash:        innerInvoice.paymentHash,
 		PaymentSecret:      innerInvoice.paymentSecret,
 		Destination:        p.LspClient().Node().NodeId(),
@@ -206,7 +206,7 @@ func testOfflineNotificationZeroConfChannel(p *testParams) {
 			lsp:             p.lsp,
 		})
 
-	log.Print("Connecting bob to lspd")
+	log.Print("Connecting bob to flspd")
 	p.LspClient().Node().ConnectPeer(p.lsp.LightningNode())
 	p.LspClient().SetHtlcAcceptor(innerAmountMsat)
 
@@ -215,7 +215,7 @@ func testOfflineNotificationZeroConfChannel(p *testParams) {
 	<-time.After(htlcInterceptorDelay)
 
 	log.Printf("Registering payment with lsp")
-	RegisterPayment(p.lsp, &lspd.PaymentInformation{
+	RegisterPayment(p.lsp, &rpc.PaymentInformation{
 		PaymentHash:        innerInvoice.paymentHash,
 		PaymentSecret:      innerInvoice.paymentSecret,
 		Destination:        p.LspClient().Node().NodeId(),

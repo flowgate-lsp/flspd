@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/flowgate-lsp/flspd/itest/lntest"
-	lspd "github.com/flowgate-lsp/flspd/rpc"
+	rpc "github.com/flowgate-lsp/flspd/rpc"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -49,17 +49,17 @@ func testDynamicFeeFlow(p *testParams) {
 		})
 
 	p.LspClient().SetHtlcAcceptor(innerAmountMsat)
-	log.Print("Connecting bob to lspd")
+	log.Print("Connecting bob to flspd")
 	p.LspClient().Node().ConnectPeer(p.lsp.LightningNode())
 
 	log.Printf("Testing some bad registrations")
-	err := RegisterPayment(p.lsp, &lspd.PaymentInformation{
+	err := RegisterPayment(p.lsp, &rpc.PaymentInformation{
 		PaymentHash:        innerInvoice.paymentHash,
 		PaymentSecret:      innerInvoice.paymentSecret,
 		Destination:        p.LspClient().Node().NodeId(),
 		IncomingAmountMsat: int64(outerAmountMsat),
 		OutgoingAmountMsat: int64(innerAmountMsat),
-		OpeningFeeParams: &lspd.OpeningFeeParams{
+		OpeningFeeParams: &rpc.OpeningFeeParams{
 			// modify minmsat
 			MinMsat:              params.MinMsat + 1,
 			Proportional:         params.Proportional,
@@ -71,13 +71,13 @@ func testDynamicFeeFlow(p *testParams) {
 	}, true)
 	assert.Contains(p.t, err.Error(), "invalid opening_fee_params")
 
-	err = RegisterPayment(p.lsp, &lspd.PaymentInformation{
+	err = RegisterPayment(p.lsp, &rpc.PaymentInformation{
 		PaymentHash:        innerInvoice.paymentHash,
 		PaymentSecret:      innerInvoice.paymentSecret,
 		Destination:        p.LspClient().Node().NodeId(),
 		IncomingAmountMsat: int64(outerAmountMsat),
 		OutgoingAmountMsat: int64(innerAmountMsat),
-		OpeningFeeParams: &lspd.OpeningFeeParams{
+		OpeningFeeParams: &rpc.OpeningFeeParams{
 			MinMsat:              params.MinMsat,
 			Proportional:         params.Proportional,
 			ValidUntil:           params.ValidUntil,
@@ -89,7 +89,7 @@ func testDynamicFeeFlow(p *testParams) {
 	}, true)
 	assert.Contains(p.t, err.Error(), "invalid opening_fee_params")
 
-	err = RegisterPayment(p.lsp, &lspd.PaymentInformation{
+	err = RegisterPayment(p.lsp, &rpc.PaymentInformation{
 		PaymentHash:   innerInvoice.paymentHash,
 		PaymentSecret: innerInvoice.paymentSecret,
 		Destination:   p.LspClient().Node().NodeId(),
@@ -100,7 +100,7 @@ func testDynamicFeeFlow(p *testParams) {
 	}, true)
 	assert.Contains(p.t, err.Error(), "not enough fees")
 
-	err = RegisterPayment(p.lsp, &lspd.PaymentInformation{
+	err = RegisterPayment(p.lsp, &rpc.PaymentInformation{
 		PaymentHash:        innerInvoice.paymentHash,
 		PaymentSecret:      innerInvoice.paymentSecret,
 		Destination:        p.LspClient().Node().NodeId(),
@@ -112,7 +112,7 @@ func testDynamicFeeFlow(p *testParams) {
 
 	// Now register the payment for real
 	log.Printf("Registering payment with lsp")
-	RegisterPayment(p.lsp, &lspd.PaymentInformation{
+	RegisterPayment(p.lsp, &rpc.PaymentInformation{
 		PaymentHash:        innerInvoice.paymentHash,
 		PaymentSecret:      innerInvoice.paymentSecret,
 		Destination:        p.LspClient().Node().NodeId(),

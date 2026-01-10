@@ -4,11 +4,11 @@ import (
 	context "context"
 	"encoding/hex"
 	"fmt"
-	"log"
 
 	ecies "github.com/ecies/go/v2"
 	"github.com/flowgate-lsp/flspd/lightning"
-	lspdrpc "github.com/flowgate-lsp/flspd/rpc"
+	rpc "github.com/flowgate-lsp/flspd/rpc"
+	"github.com/rs/zerolog/log"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -29,14 +29,14 @@ func (s *server) SubscribeNotifications(
 	ctx context.Context,
 	in *EncryptedNotificationRequest,
 ) (*SubscribeNotificationsReply, error) {
-	node, _, err := lspdrpc.GetNode(ctx)
+	node, _, err := rpc.GetNode(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	data, err := ecies.Decrypt(node.EciesPrivateKey, in.Blob)
 	if err != nil {
-		log.Printf(
+		log.Info().Msgf(
 			"failed to register for notifications: ecies.Decrypt error: %v",
 			err,
 		)
@@ -46,7 +46,7 @@ func (s *server) SubscribeNotifications(
 	var request SubscribeNotificationsRequest
 	err = proto.Unmarshal(data, &request)
 	if err != nil {
-		log.Printf(
+		log.Info().Msgf(
 			"failed to register for notifications on url %v: proto.Unmarshal(%x) error: %v",
 			request.Url,
 			data,
@@ -57,7 +57,7 @@ func (s *server) SubscribeNotifications(
 
 	pubkey, err := lightning.VerifyMessage([]byte(request.Url), request.Signature)
 	if err != nil {
-		log.Printf(
+		log.Info().Msgf(
 			"failed to register %x for notifications on url %s: lightning.VerifyMessage error: %v",
 			pubkey.SerializeCompressed(),
 			request.Url,
@@ -70,7 +70,7 @@ func (s *server) SubscribeNotifications(
 	pubkeyStr := hex.EncodeToString(pubkey.SerializeCompressed())
 	err = s.store.Register(ctx, pubkeyStr, request.Url)
 	if err != nil {
-		log.Printf(
+		log.Info().Msgf(
 			"failed to register %x for notifications on url %s: %v",
 			pubkey.SerializeCompressed(),
 			request.Url,
@@ -80,7 +80,7 @@ func (s *server) SubscribeNotifications(
 		return nil, ErrInternal
 	}
 
-	log.Printf("%s was successfully registered for notifications on url %s", pubkeyStr, request.Url)
+	log.Info().Msgf("%s was successfully registered for notifications on url %s", pubkeyStr, request.Url)
 	return &SubscribeNotificationsReply{}, nil
 }
 
@@ -88,14 +88,14 @@ func (s *server) UnsubscribeNotifications(
 	ctx context.Context,
 	in *EncryptedNotificationRequest,
 ) (*UnsubscribeNotificationsReply, error) {
-	node, _, err := lspdrpc.GetNode(ctx)
+	node, _, err := rpc.GetNode(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	data, err := ecies.Decrypt(node.EciesPrivateKey, in.Blob)
 	if err != nil {
-		log.Printf(
+		log.Info().Msgf(
 			"failed to unsubscribe: ecies.Decrypt error: %v",
 			err,
 		)
@@ -105,7 +105,7 @@ func (s *server) UnsubscribeNotifications(
 	var request UnsubscribeNotificationsRequest
 	err = proto.Unmarshal(data, &request)
 	if err != nil {
-		log.Printf(
+		log.Info().Msgf(
 			"failed to unsubscribe: proto.Unmarshal(%x) error: %v",
 			data,
 			err,
@@ -115,7 +115,7 @@ func (s *server) UnsubscribeNotifications(
 
 	pubkey, err := lightning.VerifyMessage([]byte(request.Url), request.Signature)
 	if err != nil {
-		log.Printf(
+		log.Info().Msgf(
 			"failed to unsubscribe on url %s: lightning.VerifyMessage error: %v",
 			request.Url,
 			err,
@@ -127,7 +127,7 @@ func (s *server) UnsubscribeNotifications(
 	err = s.store.Unsubscribe(ctx, hex.EncodeToString(pubkey.SerializeCompressed()), request.Url)
 
 	if err != nil {
-		log.Printf(
+		log.Info().Msgf(
 			"failed to unsubscribe %x on url %s: %v",
 			pubkey.SerializeCompressed(),
 			request.Url,

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
-	"log"
 	"math/big"
 	"time"
 
@@ -16,6 +15,7 @@ import (
 	"github.com/flowgate-lsp/flspd/history"
 	"github.com/flowgate-lsp/flspd/lightning"
 	"github.com/flowgate-lsp/flspd/notifications"
+	"github.com/rs/zerolog/log"
 	"golang.org/x/sync/singleflight"
 )
 
@@ -58,11 +58,11 @@ func NewInterceptHandler(
 
 func (i *Interceptor) Intercept(req common.InterceptRequest) common.InterceptResult {
 	reqPaymentHashStr := hex.EncodeToString(req.PaymentHash)
-	log.Printf("Intercept: scid: %s, paymentHash: %s, outgoingAmount: %v, outgoingExpiry: %v, incomingExpiry: %v", req.Scid.ToString(), reqPaymentHashStr, req.OutgoingAmountMsat, req.OutgoingExpiry, req.IncomingExpiry)
+	log.Info().Msgf("Intercept: scid: %s, paymentHash: %s, outgoingAmount: %v, outgoingExpiry: %v, incomingExpiry: %v", req.Scid.ToString(), reqPaymentHashStr, req.OutgoingAmountMsat, req.OutgoingExpiry, req.IncomingExpiry)
 	resp, _, _ := i.payHashGroup.Do(reqPaymentHashStr, func() (interface{}, error) {
 		token, params, paymentHash, paymentSecret, destination, incomingAmountMsat, outgoingAmountMsat, channelPoint, tag, err := i.store.PaymentInfo(req.PaymentHash)
 		if err != nil {
-			log.Printf("paymentInfo(%x) error: %v", req.PaymentHash, err)
+			log.Info().Msgf("paymentInfo(%x) error: %v", req.PaymentHash, err)
 			return common.InterceptResult{
 				Action:      common.INTERCEPT_FAIL_HTLC_WITH_CODE,
 				FailureCode: common.FAILURE_TEMPORARY_NODE_FAILURE,
@@ -72,13 +72,13 @@ func (i *Interceptor) Intercept(req common.InterceptRequest) common.InterceptRes
 		isRegistered := paymentSecret != nil
 		// Sanity check. If the payment is registered, the destination is always set.
 		if isRegistered && (destination == nil || len(destination) != 33) {
-			log.Printf("ERROR: Payment was registered without destination. paymentHash: %s", reqPaymentHashStr)
+			log.Info().Msgf("ERROR: Payment was registered without destination. paymentHash: %s", reqPaymentHashStr)
 		}
 
 		isProbe := isRegistered && !bytes.Equal(paymentHash, req.PaymentHash)
 		nextHop, _ := i.client.GetPeerId(&req.Scid)
 		if err != nil {
-			log.Printf("GetPeerId(%s) error: %v", req.Scid.ToString(), err)
+			log.Info().Msgf("GetPeerId(%s) error: %v", req.Scid.ToString(), err)
 			return common.InterceptResult{
 				Action: common.INTERCEPT_RESUME,
 			}, nil
@@ -87,7 +87,7 @@ func (i *Interceptor) Intercept(req common.InterceptRequest) common.InterceptRes
 		// If the payment was registered, but the next hop is not the destination
 		// that means we are not the last hop of the payment, so we'll just forward.
 		if isRegistered && nextHop != nil && !bytes.Equal(nextHop, destination) {
-			log.Printf("paymentHash: %s, nextHop (%s) != destination (%s)", reqPaymentHashStr, hex.EncodeToString(nextHop), hex.EncodeToString(destination))
+			log.Info().Msgf("paymentHash: %s, nextHop (%s) != destination (%s)", reqPaymentHashStr, hex.EncodeToString(nextHop), hex.EncodeToString(destination))
 			return common.InterceptResult{
 				Action: common.INTERCEPT_RESUME,
 			}, nil
@@ -101,7 +101,7 @@ func (i *Interceptor) Intercept(req common.InterceptRequest) common.InterceptRes
 			// If the next hop cannot be deduced from the scid, and the payment
 			// is not registered, there's nothing left to be done. Just continue.
 			if !isRegistered {
-				log.Printf("paymentHash: %s, nextHop == nil and not registered", reqPaymentHashStr)
+				log.Info().Msgf("paymentHash: %s, nextHop == nil and not registered", reqPaymentHashStr)
 				return common.InterceptResult{
 					Action: common.INTERCEPT_RESUME,
 				}, nil
@@ -114,7 +114,7 @@ func (i *Interceptor) Intercept(req common.InterceptRequest) common.InterceptRes
 
 		isConnected, err := i.client.IsConnected(nextHop)
 		if err != nil {
-			log.Printf("IsConnected(%x) error: %v", nextHop, err)
+			log.Info().Msgf("IsConnected(%x) error: %v", nextHop, err)
 			return common.InterceptResult{
 				Action:      common.INTERCEPT_FAIL_HTLC_WITH_CODE,
 				FailureCode: common.FAILURE_TEMPORARY_CHANNEL_FAILURE,
@@ -124,7 +124,7 @@ func (i *Interceptor) Intercept(req common.InterceptRequest) common.InterceptRes
 		if isProbe {
 			// If this is a known probe, we'll quit early for non-connected clients.
 			if !isConnected {
-				log.Printf("paymentHash: %s, probe and not connected", reqPaymentHashStr)
+				log.Info().Msgf("paymentHash: %s, probe and not connected", reqPaymentHashStr)
 				return common.InterceptResult{
 					Action: common.INTERCEPT_RESUME,
 				}, nil
@@ -136,7 +136,7 @@ func (i *Interceptor) Intercept(req common.InterceptRequest) common.InterceptRes
 			// node. But senders implementnig the probing-01: prefix should
 			// know that the actual payment would probably succeed.
 			if channelPoint == nil {
-				log.Printf("paymentHash: %s, probe and channelPoint == nil", reqPaymentHashStr)
+				log.Info().Msgf("paymentHash: %s, probe and channelPoint == nil", reqPaymentHashStr)
 				return common.InterceptResult{
 					Action:      common.INTERCEPT_FAIL_HTLC_WITH_CODE,
 					FailureCode: common.FAILURE_INCORRECT_OR_UNKNOWN_PAYMENT_DETAILS,
@@ -154,7 +154,7 @@ func (i *Interceptor) Intercept(req common.InterceptRequest) common.InterceptRes
 			// Make sure the client is connected by potentially notifying them to come online.
 			notifyResult := i.notifyAndWait(reqPaymentHashStr, nextHop, isRegistered)
 			if notifyResult != nil {
-				log.Printf("paymentHash: %s, !isConnected and notifyResult != nil", reqPaymentHashStr)
+				log.Info().Msgf("paymentHash: %s, !isConnected and notifyResult != nil", reqPaymentHashStr)
 				// return *notifyResult, nil
 			}
 		}
@@ -170,7 +170,7 @@ func (i *Interceptor) Intercept(req common.InterceptRequest) common.InterceptRes
 		if channelPoint == nil {
 			// TODO: When opening_fee_params is enforced, turn this check in a temporary channel failure.
 			if params == nil {
-				log.Printf("DEPRECATED: Intercepted htlc with deprecated fee mechanism. Using default fees. payment hash: %s", reqPaymentHashStr)
+				log.Info().Msgf("DEPRECATED: Intercepted htlc with deprecated fee mechanism. Using default fees. payment hash: %s", reqPaymentHashStr)
 				params = &common.OpeningFeeParams{
 					MinFeeMsat:           uint64(i.config.ChannelMinimumFeeMsat),
 					Proportional:         uint32(i.config.ChannelFeePermyriad * 100),
@@ -182,7 +182,7 @@ func (i *Interceptor) Intercept(req common.InterceptRequest) common.InterceptRes
 
 			// Make sure the cltv delta is enough.
 			if int64(req.IncomingExpiry)-int64(req.OutgoingExpiry) < int64(i.config.TimeLockDelta) {
-				log.Printf("paymentHash: %s, outgoingExpiry: %v, incomingExpiry: %v, i.config.TimeLockDelta: %v", reqPaymentHashStr, req.OutgoingExpiry, req.IncomingExpiry, i.config.TimeLockDelta)
+				log.Info().Msgf("paymentHash: %s, outgoingExpiry: %v, incomingExpiry: %v, i.config.TimeLockDelta: %v", reqPaymentHashStr, req.OutgoingExpiry, req.IncomingExpiry, i.config.TimeLockDelta)
 				return common.InterceptResult{
 					Action:      common.INTERCEPT_FAIL_HTLC_WITH_CODE,
 					FailureCode: common.FAILURE_TEMPORARY_CHANNEL_FAILURE,
@@ -191,7 +191,7 @@ func (i *Interceptor) Intercept(req common.InterceptRequest) common.InterceptRes
 
 			validUntil, err := time.Parse(format.TIME_FORMAT, params.ValidUntil)
 			if err != nil {
-				log.Printf("paymentHash: %s, time.Parse(%s, %s) failed. Failing channel open: %v", reqPaymentHashStr, format.TIME_FORMAT, params.ValidUntil, err)
+				log.Info().Msgf("paymentHash: %s, time.Parse(%s, %s) failed. Failing channel open: %v", reqPaymentHashStr, format.TIME_FORMAT, params.ValidUntil, err)
 				return common.InterceptResult{
 					Action:      common.INTERCEPT_FAIL_HTLC_WITH_CODE,
 					FailureCode: common.FAILURE_TEMPORARY_CHANNEL_FAILURE,
@@ -202,19 +202,19 @@ func (i *Interceptor) Intercept(req common.InterceptRequest) common.InterceptRes
 			// If they are expired, but the current chain fee is fine, open channel anyway.
 			if time.Now().UTC().After(validUntil) {
 				if !i.openingService.IsCurrentChainFeeCheaper(token, params) {
-					log.Printf("Intercepted expired payment registration. Failing payment. payment hash: %s, valid until: %s", reqPaymentHashStr, params.ValidUntil)
+					log.Info().Msgf("Intercepted expired payment registration. Failing payment. payment hash: %s, valid until: %s", reqPaymentHashStr, params.ValidUntil)
 					return common.InterceptResult{
 						Action:      common.INTERCEPT_FAIL_HTLC_WITH_CODE,
 						FailureCode: common.FAILURE_TEMPORARY_CHANNEL_FAILURE,
 					}, nil
 				}
 
-				log.Printf("Intercepted expired payment registration. Opening channel anyway, because it's cheaper at the current rate. paymenthash: %s, params: %+v", reqPaymentHashStr, params)
+				log.Info().Msgf("Intercepted expired payment registration. Opening channel anyway, because it's cheaper at the current rate. paymenthash: %s, params: %+v", reqPaymentHashStr, params)
 			}
 
 			channelPoint, err = i.openChannel(req.PaymentHash, destination, incomingAmountMsat, tag)
 			if err != nil {
-				log.Printf("paymentHash: %s, openChannel(%x, %v) err: %v", reqPaymentHashStr, destination, incomingAmountMsat, err)
+				log.Info().Msgf("paymentHash: %s, openChannel(%x, %v) err: %v", reqPaymentHashStr, destination, incomingAmountMsat, err)
 				return common.InterceptResult{
 					Action:      common.INTERCEPT_FAIL_HTLC_WITH_CODE,
 					FailureCode: common.FAILURE_TEMPORARY_CHANNEL_FAILURE,
@@ -230,12 +230,12 @@ func (i *Interceptor) Intercept(req common.InterceptRequest) common.InterceptRes
 		for {
 			chanResult, _ := i.client.GetChannel(destination, *channelPoint)
 			if chanResult != nil {
-				log.Printf("paymentHash: %s, channel opened successfully alias: '%v', confirmed: '%v'", reqPaymentHashStr, chanResult.AliasScid.ToString(), chanResult.ConfirmedScid.ToString())
+				log.Info().Msgf("paymentHash: %s, channel opened successfully alias: '%v', confirmed: '%v'", reqPaymentHashStr, chanResult.AliasScid.ToString(), chanResult.ConfirmedScid.ToString())
 
 				var scid *lightning.ShortChannelID
 				if chanResult.ConfirmedScid == nil {
 					if chanResult.AliasScid == nil {
-						log.Printf("Error: GetChannel: Both confirmed scid and alias scid are nil: %+v", chanResult)
+						log.Info().Msgf("Error: GetChannel: Both confirmed scid and alias scid are nil: %+v", chanResult)
 						<-time.After(1 * time.Second)
 						continue
 					}
@@ -254,7 +254,7 @@ func (i *Interceptor) Intercept(req common.InterceptRequest) common.InterceptRes
 				}})
 				if err != nil {
 					// Don't break here, this is not critical.
-					log.Printf("paymentHash: %s, failed to insert newly opened channel in history store. %v: %v", reqPaymentHashStr, channelPoint.String(), err)
+					log.Info().Msgf("paymentHash: %s, failed to insert newly opened channel in history store. %v: %v", reqPaymentHashStr, channelPoint.String(), err)
 				}
 
 				err = i.historyStore.AddOpenChannelHtlc(context.TODO(), &history.OpenChannelHtlc{
@@ -268,7 +268,7 @@ func (i *Interceptor) Intercept(req common.InterceptRequest) common.InterceptRes
 				})
 				if err != nil {
 					// Don't break here, this is not critical.
-					log.Printf(
+					log.Info().Msgf(
 						"paymentHash: %s, failed to insert htlc used for channel open in history store: channel: %v,"+
 							" original amount: %v, forward amount: %v, error: %v",
 						reqPaymentHashStr,
@@ -290,15 +290,15 @@ func (i *Interceptor) Intercept(req common.InterceptRequest) common.InterceptRes
 				}, nil
 			}
 
-			log.Printf("paymentHash: %s, waiting for channel to get opened... %x", reqPaymentHashStr, destination)
+			log.Info().Msgf("paymentHash: %s, waiting for channel to get opened... %x", reqPaymentHashStr, destination)
 			if time.Now().After(deadline) {
-				log.Printf("paymentHash: %s, Stop retrying getChannel(%v, %v)", reqPaymentHashStr, destination, channelPoint.String())
+				log.Info().Msgf("paymentHash: %s, Stop retrying getChannel(%v, %v)", reqPaymentHashStr, destination, channelPoint.String())
 				break
 			}
 			<-time.After(1 * time.Second)
 		}
 
-		log.Printf("paymentHash: %s, Error: Channel failed to open... timed out. ", reqPaymentHashStr)
+		log.Info().Msgf("paymentHash: %s, Error: Channel failed to open... timed out. ", reqPaymentHashStr)
 		return common.InterceptResult{
 			Action:      common.INTERCEPT_FAIL_HTLC_WITH_CODE,
 			FailureCode: common.FAILURE_TEMPORARY_CHANNEL_FAILURE,
@@ -325,10 +325,10 @@ func (i *Interceptor) notifyAndWait(reqPaymentHashStr string, nextHop []byte, is
 		}
 	}
 
-	log.Printf("paymentHash %s, Notified %x of pending htlc", reqPaymentHashStr, nextHop)
+	log.Info().Msgf("paymentHash %s, Notified %x of pending htlc", reqPaymentHashStr, nextHop)
 	d, err := time.ParseDuration(i.config.NotificationTimeout)
 	if err != nil {
-		log.Printf("WARN: No NotificationTimeout set. Using default 1m")
+		log.Info().Msgf("WARN: No NotificationTimeout set. Using default 1m")
 		d = time.Minute
 	}
 	timeout := time.Now().Add(d)
@@ -339,7 +339,7 @@ func (i *Interceptor) notifyAndWait(reqPaymentHashStr string, nextHop []byte, is
 	// If there's an error waiting, resume the htlc. It will
 	// probably fail with UNKNOWN_NEXT_PEER.
 	if err != nil {
-		log.Printf(
+		log.Info().Msgf(
 			"paymentHash %s, waiting for peer %x to come online failed with %v",
 			reqPaymentHashStr,
 			nextHop,
@@ -350,7 +350,7 @@ func (i *Interceptor) notifyAndWait(reqPaymentHashStr string, nextHop []byte, is
 		}
 	}
 
-	log.Printf("paymentHash %s, Peer %x is back online. Continue htlc.", reqPaymentHashStr, nextHop)
+	log.Info().Msgf("paymentHash %s, Peer %x is back online. Continue htlc.", reqPaymentHashStr, nextHop)
 	// At this point we know a few things.
 	// - This is either a channel partner or a registered payment
 	// - they were offline
@@ -362,7 +362,7 @@ func (i *Interceptor) notifyAndWait(reqPaymentHashStr string, nextHop []byte, is
 	if !isRegistered {
 		err = i.client.WaitChannelActive(nextHop, timeout)
 		if err != nil {
-			log.Printf(
+			log.Info().Msgf(
 				"paymentHash %s, waiting for channel with %x to become active failed with %v",
 				reqPaymentHashStr,
 				nextHop,
@@ -388,13 +388,13 @@ func (i *Interceptor) openChannel(paymentHash, destination []byte, incomingAmoun
 		i.feeStrategy,
 	)
 	if err != nil || fee == nil {
-		log.Printf("Error estimating chain fee, fallback to target conf: %v", err)
+		log.Info().Msgf("Error estimating chain fee, fallback to target conf: %v", err)
 		fee = &chain.FeeEstimation{
 			TargetConf: &i.config.TargetConf,
 		}
 	}
 
-	log.Printf(
+	log.Info().Msgf(
 		"Opening zero conf channel. Paymenthash: %x, Destination: %x, capacity: %v, fee: %s",
 		paymentHash,
 		destination,
@@ -413,7 +413,7 @@ func (i *Interceptor) openChannel(paymentHash, destination []byte, incomingAmoun
 		},
 	})
 	if err != nil {
-		log.Printf("paymenthash %x, client.OpenChannelSync(%x, %v) error: %v", paymentHash, destination, capacity, err)
+		log.Info().Msgf("paymenthash %x, client.OpenChannelSync(%x, %v) error: %v", paymentHash, destination, capacity, err)
 		return nil, err
 	}
 	sendOpenChannelDiscordNotification(

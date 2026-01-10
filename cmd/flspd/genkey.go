@@ -9,7 +9,7 @@ import (
 
 var genKeyCommand = cli.Command{
 	Name:   "genkey",
-	Usage:  "Generate an lspd private key for the LSPD_PRIVATE_KEY environment variable.",
+	Usage:  "Generate an flspd private key for the FLSPD_PRIVATE_KEY environment variable.",
 	Action: genKey,
 }
 
@@ -18,6 +18,6 @@ func genKey(cliCtx *cli.Context) error {
 	if err != nil {
 		return fmt.Errorf("btcec.NewPrivateKey() error: %w", err)
 	}
-	fmt.Printf("LSPD_PRIVATE_KEY=\"%x\"\n", p.Serialize())
+	fmt.Printf("FLSPD_PRIVATE_KEY=\"%x\"\n", p.Serialize())
 	return nil
 }

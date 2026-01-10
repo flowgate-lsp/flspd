@@ -30,7 +30,6 @@ var (
 
 type InterceptRequest struct {
 	// Identifier that uniquely identifies this htlc.
-	// For cln, that's hash of the next onion or the shared secret.
 	Identifier         string
 	Scid               lightning.ShortChannelID
 	PaymentHash        []byte

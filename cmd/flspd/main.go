@@ -1,8 +1,9 @@
 package main
 
 import (
-	"log"
 	"os"
+
+	"github.com/rs/zerolog/log"
 
 	"github.com/flowgate-lsp/flspd/build"
 	"github.com/urfave/cli"
@@ -19,6 +20,6 @@ func main() {
 		migrateCommand,
 	}
 	if err := app.Run(os.Args); err != nil {
-		log.Fatal(err)
+		log.Fatal().Msgf("Failed to run app: %v", err)
 	}
 }

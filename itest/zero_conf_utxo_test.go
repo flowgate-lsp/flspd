@@ -6,7 +6,7 @@ import (
 
 	"github.com/flowgate-lsp/flspd/config"
 	"github.com/flowgate-lsp/flspd/itest/lntest"
-	lspd "github.com/flowgate-lsp/flspd/rpc"
+	rpc "github.com/flowgate-lsp/flspd/rpc"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -49,11 +49,11 @@ func testOpenZeroConfUtxo(p *testParams) {
 		})
 	p.LspClient().SetHtlcAcceptor(innerAmountMsat)
 
-	log.Print("Connecting bob to lspd")
+	log.Print("Connecting bob to flspd")
 	p.LspClient().Node().ConnectPeer(lsp.LightningNode())
 
 	log.Printf("Registering payment with lsp")
-	RegisterPayment(lsp, &lspd.PaymentInformation{
+	RegisterPayment(lsp, &rpc.PaymentInformation{
 		PaymentHash:        innerInvoice.paymentHash,
 		PaymentSecret:      innerInvoice.paymentSecret,
 		Destination:        p.LspClient().Node().NodeId(),

@@ -10,7 +10,7 @@ import (
 	"github.com/flowgate-lsp/flspd/config"
 	"github.com/flowgate-lsp/flspd/itest/lntest"
 	"github.com/flowgate-lsp/flspd/notifications"
-	lspd "github.com/flowgate-lsp/flspd/rpc"
+	rpc "github.com/flowgate-lsp/flspd/rpc"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
@@ -24,7 +24,7 @@ type LndLspNode struct {
 }
 
 type lndLspNodeRuntime struct {
-	rpc             lspd.ChannelOpenerClient
+	rpc             rpc.ChannelOpenerClient
 	notificationRpc notifications.NotificationsClient
 	cleanups        []*lntest.Cleanup
 }
@@ -88,7 +88,7 @@ func (c *LndLspNode) Start() {
 		Fn:   conn.Close,
 	})
 
-	client := lspd.NewChannelOpenerClient(conn)
+	client := rpc.NewChannelOpenerClient(conn)
 	notifyClient := notifications.NewNotificationsClient(conn)
 	c.runtime = &lndLspNodeRuntime{
 		rpc:             client,
@@ -122,7 +122,7 @@ func (c *LndLspNode) EciesPublicKey() *ecies.PublicKey {
 	return c.lspBase.eciesPubkey
 }
 
-func (c *LndLspNode) Rpc() lspd.ChannelOpenerClient {
+func (c *LndLspNode) Rpc() rpc.ChannelOpenerClient {
 	return c.runtime.rpc
 }
 

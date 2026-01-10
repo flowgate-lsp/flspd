@@ -4,18 +4,18 @@ type NodeConfig struct {
 	// Name of the LSP. If empty, the node's alias will be taken instead. The
 	// name is returned in the ChannelInformation api endpoint as a friendly
 	// name.
-	Name string `json:name,omitempty`
+	Name string `json:"name,omitempty"`
 
 	// The public key of the lightning node. If empty, the node's pubkey will be
 	// taken instead. The pubkey is returned in the ChannelInformation api
 	// endpoint, s
-	NodePubkey string `json:nodePubkey,omitempty`
+	NodePubkey string `json:"nodePubkey,omitempty"`
 
 	// Hex encoded private key of the LSP. This is used to decrypt traffic from
 	// clients. Note this is not the private key of the node.
-	LspdPrivateKey string `json:"lspdPrivateKey"`
+	FlspdPrivateKey string `json:"flspdPrivateKey"`
 
-	// Tokens used to authenticate to lspd. These tokens must be unique for each
+	// Tokens used to authenticate to flspd. These tokens must be unique for each
 	// configured node, so it's obvious which node an rpc call is meant for.
 	Tokens []string `json:"tokens"`
 
@@ -68,7 +68,7 @@ type NodeConfig struct {
 	AdditionalChannelCapacity int64 `json:"additionalChannelCapacity,string"`
 
 	// The channel can be closed if not used this duration in seconds. This is
-	// not enforced by lspd, but gives an indication to clients.
+	// not enforced by flspd, but gives an indication to clients.
 	// This field is for legacy support for clients that don't support
 	// OpeningFeeParams.
 	MaxInactiveDuration uint64 `json:"maxInactiveDuration,string"`
@@ -79,9 +79,6 @@ type NodeConfig struct {
 
 	// Set this field to connect to an LND node.
 	Lnd *LndConfig `json:"lnd,omitempty"`
-
-	// Set this field to connect to a CLN node.
-	Cln *ClnConfig `json:"cln,omitempty"`
 }
 
 type LndConfig struct {
@@ -93,24 +90,4 @@ type LndConfig struct {
 
 	// macaroon to use.
 	Macaroon string `json:"macaroon"`
-}
-
-type ClnConfig struct {
-	// The address to the cln htlc acceptor grpc api shipped with lspd.
-	PluginAddress string `json:"pluginAddress"`
-
-	// The address to the cln grpc api.
-	GrpcAddress string `json:"grpcAddress"`
-
-	// CA cert for grpc access. Can either be a file path or the cert contents.
-	// Typically stored in `lightningd-dir/mainnet/ca.pem`.
-	CaCert string `json:"caCert"`
-
-	// Client cert for grpc access. Can either be a file path or the cert
-	// contents. Typically stored in `lightningd-dir/{network}/client.pem`.
-	ClientCert string `json:"clientCert"`
-
-	// Client key for grpc access. Can either be a file path or the key
-	// contents. Typically stored in `lightningd-dir/{network}/client-key.pem`.
-	ClientKey string `json:"clientKey"`
 }

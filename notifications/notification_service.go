@@ -5,10 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"io"
-	"log"
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/rs/zerolog/log"
 )
 
 var minNotificationInterval time.Duration = time.Second * 30
@@ -66,11 +67,11 @@ func (s *NotificationService) Notify(
 
 	registrations, err := s.store.GetRegistrations(context.Background(), pubkey)
 	if err != nil {
-		log.Printf("Failed to get notification registrations for %s: %v", pubkey, err)
+		log.Info().Msgf("Failed to get notification registrations for %s: %v", pubkey, err)
 		return false, err
 	}
 
-	log.Printf("Notifying %d registrations for %s", len(registrations), pubkey)
+	log.Info().Msgf("Notifying %d registrations for %s", len(registrations), pubkey)
 
 	req := &PaymentReceivedPayload{
 		Template: "payment_received",
@@ -102,7 +103,7 @@ func (s *NotificationService) Notify(
 	wg.Wait()
 	cancel()
 
-	log.Printf("finished notifying %s with result: %v", pubkey, notified)
+	log.Info().Msgf("finished notifying %s with result: %v", pubkey, notified)
 	if notified {
 		s.mtx.Lock()
 		s.recentNotifications[paymentIdentifier(pubkey, paymenthash)] = time.Now()
@@ -115,13 +116,13 @@ func (s *NotificationService) notifyOnce(ctx context.Context, req *PaymentReceiv
 	var buf bytes.Buffer
 	err := json.NewEncoder(&buf).Encode(req)
 	if err != nil {
-		log.Printf("Failed to encode payment notification for %s: %v", pubkey, err)
+		log.Info().Msgf("Failed to encode payment notification for %s: %v", pubkey, err)
 		return false
 	}
 
 	resp, err := http.DefaultClient.Post(url, "application/json", &buf)
 	if err != nil {
-		log.Printf("Failed to send payment notification for %s to %s: %v", pubkey, url, err)
+		log.Info().Msgf("Failed to send payment notification for %s to %s: %v", pubkey, url, err)
 		// TODO: Remove subscription?
 		return false
 	}
@@ -130,7 +131,7 @@ func (s *NotificationService) notifyOnce(ctx context.Context, req *PaymentReceiv
 		buf := make([]byte, 1000)
 		bytesRead, _ := io.ReadFull(resp.Body, buf)
 		respBody := buf[:bytesRead]
-		log.Printf("Got non successfull status code (%s) for payment notification for %s to %s: %s", resp.Status, pubkey, url, respBody)
+		log.Info().Msgf("Got non successfull status code (%s) for payment notification for %s to %s: %s", resp.Status, pubkey, url, respBody)
 		// TODO: Remove subscription?
 		return false
 	}

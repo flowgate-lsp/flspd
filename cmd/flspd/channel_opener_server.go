@@ -6,15 +6,16 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"log"
 	"time"
+
+	"github.com/rs/zerolog/log"
 
 	ecies "github.com/ecies/go/v2"
 	btcec "github.com/flokiorg/go-flokicoin/crypto"
 	"github.com/flowgate-lsp/flspd/common"
 	"github.com/flowgate-lsp/flspd/format"
 	"github.com/flowgate-lsp/flspd/interceptor"
-	lspdrpc "github.com/flowgate-lsp/flspd/rpc"
+	rpc "github.com/flowgate-lsp/flspd/rpc"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/flokiorg/flnd/lnwire"
@@ -22,7 +23,7 @@ import (
 )
 
 type channelOpenerServer struct {
-	lspdrpc.ChannelOpenerServer
+	rpc.ChannelOpenerServer
 	store          interceptor.InterceptStore
 	openingService common.OpeningService
 }
@@ -37,8 +38,8 @@ func NewChannelOpenerServer(
 	}
 }
 
-func (s *channelOpenerServer) ChannelInformation(ctx context.Context, in *lspdrpc.ChannelInformationRequest) (*lspdrpc.ChannelInformationReply, error) {
-	node, token, err := lspdrpc.GetNode(ctx)
+func (s *channelOpenerServer) ChannelInformation(ctx context.Context, in *rpc.ChannelInformationRequest) (*rpc.ChannelInformationReply, error) {
+	node, token, err := rpc.GetNode(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -48,9 +49,9 @@ func (s *channelOpenerServer) ChannelInformation(ctx context.Context, in *lspdrp
 		return nil, err
 	}
 
-	var menu []*lspdrpc.OpeningFeeParams
+	var menu []*rpc.OpeningFeeParams
 	for _, p := range params {
-		menu = append(menu, &lspdrpc.OpeningFeeParams{
+		menu = append(menu, &rpc.OpeningFeeParams{
 			MinMsat:              p.MinFeeMsat,
 			Proportional:         p.Proportional,
 			ValidUntil:           p.ValidUntil,
@@ -60,7 +61,7 @@ func (s *channelOpenerServer) ChannelInformation(ctx context.Context, in *lspdrp
 		})
 	}
 
-	return &lspdrpc.ChannelInformationReply{
+	return &rpc.ChannelInformationReply{
 		Name:                  node.NodeConfig.Name,
 		Pubkey:                node.NodeConfig.NodePubkey,
 		Host:                  node.NodeConfig.Host,
@@ -80,26 +81,26 @@ func (s *channelOpenerServer) ChannelInformation(ctx context.Context, in *lspdrp
 
 func (s *channelOpenerServer) RegisterPayment(
 	ctx context.Context,
-	in *lspdrpc.RegisterPaymentRequest,
-) (*lspdrpc.RegisterPaymentReply, error) {
-	node, token, err := lspdrpc.GetNode(ctx)
+	in *rpc.RegisterPaymentRequest,
+) (*rpc.RegisterPaymentReply, error) {
+	node, token, err := rpc.GetNode(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	data, err := ecies.Decrypt(node.EciesPrivateKey, in.Blob)
 	if err != nil {
-		log.Printf("ecies.Decrypt(%x) error: %v", in.Blob, err)
+		log.Info().Msgf("ecies.Decrypt(%x) error: %v", in.Blob, err)
 		return nil, fmt.Errorf("ecies.Decrypt(%x) error: %w", in.Blob, err)
 	}
 
-	var pi lspdrpc.PaymentInformation
+	var pi rpc.PaymentInformation
 	err = proto.Unmarshal(data, &pi)
 	if err != nil {
-		log.Printf("proto.Unmarshal(%x) error: %v", data, err)
+		log.Info().Msgf("proto.Unmarshal(%x) error: %v", data, err)
 		return nil, fmt.Errorf("proto.Unmarshal(%x) error: %w", data, err)
 	}
-	log.Printf("RegisterPayment - Destination: %x, pi.PaymentHash: %x, pi.PaymentSecret: %x, pi.IncomingAmountMsat: %v, pi.OutgoingAmountMsat: %v, pi.Tag: %v",
+	log.Info().Msgf("RegisterPayment - Destination: %x, pi.PaymentHash: %x, pi.PaymentSecret: %x, pi.IncomingAmountMsat: %v, pi.OutgoingAmountMsat: %v, pi.Tag: %v",
 		pi.Destination, pi.PaymentHash, pi.PaymentSecret, pi.IncomingAmountMsat, pi.OutgoingAmountMsat, pi.Tag)
 
 	if len(pi.Tag) > 1000 {
@@ -133,8 +134,8 @@ func (s *channelOpenerServer) RegisterPayment(
 		}
 	} else {
 		tokenHash := sha256.Sum256([]byte(token))
-		log.Printf("DEPRECATED: RegisterPayment with deprecated fee mechanism. sha256 hash of token used: %x", tokenHash)
-		pi.OpeningFeeParams = &lspdrpc.OpeningFeeParams{
+		log.Info().Msgf("DEPRECATED: RegisterPayment with deprecated fee mechanism. sha256 hash of token used: %x", tokenHash)
+		pi.OpeningFeeParams = &rpc.OpeningFeeParams{
 			MinMsat:              uint64(node.NodeConfig.ChannelMinimumFeeMsat),
 			Proportional:         uint32(node.NodeConfig.ChannelFeePermyriad * 100),
 			ValidUntil:           time.Now().UTC().Add(time.Duration(time.Hour * 24)).Format(format.TIME_FORMAT),
@@ -145,7 +146,7 @@ func (s *channelOpenerServer) RegisterPayment(
 
 	err = checkPayment(pi.OpeningFeeParams, pi.IncomingAmountMsat, pi.OutgoingAmountMsat)
 	if err != nil {
-		log.Printf("checkPayment(%v, %v) error: %v", pi.IncomingAmountMsat, pi.OutgoingAmountMsat, err)
+		log.Info().Msgf("checkPayment(%v, %v) error: %v", pi.IncomingAmountMsat, pi.OutgoingAmountMsat, err)
 		return nil, fmt.Errorf("checkPayment(%v, %v) error: %v", pi.IncomingAmountMsat, pi.OutgoingAmountMsat, err)
 	}
 	params := &common.OpeningFeeParams{
@@ -158,27 +159,27 @@ func (s *channelOpenerServer) RegisterPayment(
 	}
 	err = s.store.RegisterPayment(token, params, pi.Destination, pi.PaymentHash, pi.PaymentSecret, pi.IncomingAmountMsat, pi.OutgoingAmountMsat, pi.Tag)
 	if err != nil {
-		log.Printf("RegisterPayment() error: %v", err)
+		log.Info().Msgf("RegisterPayment() error: %v", err)
 		return nil, fmt.Errorf("RegisterPayment() error: %w", err)
 	}
-	return &lspdrpc.RegisterPaymentReply{}, nil
+	return &rpc.RegisterPaymentReply{}, nil
 }
 
-func getSignedEncryptedData(n *common.Node, in *lspdrpc.Encrypted) (string, []byte, error) {
+func getSignedEncryptedData(n *common.Node, in *rpc.Encrypted) (string, []byte, error) {
 	signedBlob, err := ecies.Decrypt(n.EciesPrivateKey, in.Data)
 	if err != nil {
-		log.Printf("ecies.Decrypt(%x) error: %v", in.Data, err)
+		log.Info().Msgf("ecies.Decrypt(%x) error: %v", in.Data, err)
 		return "", nil, fmt.Errorf("ecies.Decrypt(%x) error: %w", in.Data, err)
 	}
-	var signed lspdrpc.Signed
+	var signed rpc.Signed
 	err = proto.Unmarshal(signedBlob, &signed)
 	if err != nil {
-		log.Printf("proto.Unmarshal(%x) error: %v", signedBlob, err)
+		log.Info().Msgf("proto.Unmarshal(%x) error: %v", signedBlob, err)
 		return "", nil, fmt.Errorf("proto.Unmarshal(%x) error: %w", signedBlob, err)
 	}
 	pubkey, err := btcec.ParsePubKey(signed.Pubkey)
 	if err != nil {
-		log.Printf("unable to parse pubkey: %v", err)
+		log.Info().Msgf("unable to parse pubkey: %v", err)
 		return "", nil, fmt.Errorf("unable to parse pubkey: %w", err)
 	}
 	wireSig, err := lnwire.NewSigFromECDSARawSignature(signed.Signature)
@@ -198,49 +199,49 @@ func getSignedEncryptedData(n *common.Node, in *lspdrpc.Encrypted) (string, []by
 	return hex.EncodeToString(signed.Pubkey), signed.Data, nil
 }
 
-func (s *channelOpenerServer) CheckChannels(ctx context.Context, in *lspdrpc.Encrypted) (*lspdrpc.Encrypted, error) {
-	node, _, err := lspdrpc.GetNode(ctx)
+func (s *channelOpenerServer) CheckChannels(ctx context.Context, in *rpc.Encrypted) (*rpc.Encrypted, error) {
+	node, _, err := rpc.GetNode(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	nodeID, data, err := getSignedEncryptedData(node, in)
 	if err != nil {
-		log.Printf("getSignedEncryptedData error: %v", err)
+		log.Info().Msgf("getSignedEncryptedData error: %v", err)
 		return nil, fmt.Errorf("getSignedEncryptedData error: %v", err)
 	}
-	var checkChannelsRequest lspdrpc.CheckChannelsRequest
+	var checkChannelsRequest rpc.CheckChannelsRequest
 	err = proto.Unmarshal(data, &checkChannelsRequest)
 	if err != nil {
-		log.Printf("proto.Unmarshal(%x) error: %v", data, err)
+		log.Info().Msgf("proto.Unmarshal(%x) error: %v", data, err)
 		return nil, fmt.Errorf("proto.Unmarshal(%x) error: %w", data, err)
 	}
 	closedChannels, err := node.Client.GetClosedChannels(nodeID, checkChannelsRequest.WaitingCloseChannels)
 	if err != nil {
-		log.Printf("GetClosedChannels(%v) error: %v", checkChannelsRequest.FakeChannels, err)
+		log.Info().Msgf("GetClosedChannels(%v) error: %v", checkChannelsRequest.FakeChannels, err)
 		return nil, fmt.Errorf("GetClosedChannels(%v) error: %w", checkChannelsRequest.FakeChannels, err)
 	}
-	checkChannelsReply := lspdrpc.CheckChannelsReply{
+	checkChannelsReply := rpc.CheckChannelsReply{
 		NotFakeChannels: make(map[string]uint64),
 		ClosedChannels:  closedChannels,
 	}
 	dataReply, err := proto.Marshal(&checkChannelsReply)
 	if err != nil {
-		log.Printf("proto.Marshall() error: %v", err)
+		log.Info().Msgf("proto.Marshall() error: %v", err)
 		return nil, fmt.Errorf("proto.Marshal() error: %w", err)
 	}
 
 	var encrypted []byte
 	encrypted, err = ecies.Encrypt(node.EciesPublicKey, dataReply)
 	if err != nil {
-		log.Printf("ecies.Encrypt() error: %v", err)
+		log.Info().Msgf("ecies.Encrypt() error: %v", err)
 		return nil, fmt.Errorf("ecies.Encrypt() error: %w", err)
 	}
 
-	return &lspdrpc.Encrypted{Data: encrypted}, nil
+	return &rpc.Encrypted{Data: encrypted}, nil
 }
 
-func checkPayment(params *lspdrpc.OpeningFeeParams, incomingAmountMsat, outgoingAmountMsat int64) error {
+func checkPayment(params *rpc.OpeningFeeParams, incomingAmountMsat, outgoingAmountMsat int64) error {
 	fees := incomingAmountMsat * int64(params.Proportional) / 1_000_000 / 1_000 * 1_000
 	if fees < int64(params.MinMsat) {
 		fees = int64(params.MinMsat)

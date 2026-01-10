@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/flowgate-lsp/flspd/itest/lntest"
-	lspd "github.com/flowgate-lsp/flspd/rpc"
+	rpc "github.com/flowgate-lsp/flspd/rpc"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -30,7 +30,7 @@ func TestConfigParameters(t *testing.T) {
 
 	info, err := lsp.Rpc().ChannelInformation(
 		h.Ctx,
-		&lspd.ChannelInformationRequest{},
+		&rpc.ChannelInformationRequest{},
 	)
 
 	if err != nil {

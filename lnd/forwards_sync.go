@@ -2,9 +2,10 @@ package lnd
 
 import (
 	"context"
-	"log"
 	"strconv"
 	"time"
+
+	"github.com/rs/zerolog/log"
 
 	"github.com/flokiorg/flnd/lnrpc"
 	"github.com/flowgate-lsp/flspd/history"
@@ -50,7 +51,7 @@ func (s *ForwardSync) ForwardsSynchronize(ctx context.Context) {
 func (s *ForwardSync) forwardsSynchronizeOnce(ctx context.Context) {
 	last, err := s.store.FetchLndForwardOffset(ctx, s.nodeid)
 	if err != nil {
-		log.Printf("forwardsSynchronizeOnce(%x) - FetchLndForwardOffset err: %v", s.nodeid, err)
+		log.Info().Msgf("forwardsSynchronizeOnce(%x) - FetchLndForwardOffset err: %v", s.nodeid, err)
 		return
 	}
 
@@ -65,11 +66,11 @@ func (s *ForwardSync) forwardsSynchronizeOnce(ctx context.Context) {
 			NumMaxEvents: maxEvents,
 		})
 		if err != nil {
-			log.Printf("forwardsSynchronizeOnce(%x) - ForwardingHistory error: %v", s.nodeid, err)
+			log.Info().Msgf("forwardsSynchronizeOnce(%x) - ForwardingHistory error: %v", s.nodeid, err)
 			return
 		}
 
-		log.Printf("forwardsSynchronizeOnce(%x) - startTime: %v, Events: %v", s.nodeid, startTime, len(forwardHistory.ForwardingEvents))
+		log.Info().Msgf("forwardsSynchronizeOnce(%x) - startTime: %v, Events: %v", s.nodeid, startTime, len(forwardHistory.ForwardingEvents))
 		if len(forwardHistory.ForwardingEvents) == 0 {
 			break
 		}
@@ -88,7 +89,7 @@ func (s *ForwardSync) forwardsSynchronizeOnce(ctx context.Context) {
 		}
 		err = s.store.InsertForwards(ctx, forwards, s.nodeid)
 		if err != nil {
-			log.Printf("forwardsSynchronizeOnce(%x) - store.InsertForwards() error: %v", s.nodeid, err)
+			log.Info().Msgf("forwardsSynchronizeOnce(%x) - store.InsertForwards() error: %v", s.nodeid, err)
 			return
 		}
 

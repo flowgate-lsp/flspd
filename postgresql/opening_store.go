@@ -3,11 +3,11 @@ package postgresql
 import (
 	"context"
 	"encoding/json"
-	"log"
 	"time"
 
 	"github.com/flowgate-lsp/flspd/common"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/rs/zerolog/log"
 )
 
 type extendedParams struct {
@@ -27,7 +27,7 @@ func (s *PostgresOpeningStore) GetFeeParamsSettings(token string) ([]*common.Ope
 	rows, err := s.pool.Query(context.Background(),
 		`SELECT validity, params FROM new_channel_params WHERE token=$1 AND validity>0`, token)
 	if err != nil {
-		log.Printf("GetFeeParamsSettings(%v) error: %v", token, err)
+		log.Info().Msgf("GetFeeParamsSettings(%v) error: %v", token, err)
 		return nil, err
 	}
 	defer rows.Close()
@@ -44,7 +44,7 @@ func (s *PostgresOpeningStore) GetFeeParamsSettings(token string) ([]*common.Ope
 		var params *common.OpeningFeeParams
 		err := json.Unmarshal([]byte(param), &params)
 		if err != nil {
-			log.Printf("Failed to unmarshal fee param '%v': %v", param, err)
+			log.Info().Msgf("Failed to unmarshal fee param '%v': %v", param, err)
 			return nil, err
 		}
 

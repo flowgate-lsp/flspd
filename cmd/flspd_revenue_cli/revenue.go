@@ -6,10 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"path/filepath"
 	"sort"
+
+	"github.com/rs/zerolog/log"
 
 	"github.com/flowgate-lsp/flspd/postgresql"
 	"github.com/urfave/cli"
@@ -137,7 +138,7 @@ func revenue(ctx *cli.Context) error {
 		return fmt.Errorf("failed to marshal json: %w", err)
 	}
 
-	log.Println(j)
+	log.Info().Msg(string(j))
 	return nil
 }
 

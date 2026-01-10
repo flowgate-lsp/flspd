@@ -5,10 +5,11 @@ import (
 	"crypto/x509"
 	"encoding/hex"
 	"fmt"
-	"log"
 	"math"
 	"sync"
 	"time"
+
+	"github.com/rs/zerolog/log"
 
 	"github.com/flokiorg/flnd/lnrpc"
 	"github.com/flokiorg/flnd/lnrpc/chainrpc"
@@ -57,7 +58,7 @@ func NewLndClient(conf *config.LndConfig) (*LndClient, error) {
 		grpc.WithPerRPCCredentials(macCred),
 	)
 	if err != nil {
-		log.Fatalf("Failed to connect to LND gRPC: %v", err)
+		log.Fatal().Msgf("Failed to connect to LND gRPC: %v", err)
 	}
 
 	client := lnrpc.NewLightningClient(conn)
@@ -99,7 +100,7 @@ func (c *LndClient) listenPeerEvents() {
 			&lnrpc.PeerEventSubscription{},
 		)
 		if err != nil {
-			log.Printf("SubscribePeerEvents: %v", err)
+			log.Info().Msgf("SubscribePeerEvents: %v", err)
 			<-time.After(time.Second)
 			continue
 		}
@@ -113,11 +114,11 @@ func (c *LndClient) listenPeerEvents() {
 			if err != nil {
 				status, ok := status.FromError(err)
 				if ok && status.Code() == codes.Canceled {
-					log.Printf("listenPeerEvents: Got code canceled. Break.")
+					log.Info().Msgf("listenPeerEvents: Got code canceled. Break.")
 					break
 				}
 
-				log.Printf("unexpected error in listenPeerEvents: %v", err)
+				log.Info().Msgf("unexpected error in listenPeerEvents: %v", err)
 				break
 			}
 
@@ -151,7 +152,7 @@ func (c *LndClient) listenChannelEvents() {
 			&lnrpc.ChannelEventSubscription{},
 		)
 		if err != nil {
-			log.Printf("listenChannelEvents: SubscribeChannelEvents: %v", err)
+			log.Info().Msgf("listenChannelEvents: SubscribeChannelEvents: %v", err)
 			<-time.After(time.Second)
 			continue
 		}
@@ -165,11 +166,11 @@ func (c *LndClient) listenChannelEvents() {
 			if err != nil {
 				status, ok := status.FromError(err)
 				if ok && status.Code() == codes.Canceled {
-					log.Printf("listenChannelEvents: Got code canceled. Break.")
+					log.Info().Msgf("listenChannelEvents: Got code canceled. Break.")
 					break
 				}
 
-				log.Printf("unexpected error in listenChannelEvents: %v", err)
+				log.Info().Msgf("unexpected error in listenChannelEvents: %v", err)
 				break
 			}
 
@@ -180,7 +181,7 @@ func (c *LndClient) listenChannelEvents() {
 			ch := msg.GetActiveChannel()
 			point, err := extractChannelPoint(ch)
 			if err != nil {
-				log.Printf("listenChannelEvents: Failed to extract channel point %+v: %v", ch, err)
+				log.Info().Msgf("listenChannelEvents: Failed to extract channel point %+v: %v", ch, err)
 				continue
 			}
 
@@ -215,7 +216,7 @@ func extractChannelPoint(cp *lnrpc.ChannelPoint) (string, error) {
 func (c *LndClient) GetInfo() (*lightning.GetInfoResult, error) {
 	info, err := c.client.GetInfo(context.Background(), &lnrpc.GetInfoRequest{})
 	if err != nil {
-		log.Printf("LND: client.GetInfo() error: %v", err)
+		log.Info().Msgf("LND: client.GetInfo() error: %v", err)
 		return nil, err
 	}
 
@@ -230,18 +231,18 @@ func (c *LndClient) IsConnected(destination []byte) (bool, error) {
 
 	resp, err := c.client.ListPeers(context.Background(), &lnrpc.ListPeersRequest{})
 	if err != nil {
-		log.Printf("LND: client.ListPeers() error: %v", err)
+		log.Info().Msgf("LND: client.ListPeers() error: %v", err)
 		return false, fmt.Errorf("LND: client.ListPeers() error: %w", err)
 	}
 
 	for _, peer := range resp.Peers {
 		if peer.PubKey == pubkey {
-			log.Printf("LND: destination online: %x", destination)
+			log.Info().Msgf("LND: destination online: %x", destination)
 			return true, nil
 		}
 	}
 
-	log.Printf("LND: destination offline: %x", destination)
+	log.Info().Msgf("LND: destination offline: %x", destination)
 	return false, nil
 }
 
@@ -283,13 +284,13 @@ func (c *LndClient) OpenChannel(req *lightning.OpenChannelRequest) (*wire.OutPoi
 
 	channelPoint, err := c.client.OpenChannelSync(context.Background(), lnReq)
 	if err != nil {
-		log.Printf("LND: client.OpenChannelSync(%x, %v) error: %v", req.Destination, req.CapacitySat, err)
+		log.Info().Msgf("LND: client.OpenChannelSync(%x, %v) error: %v", req.Destination, req.CapacitySat, err)
 		return nil, fmt.Errorf("LND: OpenChannel() error: %w", err)
 	}
 
 	result, err := lightning.NewOutPoint(channelPoint.GetFundingTxidBytes(), channelPoint.OutputIndex)
 	if err != nil {
-		log.Printf("LND: OpenChannel returned invalid outpoint. error: %v", err)
+		log.Info().Msgf("LND: OpenChannel returned invalid outpoint. error: %v", err)
 		return nil, err
 	}
 
@@ -299,7 +300,7 @@ func (c *LndClient) OpenChannel(req *lightning.OpenChannelRequest) (*wire.OutPoi
 func (c *LndClient) GetChannel(peerID []byte, channelPoint wire.OutPoint) (*lightning.GetChannelResult, error) {
 	r, err := c.client.ListChannels(context.Background(), &lnrpc.ListChannelsRequest{Peer: peerID})
 	if err != nil {
-		log.Printf("client.ListChannels(%x) error: %v", peerID, err)
+		log.Info().Msgf("client.ListChannels(%x) error: %v", peerID, err)
 		return nil, err
 	}
 
@@ -309,7 +310,7 @@ func (c *LndClient) GetChannel(peerID []byte, channelPoint wire.OutPoint) (*ligh
 	}
 
 	for _, c := range r.Channels {
-		log.Printf("getChannel(%x): %v", peerID, c.ChanId)
+		log.Info().Msgf("getChannel(%x): %v", peerID, c.ChanId)
 		if c.ChannelPoint == channelPointStr && c.Active {
 			aliasScid, confirmedScid := mapScidsFromChannel(c)
 			return &lightning.GetChannelResult{
@@ -319,7 +320,7 @@ func (c *LndClient) GetChannel(peerID []byte, channelPoint wire.OutPoint) (*ligh
 			}, nil
 		}
 	}
-	log.Printf("No channel found: getChannel(%x)", peerID)
+	log.Info().Msgf("No channel found: getChannel(%x)", peerID)
 	return nil, fmt.Errorf("no channel found")
 }
 
@@ -530,13 +531,13 @@ func (c *LndClient) ListChannels() ([]*lightning.Channel, error) {
 	for i, c := range channels.Channels {
 		peerId, err := hex.DecodeString(c.RemotePubkey)
 		if err != nil {
-			log.Printf("hex.DecodeString in LndClient.ListChannels error: %v", err)
+			log.Info().Msgf("hex.DecodeString in LndClient.ListChannels error: %v", err)
 			continue
 		}
 		alias, confirmedScid := mapScidsFromChannel(c)
 		outpoint, err := lightning.NewOutPointFromString(c.ChannelPoint)
 		if err != nil {
-			log.Printf("lightning.NewOutPointFromString(%s) in LndClient.ListChannels error: %v", c.ChannelPoint, err)
+			log.Info().Msgf("lightning.NewOutPointFromString(%s) in LndClient.ListChannels error: %v", c.ChannelPoint, err)
 		}
 
 		result[i] = &lightning.Channel{
@@ -550,13 +551,13 @@ func (c *LndClient) ListChannels() ([]*lightning.Channel, error) {
 	for _, c := range pendingChannels.PendingOpenChannels {
 		peerId, err := hex.DecodeString(c.Channel.RemoteNodePub)
 		if err != nil {
-			log.Printf("hex.DecodeString in LndClient.ListChannels error: %v", err)
+			log.Info().Msgf("hex.DecodeString in LndClient.ListChannels error: %v", err)
 			continue
 		}
 
 		outpoint, err := lightning.NewOutPointFromString(c.Channel.ChannelPoint)
 		if err != nil {
-			log.Printf("lightning.NewOutPointFromString(%s) in LndClient.ListChannels error: %v", c.Channel.ChannelPoint, err)
+			log.Info().Msgf("lightning.NewOutPointFromString(%s) in LndClient.ListChannels error: %v", c.Channel.ChannelPoint, err)
 		}
 		result = append(result, &lightning.Channel{
 			AliasScid:     nil,
