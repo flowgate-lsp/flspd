@@ -51,15 +51,11 @@ jobs:
           VERSION=${{ needs.prepare.outputs.version }}
           LDFLAGS="-s -w -X github.com/flowgate-lsp/flspd/build.tag=${VERSION}"
           
-          mkdir -p dist
-          go build -trimpath -ldflags "$LDFLAGS" -o dist/flspd cmd/flspd/main.go cmd/flspd/run.go cmd/flspd/genkey.go cmd/flspd/migrate.go cmd/flspd/grpc_server.go cmd/flspd/channel_opener_server.go 			
-          go build -trimpath -ldflags "$LDFLAGS" -o dist/flspd_revenue_cli cmd/flspd_revenue_cli/main.go cmd/flspd_revenue_cli/revenue.go
           
-          # I realized the standard build is actually `go build ./cmd/flspd`, not listing files individually unless necessary.
-          # The Makefile uses `go build ... $(PKG)/cmd/flspd`. I should stick to that pattern.
-          rm -rf dist/*
+          mkdir -p dist
           go build -trimpath -ldflags "$LDFLAGS" -o dist/flspd ./cmd/flspd
           go build -trimpath -ldflags "$LDFLAGS" -o dist/flspd_revenue_cli ./cmd/flspd_revenue_cli
+
           
           cd dist
           tar -czvf flspd_${{ matrix.goos }}_${{ matrix.goarch }}_${VERSION}.tar.gz flspd flspd_revenue_cli
