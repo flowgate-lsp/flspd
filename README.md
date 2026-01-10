@@ -1,71 +1,66 @@
-# lspd
-lspd is a simple deamon that provides [LSP](https://medium.com/breez-technology/introducing-lightning-service-providers-fe9fb1665d5f) services to Breez clients. 
+# flspd
+flspd is a Flokicoin Liquidity Service Provider (LSP) daemon that provides services to Flowgate/Flokicoin clients.
 
-This is a simple example of an lspd that works with an [lnd](https://github.com/flokiorg/flnd) node or a [cln](https://github.com/ElementsProject/lightning) node.
-
-[Breez SDK](https://github.com/breez/breez-sdk) uses cln lsdp and [Breez mobile](https://github.com/breez/breezmobile) uses lnd lspd.
+It is designed to work with an [flnd](https://github.com/flokiorg/flnd) (Flokicoin LND) node.
 
 ## Deployment
-Installation and configuration instructions for both implementations can be found here:
-### Manual install 
-- [CLN](./docs/CLN.md) - step by step installation instructions for CLN
-- [LND](./docs/LND.md) - step by step installation instructions for LND
-### Automated deployment
-- [AWS](./docs/aws.md) - automated deployment of bitcoind, CLN and lspd to AWS, together with 
-- [Bash](./docs/bash.md) - install everything on any debian/ubuntu server
 
-## Implement your own lspd
-You can create your own lsdp by implementing the grpc methods described [here](https://github.com/breez/lspd/blob/master/rpc/lspd.md).
+### Docker (Recommended)
+The easiest way to run `flspd` is using the provided Docker setup.
 
-## Flow for creating channels
-When Alice wants Bob to pay her an amount and Alice doesn't have a channel with sufficient capacity, she calls the lspd function RegisterPayment() and sending the paymentHash, paymentSecret (for mpp payments), destination (Alice pubkey), and two amounts.
-The first amount (incoming from the lsp point of view) is the amount BOB will pay. The second amount (outgoing from the lsp point of view) is the amount Alice will receive. The difference between these two amounts is the fees for the lsp.
-In order to open the channel on the fly, the lsp is connecting to lnd using the interceptor api.
+1.  **Configure Environment**:
+    Copy `sample.env` to `.env` and update the `NODES` and `DATABASE_URL` settings.
+    ```bash
+    cp sample.env .env
+    # Edit .env with your favorite editor
+    ```
 
-## Probing support
-The lsp supports probing non-mpp payments if the payment hash for probing is sha256('probing-01:' || payment_hash) when payment_hash is the hash of the real payment.
+2.  **Run with Docker Compose**:
+    ```bash
+    docker-compose up -d
+    ```
+    This will start `flspd` and a `postgres` database. Ensure your `flnd` node is running and accessible (as configured in `NODES`).
 
-## Integration tests
-In order to run the integration tests, you need:
-- Docker running
-- python3 installed
-- lightningd v24.02.1
-- lnd v0.17.2 lsp version https://github.com/breez/lnd/commit/0c939786ced78a981bd77c7da628bfcf86ada568
-- lnd v0.16.4 breez client version https://github.com/breez/lnd/commit/b9b7d37852321146dd7171809d673141fe1137bf
-- bitcoind (tested with v23.0)
-- bitcoin-cli (tested with v23.0)
-- build of lspd (`make release-lspd`)
-- build of lspd cln plugin (`make release-plugin`)
+### Manual Install
+If you prefer to run `flspd` manually or want to contribute:
 
-To run the integration tests, run the following command from the lspd root directory (replacing the appropriate paths). 
+1.  **Prerequisites**:
+    *   Go 1.24+
+    *   PostgreSQL
+    *   [flnd](https://github.com/flokiorg/flnd)
 
-```
+2.  **Build**:
+    ```bash
+    go build -v ./cmd/flspd
+    ```
+
+3.  **Run**:
+    ```bash
+    export NODES='[...]' # See sample.env
+    ./flspd
+    ```
+
+## Flow for Creating Channels
+When a client (Alice) wants to receive a payment but lacks sufficient inbound capacity, she calls the flspd function `RegisterPayment()`, providing:
+*   Payment Hash & Secret
+*   Destination (Alice's Pubkey)
+*   Incoming Amount (what the payer sends)
+*   Outgoing Amount (what Alice receives)
+
+The difference represents the LSP fee. `flspd` intercepts the incoming HTLC from the upstream node and opens a channel to Alice on-the-fly (Zero-Conf) to fulfill the payment.
+
+## Integration Tests
+To run integration tests, you need:
+*   Docker
+*   `flnd` binary
+*   `lokid` binary
+
+Run tests from the root directory:
+```bash
 go test -timeout 20m -v ./itest \
-  --lightningdexec /full/path/to/lightningd \
-  --lndexec /full/path/to/lnd \
-  --lndmobileexec /full/path/to/lnd \
-  --clnpluginexec /full/path/to/lspd_cln_plugin \
-  --lspdexec /full/path/to/lspd \
+  --lndexec /path/to/flnd \
+  --lndmobileexec /path/to/flnd \
+  --bitcoindexec /path/to/lokid \
+  --bitcoincliexec /path/to/lokicli \
+  --lspdexec /path/to/built/flspd
 ```
-
-- Required: `--lightningdexec` Full path to lightningd development build executable. Defaults to `lightningd` in `$PATH`.
-- Required: `--lndexec` Full path to LSP LND executable. Defaults to `lnd` in `$PATH`. 
-- Required: `--lndmobileexec` Full path to Breez mobile client LND executable. No default.
-- Required: `--lspdexec` Full path to `lspd` executable to test. Defaults to `lspd` in `$PATH`.
-- Required: `--clnpluginexec` Full path to the lspd cln plugin executable. No default.
-- Recommended: `--bitcoindexec` Full path to `bitcoind`. Defaults to `bitcoind` in `$PATH`.
-- Recommended: `--bitcoincliexec` Full path to `bitcoin-cli`. Defaults to `bitcoin-cli` in `$PATH`.
-- Recommended: `--testdir` uses the testdir as root directory for test files. Recommended because the CLN `lightning-rpc` socket max path length is 104-108 characters. Defaults to a temp directory (which has a long path length usually).
-- Optional: `--preservelogs` persists only the logs in the testing directory.
-- Optional: `--preservestate` preserves all artifacts from the lightning nodes, miners, postgres container and startup scripts.
-- Optional: `--dumplogs` dumps all logs to the console after a test is complete.
-
-Unfortunately the tests cannot be cancelled with CTRL+C without having to clean 
-up some artefacts. Here's where to look:
-- lspd process
-- lightningd process
-- lnd process
-- bitcoind process
-- docker container for postgres with default name
-
-It may be a good idea to clean your testdir every once in a while if you're using the `preservelogs` or `preservestate` flags.
