@@ -1,0 +1,47 @@
+services:
+  flspd:
+    build:
+      context: ../../
+      dockerfile: flowgate/flspd/Dockerfile.dev
+      args:
+        # Pass these if you want specific version stamps in the build
+        TAG: "v1.0.0"
+        COMMIT: "dockerCode"
+    container_name: flspd
+    restart: unless-stopped
+    ports:
+      - "9090:9090" # Host:Container port mapping
+    environment:
+      - LISTEN_ADDRESS=0.0.0.0:9090
+      - DATABASE_URL=postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
+      - AUTO_MIGRATE_DATABASE=true
+      - MEMPOOL_PRIORITY=${MEMPOOL_PRIORITY}
+      - MEMPOOL_API_BASE_URL=${MEMPOOL_API_BASE_URL}
+      - NODES_JSON=${NODES_JSON}
+      - NODES_CONFIG_PATH=/flspd/nodes.json
+      - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL}
+      - DISCORD_NOTIFICATIONS_ENABLED=${DISCORD_NOTIFICATIONS_ENABLED:-false}
+      # Logging configuration
+      - LOG_DIR=/var/log/flspd
+      - LOG_MAX_SIZE_MB=${LOG_MAX_SIZE_MB:-100}
+      - LOG_MAX_BACKUPS=${LOG_MAX_BACKUPS:-5}
+      - LOG_MAX_AGE_DAYS=${LOG_MAX_AGE_DAYS:-30}
+      - LOG_COMPRESS=${LOG_COMPRESS:-true}
+    volumes:
+      - ${NODES_CONFIG_PATH}:/flspd/nodes.json
+      - ${LOG_DIR}:/var/log/flspd
+    depends_on:
+      - postgres
+
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: flspd-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: flspd
+      POSTGRES_PASSWORD: flspdpassword
+      POSTGRES_DB: flspd
+      POSTGRES_HOST_AUTH_METHOD: trust
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data

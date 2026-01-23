@@ -1,0 +1,167 @@
+package notifications
+
+import (
+	context "context"
+	"encoding/hex"
+	"fmt"
+
+	ecies "github.com/ecies/go/v2"
+	"github.com/flowgate-lsp/flspd/common"
+	"github.com/flowgate-lsp/flspd/lightning"
+	rpc "github.com/flowgate-lsp/flspd/rpc"
+	"github.com/rs/zerolog/log"
+	"google.golang.org/protobuf/proto"
+)
+
+var ErrInternal = fmt.Errorf("internal error")
+
+type server struct {
+	store Store
+	NotificationsServer
+}
+
+func NewNotificationsServer(store Store) NotificationsServer {
+	return &server{
+		store: store,
+	}
+}
+
+func (s *server) SubscribeNotifications(
+	ctx context.Context,
+	in *EncryptedNotificationRequest,
+) (*SubscribeNotificationsReply, error) {
+	node, _, err := rpc.GetNode(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	data, err := ecies.Decrypt(node.EciesPrivateKey, in.Blob)
+	if err != nil {
+		log.Warn().
+			Err(err).
+			Str("component", string(common.LogComponentNotifications)).
+			Str("action", string(common.LogActionValidate)).
+			Msg("Notifications: Failed to decrypt request")
+		return nil, fmt.Errorf("ecies.Decrypt(%x) error: %w", in.Blob, err)
+	}
+
+	var request SubscribeNotificationsRequest
+	err = proto.Unmarshal(data, &request)
+	if err != nil {
+		log.Warn().
+			Err(err).
+			Str("component", string(common.LogComponentNotifications)).
+			Str("action", string(common.LogActionValidate)).
+			Msg("Notifications: Failed to unmarshal subscription request")
+		return nil, fmt.Errorf("proto.Unmarshal(%x) error: %w", data, err)
+	}
+
+	pubkey, err := lightning.VerifyMessage([]byte(request.Url), request.Signature)
+	if err != nil {
+		log.Warn().
+			Err(err).
+			Str("component", string(common.LogComponentNotifications)).
+			Str("action", string(common.LogActionValidate)).
+			Str("url", request.Url).
+			Msg("Notifications: Failed to verify signature")
+
+		return nil, err
+	}
+
+	pubkeyStr := hex.EncodeToString(pubkey.SerializeCompressed())
+
+	// Default to "push" if transport not specified
+	transport := request.Transport
+	if transport == "" {
+		transport = "push"
+	}
+
+	err = s.store.Register(ctx, pubkeyStr, request.Url, transport)
+	if err != nil {
+		log.Error().
+			Err(err).
+			Str("component", string(common.LogComponentNotifications)).
+			Str("action", string(common.LogActionFailure)).
+			Str("pubkey", pubkeyStr).
+			Str("url", request.Url).
+			Msg("Notifications: Failed to register in store")
+
+		return nil, ErrInternal
+	}
+
+	log.Debug().
+		Str("component", string(common.LogComponentNotifications)).
+		Str("action", string(common.LogActionSuccess)).
+		Str("pubkey", pubkeyStr).
+		Str("url", request.Url).
+		Str("transport", transport).
+		Msg("Notifications: Successfully registered client")
+	return &SubscribeNotificationsReply{}, nil
+}
+
+func (s *server) UnsubscribeNotifications(
+	ctx context.Context,
+	in *EncryptedNotificationRequest,
+) (*UnsubscribeNotificationsReply, error) {
+	node, _, err := rpc.GetNode(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	data, err := ecies.Decrypt(node.EciesPrivateKey, in.Blob)
+	if err != nil {
+		log.Warn().
+			Err(err).
+			Str("component", string(common.LogComponentNotifications)).
+			Str("action", string(common.LogActionValidate)).
+			Msg("Notifications: Failed to decrypt unsubscribe request")
+		return nil, fmt.Errorf("ecies.Decrypt(%x) error: %w", in.Blob, err)
+	}
+
+	var request UnsubscribeNotificationsRequest
+	err = proto.Unmarshal(data, &request)
+	if err != nil {
+		log.Warn().
+			Err(err).
+			Str("component", string(common.LogComponentNotifications)).
+			Str("action", string(common.LogActionValidate)).
+			Msg("Notifications: Failed to unmarshal unsubscribe request")
+		return nil, fmt.Errorf("proto.Unmarshal(%x) error: %w", data, err)
+	}
+
+	pubkey, err := lightning.VerifyMessage([]byte(request.Url), request.Signature)
+	if err != nil {
+		log.Warn().
+			Err(err).
+			Str("component", string(common.LogComponentNotifications)).
+			Str("action", string(common.LogActionValidate)).
+			Str("url", request.Url).
+			Msg("Notifications: Failed to verify signature for unsubscribe")
+
+		return nil, err
+	}
+
+	pubkeyStr := hex.EncodeToString(pubkey.SerializeCompressed())
+	err = s.store.Unsubscribe(ctx, pubkeyStr, request.Url)
+
+	if err != nil {
+		log.Error().
+			Err(err).
+			Str("component", string(common.LogComponentNotifications)).
+			Str("action", string(common.LogActionFailure)).
+			Str("pubkey", pubkeyStr).
+			Str("url", request.Url).
+			Msg("Notifications: Failed to unsubscribe in store")
+
+		return nil, ErrInternal
+	}
+
+	log.Debug().
+		Str("component", string(common.LogComponentNotifications)).
+		Str("action", string(common.LogActionSuccess)).
+		Str("pubkey", pubkeyStr).
+		Str("url", request.Url).
+		Msg("Notifications: Successfully unsubscribed client")
+
+	return &UnsubscribeNotificationsReply{}, nil
+}

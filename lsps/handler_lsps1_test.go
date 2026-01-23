@@ -1,0 +1,164 @@
+package lsps
+
+import (
+	"encoding/hex"
+	"encoding/json"
+	"testing"
+
+	"github.com/flokiorg/flnd/lnrpc"
+	"github.com/flowgate-lsp/flspd/common"
+	"github.com/flowgate-lsp/flspd/config"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+)
+
+// TestTableHandleLsps1CreateOrder tests create order scenarios using a table-driven approach
+func TestTableHandleLsps1CreateOrder(t *testing.T) {
+	// Define table scenarios
+	tests := []struct {
+		name                 string
+		req                  Lsps1CreateOrderRequest
+		peerId               string
+		mockSetup            func(*MockOpeningStore, *MockLightningClient, *MockNodesService, *MockLiquidityManager)
+		config               lspsConfig
+		expectedError        int    // 0 means no error expected, otherwise JSON-RPC error code
+		expectedOrderState   string // Expected state in response (if success)
+		expectedErrorMessage string // Partial match for error message
+	}{
+		{
+			name: "Success - Happy Path",
+			req: Lsps1CreateOrderRequest{
+				ClientBalanceLoki:            "1000000",
+				LspBalanceLoki:               "5000000",
+				FundingConfirmsWithinBlocks:  1,
+				RequiredChannelConfirmations: 0,
+				ChannelExpiryBlocks:          201600,
+				Token:                        "",
+				AnnounceChannel:              false,
+			},
+			peerId: "02677063d89856f4d04be859e9a4d3393165b6f3cd78641bc3c4ef9ca2fde37f",
+			mockSetup: func(store *MockOpeningStore, lnd *MockLightningClient, nodes *MockNodesService, liquidity *MockLiquidityManager) {
+				store.On("CountLsps1Orders", mock.Anything, string(Lsps1OrderStateCreated), mock.Anything).Return(0, nil)
+				lnd.On("AddInvoice", mock.Anything, mock.MatchedBy(func(inv *lnrpc.Invoice) bool {
+					return inv.Value >= 1000000 // At least client balance + fee
+				})).Return(&lnrpc.AddInvoiceResponse{PaymentRequest: "lnbc1..."}, nil)
+				store.On("RegisterLsps1Order", mock.MatchedBy(func(order *common.Lsps1Order) bool {
+					return order.ClientBalanceLoki == 1000000 && order.LspBalanceLoki == 5000000 &&
+						order.OrderState == string(Lsps1OrderStateCreated) &&
+						order.PaymentState == string(Lsps1PaymentStateExpectPayment)
+				})).Return(nil)
+				store.On("GetFeeParamsMenu", mock.Anything, mock.Anything).Return([]*common.OpeningFeeParams{}, nil)
+				nodes.On("GetNodes").Return([]*common.Node{{NodeConfig: &config.NodeConfig{FeeRate: 0.000001}}}, nil)
+				liquidity.On("CheckOnChainLiquidity", mock.Anything, mock.Anything).Return(nil)
+			},
+			config:             lspsConfig{Lsps1MaxPendingOrders: 5},
+			expectedError:      0,
+			expectedOrderState: string(Lsps1OrderStateCreated),
+		},
+		{
+			name: "Failure - Zero Balances",
+			req: Lsps1CreateOrderRequest{
+				ClientBalanceLoki: "0",
+				LspBalanceLoki:    "0",
+			},
+			peerId: "02677063d89856f4d04be859e9a4d3393165b6f3cd78641bc3c4ef9ca2fde37f",
+			mockSetup: func(store *MockOpeningStore, lnd *MockLightningClient, nodes *MockNodesService, liquidity *MockLiquidityManager) {
+				// No mocks expected called
+			},
+			config:               lspsConfig{Lsps1MaxPendingOrders: 5},
+			expectedError:        -32602,
+			expectedErrorMessage: "Invalid params",
+		},
+		{
+			name: "Failure - Client Balance Too High",
+			req: Lsps1CreateOrderRequest{
+				ClientBalanceLoki: "200000000", // > 100M limit
+				LspBalanceLoki:    "0",
+			},
+			peerId: "02677063d89856f4d04be859e9a4d3393165b6f3cd78641bc3c4ef9ca2fde37f",
+			mockSetup: func(store *MockOpeningStore, lnd *MockLightningClient, nodes *MockNodesService, liquidity *MockLiquidityManager) {
+				// No mocks expected called
+			},
+			config:               lspsConfig{Lsps1MaxPendingOrders: 5},
+			expectedError:        100,                            // Application specific error
+			expectedErrorMessage: "Client balance out of bounds", // Partial match
+		},
+		{
+			name: "Failure - Too Many Pending Orders",
+			req: Lsps1CreateOrderRequest{
+				ClientBalanceLoki: "1000000",
+			},
+			peerId: "02677063d89856f4d04be859e9a4d3393165b6f3cd78641bc3c4ef9ca2fde37f",
+			mockSetup: func(store *MockOpeningStore, lnd *MockLightningClient, nodes *MockNodesService, liquidity *MockLiquidityManager) {
+				store.On("GetFeeParamsMenu", mock.Anything, mock.Anything).Return([]*common.OpeningFeeParams{}, nil)
+				store.On("CountLsps1Orders", mock.Anything, string(Lsps1OrderStateCreated), mock.Anything).Return(5, nil) // Already 5
+				nodes.On("GetNodes").Return([]*common.Node{{NodeConfig: &config.NodeConfig{FeeRate: 0.000001}}}, nil)
+				liquidity.On("CheckOnChainLiquidity", mock.Anything, mock.Anything).Return(nil)
+			},
+			config:               lspsConfig{Lsps1MaxPendingOrders: 5},
+			expectedError:        -32603,
+			expectedErrorMessage: "Too many pending orders",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockStore := new(MockOpeningStore)
+			mockLnd := new(MockLightningClient)
+			mockNodes := new(MockNodesService)
+			mockLiquidity := new(MockLiquidityManager)
+
+			tt.mockSetup(mockStore, mockLnd, mockNodes, mockLiquidity)
+
+			server := &Server{
+				config:           Config{Lsps1MaxPendingOrders: tt.config.Lsps1MaxPendingOrders},
+				lndClient:        mockLnd,
+				nodesService:     mockNodes,
+				openingService:   mockStore,
+				liquidityManager: mockLiquidity,
+			}
+
+			// Marshal request
+			paramsBytes, _ := json.Marshal(tt.req)
+			req := &JsonRpcRequest{
+				Id:     json.RawMessage(`"test-id"`),
+				Method: "lsps1.create_order",
+				Params: paramsBytes,
+			}
+
+			peerBytes, _ := hex.DecodeString(tt.peerId)
+			resp := server.handleLsps1CreateOrder(req, peerBytes)
+
+			if tt.expectedError != 0 {
+				assert.NotNil(t, resp.Error, "Expected error but got nil")
+				if resp.Error != nil {
+					assert.Equal(t, tt.expectedError, resp.Error.Code)
+					if tt.expectedErrorMessage != "" {
+						assert.Contains(t, resp.Error.Message, tt.expectedErrorMessage)
+					}
+				}
+			} else {
+				assert.Nil(t, resp.Error, "Expected success but got error: %v", resp.Error)
+				if resp.Result != nil {
+					// Check result structure
+					// We need to marshal/unmarshal result to check fields effectively purely from 'resp.Result' interface{}
+					// But our handler returns *JsonRpcResponse with Result interface{} which holds the struct directly usually
+					// Wait, NewJsonRpcResponse takes interface{}, so resp.Result holds the struct.
+					res, ok := resp.Result.(Lsps1CreateOrderResponse)
+					assert.True(t, ok, "Result should be Lsps1CreateOrderResponse")
+					assert.Equal(t, tt.expectedOrderState, res.OrderState)
+				}
+			}
+
+			mockStore.AssertExpectations(t)
+			mockLnd.AssertExpectations(t)
+			mockNodes.AssertExpectations(t)
+			mockLiquidity.AssertExpectations(t)
+		})
+	}
+}
+
+// Helpers/Mocks specifically for these tests if not common
+type lspsConfig struct {
+	Lsps1MaxPendingOrders int
+}

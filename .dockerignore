@@ -1,0 +1,18 @@
+# Version control
+.git
+.gitignore
+
+# Build artifacts
+bin/
+flspd
+flspd_revenue_cli
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Data
+data/
+*.db
+*.log

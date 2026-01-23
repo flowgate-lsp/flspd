@@ -1,0 +1,468 @@
+package lsps
+
+import (
+	"context"
+	"encoding/hex"
+	"testing"
+	"time"
+
+	"github.com/flokiorg/flnd/lnrpc"
+	"github.com/flokiorg/go-flokicoin/chaincfg/chainhash"
+	btcec "github.com/flokiorg/go-flokicoin/crypto"
+	"github.com/flokiorg/go-flokicoin/wire"
+	"github.com/flowgate-lsp/flspd/chain"
+	"github.com/flowgate-lsp/flspd/common"
+	"github.com/flowgate-lsp/flspd/config"
+	"github.com/flowgate-lsp/flspd/history"
+	"github.com/flowgate-lsp/flspd/lightning"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+)
+
+// MockLightningClient for testing
+type MockLightningClient struct {
+	mock.Mock
+}
+
+func (m *MockLightningClient) GetInfo() (*lightning.GetInfoResult, error) {
+	args := m.Called()
+	return args.Get(0).(*lightning.GetInfoResult), args.Error(1)
+}
+
+func (m *MockLightningClient) IsConnected(destination []byte) (bool, error) {
+	args := m.Called(destination)
+	return args.Bool(0), args.Error(1)
+}
+
+func (m *MockLightningClient) OpenChannel(req *lightning.OpenChannelRequest) (*wire.OutPoint, error) {
+	args := m.Called(req)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*wire.OutPoint), args.Error(1)
+}
+
+func (m *MockLightningClient) GetChannel(peerID []byte, channelPoint wire.OutPoint) (*lightning.GetChannelResult, error) {
+	args := m.Called(peerID, channelPoint)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*lightning.GetChannelResult), args.Error(1)
+}
+
+func (m *MockLightningClient) GetPeerId(scid *lightning.ShortChannelID) ([]byte, error) {
+	args := m.Called(scid)
+	return args.Get(0).([]byte), args.Error(1)
+}
+
+func (m *MockLightningClient) GetClosedChannels(nodeID string, channelPoints map[string]uint64) (map[string]uint64, error) {
+	args := m.Called(nodeID, channelPoints)
+	return args.Get(0).(map[string]uint64), args.Error(1)
+}
+
+func (m *MockLightningClient) WaitOnline(peerID []byte, deadline time.Time) error {
+	args := m.Called(peerID, deadline)
+	return args.Error(0)
+}
+
+func (m *MockLightningClient) WaitChannelActive(peerID []byte, deadline time.Time) error {
+	args := m.Called(peerID, deadline)
+	return args.Error(0)
+}
+
+func (m *MockLightningClient) ListChannels() ([]*lightning.Channel, error) {
+	args := m.Called()
+	return args.Get(0).([]*lightning.Channel), args.Error(1)
+}
+
+func (m *MockLightningClient) SubscribeInvoices() (<-chan *lightning.InvoiceUpdate, <-chan error, error) {
+	args := m.Called()
+	return args.Get(0).(<-chan *lightning.InvoiceUpdate), args.Get(1).(<-chan error), args.Error(2)
+}
+
+func (m *MockLightningClient) SendCustomMessage(ctx context.Context, msg *lnrpc.SendCustomMessageRequest) (*lnrpc.SendCustomMessageResponse, error) {
+	args := m.Called(ctx, msg)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*lnrpc.SendCustomMessageResponse), args.Error(1)
+}
+
+func (m *MockLightningClient) SubscribeCustomMessages(ctx context.Context, req *lnrpc.SubscribeCustomMessagesRequest) (lnrpc.Lightning_SubscribeCustomMessagesClient, error) {
+	args := m.Called(ctx, req)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(lnrpc.Lightning_SubscribeCustomMessagesClient), args.Error(1)
+}
+
+// MockOpeningStore for testing
+type MockOpeningStore struct {
+	mock.Mock
+}
+
+func (m *MockOpeningStore) GetFeeParamsSettings(token string) ([]*common.OpeningFeeParamsSetting, error) {
+	args := m.Called(token)
+	return args.Get(0).([]*common.OpeningFeeParamsSetting), args.Error(1)
+}
+
+func (m *MockOpeningStore) SetFeeParams(token string, validity time.Duration, params common.OpeningFeeParams) error {
+	args := m.Called(token, validity, params)
+	return args.Error(0)
+}
+
+func (m *MockOpeningStore) RegisterLsps2Buy(reg *common.Lsps2BuyRegistration) error {
+	args := m.Called(reg)
+	return args.Error(0)
+}
+
+func (m *MockOpeningStore) GetLsps2BuyRegistration(scid uint64) (*common.Lsps2BuyRegistration, error) {
+	args := m.Called(scid)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*common.Lsps2BuyRegistration), args.Error(1)
+}
+
+func (m *MockOpeningStore) RegisterLsps1Order(order *common.Lsps1Order) error {
+	args := m.Called(order)
+	return args.Error(0)
+}
+
+func (m *MockOpeningStore) GetLsps1Order(orderId string) (*common.Lsps1Order, error) {
+	args := m.Called(orderId)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*common.Lsps1Order), args.Error(1)
+}
+
+func (m *MockOpeningStore) GetLsps1OrderByPaymentInvoice(paymentInvoice string) (*common.Lsps1Order, error) {
+	args := m.Called(paymentInvoice)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*common.Lsps1Order), args.Error(1)
+}
+
+func (m *MockOpeningStore) UpdateLsps1OrderState(orderId string, newState string, newPaymentState string) error {
+	args := m.Called(orderId, newState, newPaymentState)
+	return args.Error(0)
+}
+
+func (m *MockOpeningStore) RegisterLsps5Webhook(webhook *common.Lsps5Webhook) error {
+	args := m.Called(webhook)
+	return args.Error(0)
+}
+
+func (m *MockOpeningStore) GetLsps5Webhooks(clientNodeId string) ([]*common.Lsps5Webhook, error) {
+	args := m.Called(clientNodeId)
+	return args.Get(0).([]*common.Lsps5Webhook), args.Error(1)
+}
+
+func (m *MockOpeningStore) RemoveLsps5Webhook(clientNodeId, appName string) error {
+	args := m.Called(clientNodeId, appName)
+	return args.Error(0)
+}
+
+func (m *MockOpeningStore) CountLsps1Orders(clientNodeId string, state string, excludeExpiredBefore *time.Time) (int, error) {
+	args := m.Called(clientNodeId, state, excludeExpiredBefore)
+	return args.Int(0), args.Error(1)
+}
+
+func (m *MockOpeningStore) CountLsps5Webhooks(clientNodeId string) (int, error) {
+	args := m.Called(clientNodeId)
+	return args.Int(0), args.Error(1)
+}
+
+func (m *MockOpeningStore) GetPaidLsps1Order(clientNodeId string) (*common.Lsps1Order, error) {
+	args := m.Called(clientNodeId)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*common.Lsps1Order), args.Error(1)
+}
+
+func (m *MockOpeningStore) UpdateLsps1OrderFunding(orderId string, fundingTxid string, fundingOutpoint int) error {
+	args := m.Called(orderId, fundingTxid, fundingOutpoint)
+	return args.Error(0)
+}
+
+func (m *MockOpeningStore) GetFeeParamsMenu(token string, privateKey *btcec.PrivateKey) ([]*common.OpeningFeeParams, error) {
+	args := m.Called(token, privateKey)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]*common.OpeningFeeParams), args.Error(1)
+}
+
+func (m *MockOpeningStore) ValidateOpeningFeeParams(params *common.OpeningFeeParams, publicKey *btcec.PublicKey) bool {
+	args := m.Called(params, publicKey)
+	return args.Bool(0)
+}
+
+func (m *MockOpeningStore) IsCurrentChainFeeCheaper(token string, params *common.OpeningFeeParams) bool {
+	args := m.Called(token, params)
+	return args.Bool(0)
+}
+
+func (m *MockOpeningStore) GetReservedLiquidity() (uint64, error) {
+	args := m.Called()
+	return args.Get(0).(uint64), args.Error(1)
+}
+
+func (m *MockLightningClient) WalletBalance(ctx context.Context) (*lightning.WalletBalanceResult, error) {
+	args := m.Called(ctx)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*lightning.WalletBalanceResult), args.Error(1)
+}
+
+// MockHistoryStore for testing
+type MockHistoryStore struct {
+	mock.Mock
+}
+
+func (m *MockHistoryStore) UpdateChannels(ctx context.Context, updates []*history.ChannelUpdate) error {
+	args := m.Called(ctx, updates)
+	return args.Error(0)
+}
+
+func (m *MockHistoryStore) InsertForwards(ctx context.Context, forwards []*history.Forward, nodeId []byte) error {
+	args := m.Called(ctx, forwards, nodeId)
+	return args.Error(0)
+}
+
+func (m *MockHistoryStore) UpdateForwards(ctx context.Context, forwards []*history.Forward, nodeId []byte) error {
+	args := m.Called(ctx, forwards, nodeId)
+	return args.Error(0)
+}
+
+func (m *MockHistoryStore) FetchLndForwardOffset(ctx context.Context, nodeId []byte) (*time.Time, error) {
+	args := m.Called(ctx, nodeId)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*time.Time), args.Error(1)
+}
+
+func (m *MockHistoryStore) AddOpenChannelHtlc(ctx context.Context, htlc *history.OpenChannelHtlc) error {
+	args := m.Called(ctx, htlc)
+	return args.Error(0)
+}
+
+// MockFeeEstimator for testing
+type MockFeeEstimator struct {
+	mock.Mock
+}
+
+func (m *MockFeeEstimator) EstimateFeeRate(ctx context.Context, strategy chain.FeeStrategy) (*chain.FeeEstimation, error) {
+	args := m.Called(ctx, strategy)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*chain.FeeEstimation), args.Error(1)
+}
+
+// TestProcessSettledInvoice_Success tests happy path invoice settlement
+func TestProcessSettledInvoice_Success(t *testing.T) {
+	mockClient := new(MockLightningClient)
+	mockStore := new(MockOpeningStore)
+
+	invoice := "lnbc1test..."
+	order := &common.Lsps1Order{
+		OrderId:           "test-order-123",
+		PeerId:            "testpeer",
+		OrderState:        "CREATED",
+		PaymentState:      "CREATED",
+		ClientBalanceLoki: 1000000,
+	}
+
+	mockStore.On("GetLsps1OrderByPaymentInvoice", invoice).Return(order, nil)
+	mockStore.On("UpdateLsps1OrderState", "test-order-123", "PAID", "PAID").Return(nil)
+
+	historyStore := new(MockHistoryStore)
+	feeEstimator := new(MockFeeEstimator)
+	conf := &config.NodeConfig{}
+
+	svc := NewLsps1SettlementService(mockClient, mockStore, historyStore, conf, feeEstimator, chain.FeeStrategyEconomy)
+
+	update := &lightning.InvoiceUpdate{
+		State:          lightning.InvoiceStateSettled,
+		PaymentRequest: invoice,
+		AmountMloki:    1000000,
+	}
+
+	svc.processSettledInvoice(update)
+
+	mockStore.AssertExpectations(t)
+}
+
+func (m *MockLightningClient) AddInvoice(ctx context.Context, invoice *lnrpc.Invoice) (*lnrpc.AddInvoiceResponse, error) {
+	args := m.Called(ctx, invoice)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*lnrpc.AddInvoiceResponse), args.Error(1)
+}
+
+// TestProcessSettledInvoice_OrderNotFound tests non-LSPS1 invoice
+func TestProcessSettledInvoice_OrderNotFound(t *testing.T) {
+	mockClient := new(MockLightningClient)
+	mockStore := new(MockOpeningStore)
+
+	invoice := "lnbc1test..."
+
+	mockStore.On("GetLsps1OrderByPaymentInvoice", invoice).Return(nil, assert.AnError)
+
+	historyStore := new(MockHistoryStore)
+	feeEstimator := new(MockFeeEstimator)
+	conf := &config.NodeConfig{}
+
+	svc := NewLsps1SettlementService(mockClient, mockStore, historyStore, conf, feeEstimator, chain.FeeStrategyEconomy)
+
+	update := &lightning.InvoiceUpdate{
+		State:          lightning.InvoiceStateSettled,
+		PaymentRequest: invoice,
+	}
+
+	svc.processSettledInvoice(update)
+
+	// Should not call UpdateLsps1OrderState
+	mockStore.AssertNotCalled(t, "UpdateLsps1OrderState", mock.Anything, mock.Anything, mock.Anything)
+}
+
+// TestProcessSettledInvoice_TriggerChannelOpen tests that channel opening is triggered
+func TestProcessSettledInvoice_TriggerChannelOpen(t *testing.T) {
+	mockClient := new(MockLightningClient)
+	mockStore := new(MockOpeningStore)
+	historyStore := new(MockHistoryStore)
+	feeEstimator := new(MockFeeEstimator)
+	conf := &config.NodeConfig{
+		FeeRate:       0.000001,
+		BaseFeeMloki:  1000,
+		TimeLockDelta: 40,
+	}
+
+	invoice := "lnbc1test..."
+	order := &common.Lsps1Order{
+		OrderId:           "test-order-123",
+		PeerId:            "02677063d89856f4d04be859e9a4d3393165b6f3cd78641bc3c4ef9ca2fde37f", // Valid hex for peer ID
+		OrderState:        "CREATED",
+		PaymentState:      "CREATED",
+		ClientBalanceLoki: 1000000,
+		LspBalanceLoki:    5000000,
+		AnnounceChannel:   false,
+	}
+
+	peerId, _ := hex.DecodeString(order.PeerId)
+
+	mockStore.On("GetLsps1OrderByPaymentInvoice", invoice).Return(order, nil)
+	mockStore.On("UpdateLsps1OrderState", "test-order-123", "PAID", "PAID").Return(nil)
+
+	// Connectivity check
+	mockClient.On("IsConnected", peerId).Return(true, nil)
+
+	// Fee estimation
+	feeEst := &chain.FeeEstimation{
+		LokiPerVByte: func() *float64 { f := 1.0; return &f }(),
+	}
+	feeEstimator.On("EstimateFeeRate", mock.Anything, chain.FeeStrategyEconomy).Return(feeEst, nil)
+
+	// Channel opening
+	chanPoint := &wire.OutPoint{
+		Hash: func() chainhash.Hash {
+			h, _ := chainhash.NewHashFromStr("deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
+			return *h
+		}(),
+		Index: 0,
+	}
+	mockClient.On("OpenChannel", mock.MatchedBy(func(req *lightning.OpenChannelRequest) bool {
+		return req.CapacityLoki == 6000000 && req.PushLoki == 1000000
+	})).Return(chanPoint, nil)
+
+	// Store updates
+	mockStore.On("UpdateLsps1OrderFunding", "test-order-123", chanPoint.Hash.String(), 0).Return(nil)
+	mockStore.On("UpdateLsps1OrderState", "test-order-123", "COMPLETED", "PAID").Return(nil)
+
+	svc := NewLsps1SettlementService(mockClient, mockStore, historyStore, conf, feeEstimator, chain.FeeStrategyEconomy)
+
+	update := &lightning.InvoiceUpdate{
+		State:          lightning.InvoiceStateSettled,
+		PaymentRequest: invoice,
+		AmountMloki:    1000000,
+	}
+
+	svc.processSettledInvoice(update)
+
+	// Wait for goroutine to finish (simple sleep for now as it's a unit test)
+	time.Sleep(100 * time.Millisecond)
+
+	mockStore.AssertExpectations(t)
+	mockClient.AssertExpectations(t)
+}
+
+// TestProcessSettledInvoice_AlreadyPaid tests duplicate settlement
+func TestProcessSettledInvoice_AlreadyPaid(t *testing.T) {
+	mockClient := new(MockLightningClient)
+	mockStore := new(MockOpeningStore)
+
+	invoice := "lnbc1test..."
+	order := &common.Lsps1Order{
+		OrderId:      "test-order-123",
+		OrderState:   "PAID", // Already paid
+		PaymentState: "PAID",
+	}
+
+	mockStore.On("GetLsps1OrderByPaymentInvoice", invoice).Return(order, nil)
+
+	historyStore := new(MockHistoryStore)
+	feeEstimator := new(MockFeeEstimator)
+	conf := &config.NodeConfig{}
+
+	svc := NewLsps1SettlementService(mockClient, mockStore, historyStore, conf, feeEstimator, chain.FeeStrategyEconomy)
+
+	update := &lightning.InvoiceUpdate{
+		State:          lightning.InvoiceStateSettled,
+		PaymentRequest: invoice,
+	}
+
+	svc.processSettledInvoice(update)
+
+	// Should not call UpdateLsps1OrderState for already paid order
+	mockStore.AssertNotCalled(t, "UpdateLsps1OrderState", mock.Anything, mock.Anything, mock.Anything)
+}
+
+// TestGracefulShutdown tests context cancellation
+func TestGracefulShutdown(t *testing.T) {
+	mockClient := new(MockLightningClient)
+	mockStore := new(MockOpeningStore)
+
+	invoiceChan := make(chan *lightning.InvoiceUpdate, 1)
+	errChan := make(chan error, 1)
+
+	mockClient.On("SubscribeInvoices").Return((<-chan *lightning.InvoiceUpdate)(invoiceChan), (<-chan error)(errChan), nil)
+
+	historyStore := new(MockHistoryStore)
+	feeEstimator := new(MockFeeEstimator)
+	conf := &config.NodeConfig{}
+
+	svc := NewLsps1SettlementService(mockClient, mockStore, historyStore, conf, feeEstimator, chain.FeeStrategyEconomy)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	err := svc.Start(ctx)
+	assert.NoError(t, err)
+
+	// Let it run briefly
+	time.Sleep(100 * time.Millisecond)
+
+	// Cancel and stop
+	cancel()
+	svc.Stop()
+
+	// Give it a moment to shutdown
+	time.Sleep(100 * time.Millisecond)
+
+	mockClient.AssertExpectations(t)
+}
