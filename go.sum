@@ -381,6 +381,8 @@ github.com/flokiorg/go-socks v0.0.0-20170105172521-4720035b7bfd/go.mod h1:YSmQVJ
 github.com/flokiorg/walletd v0.1.6-beta h1:kmY+e2dJizQAK6uH6jERqo1Pp/jRYbh0h+XLa3/LUoU=
 github.com/flokiorg/walletd v0.1.6-beta/go.mod h1:zlepMaVRL4fXHhuYex0CfecyJX8Eek5dCA7n2roofJU=
 github.com/flosch/pongo2 v0.0.0-20190707114632-bbf5a6c351f4/go.mod h1:T9YF2M40nIgbVgp3rreNmTged+9HrbNTIQf1PsaIiTA=
+github.com/flowgate-lsp/nostr-lsps5 v1.0.2 h1:Xd1G90nPMoZJ4Aq21njhpXnXtGRP4Ex+3DVtBvMCHI0=
+github.com/flowgate-lsp/nostr-lsps5 v1.0.2/go.mod h1:ZyiLDRaUNoOyckimfhygGPllURiS0lZ91xYWbKmP10E=
 github.com/fogleman/gg v1.2.1-0.20190220221249-0403632d5b90/go.mod h1:R/bRT+9gY/C5z7JzPU0zXsXHKM4/ayA+zqcVNZzPa1k=
 github.com/fogleman/gg v1.3.0/go.mod h1:R/bRT+9gY/C5z7JzPU0zXsXHKM4/ayA+zqcVNZzPa1k=
 github.com/frankban/quicktest v1.2.2 h1:xfmOhhoH5fGPgbEAlhLpJH9p0z/0Qizio9osmvn9IUY=
