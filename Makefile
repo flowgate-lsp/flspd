@@ -38,3 +38,6 @@ rundev: _rundev_setup
 
 rundev-build: _rundev_setup
 	docker compose -f docker-compose.dev.yml up --build
+
+stopdev:
+	docker compose -f docker-compose.dev.yml down
