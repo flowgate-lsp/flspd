@@ -27,9 +27,14 @@ clean:
 docker-verify:
 	docker build . -t flspd:local-test
 
-rundev:
+# Internal helper for setup
+_rundev_setup:
 	mkdir -p data/postgres
-	@if [ ! -f data/nodes.json ]; then cp nodes.sample.json data/nodes.json; fi
+	@if [ ! -f data/nodes.yaml ]; then cp nodes.sample.yaml data/nodes.yaml; fi
 	@if [ ! -f .env ]; then cp compose.env.sample .env; fi
-	docker compose -f docker-compose.dev.yml up --build
 
+rundev: _rundev_setup
+	docker compose -f docker-compose.dev.yml up
+
+rundev-build: _rundev_setup
+	docker compose -f docker-compose.dev.yml up --build

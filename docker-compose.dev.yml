@@ -18,9 +18,10 @@ services:
       - MEMPOOL_PRIORITY=${MEMPOOL_PRIORITY}
       - MEMPOOL_API_BASE_URL=${MEMPOOL_API_BASE_URL}
       - NODES_JSON=${NODES_JSON}
-      - NODES_CONFIG_PATH=/flspd/nodes.json
+      - NODES_CONFIG_PATH=/flspd/nodes.yaml
       - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL}
       - DISCORD_NOTIFICATIONS_ENABLED=${DISCORD_NOTIFICATIONS_ENABLED:-false}
+      - LSP_NOSTR_PRIVATE_KEY=${LSP_NOSTR_PRIVATE_KEY}
       # Logging configuration
       - LOG_DIR=/var/log/flspd
       - LOG_MAX_SIZE_MB=${LOG_MAX_SIZE_MB:-100}
@@ -28,7 +29,7 @@ services:
       - LOG_MAX_AGE_DAYS=${LOG_MAX_AGE_DAYS:-30}
       - LOG_COMPRESS=${LOG_COMPRESS:-true}
     volumes:
-      - ${NODES_CONFIG_PATH}:/flspd/nodes.json
+      - ${NODES_CONFIG_PATH}:/flspd/nodes.yaml
       - ${LOG_DIR}:/var/log/flspd
     depends_on:
       - postgres
