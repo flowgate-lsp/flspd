@@ -28,13 +28,15 @@ type LndClientWrapper interface {
 // NotificationService interface for sending LSPS5 webhook notifications
 type NotificationService interface {
 	NotifyWebhookRegistered(pubkey string, webhook *common.Lsps5Webhook) bool
+	NotifyOrderStateChanged(pubkey string, orderId string, state string, channelPoint string, errorMsg string) (bool, error)
 }
 
 type Config struct {
 	Lsps1MaxPendingOrders int
 	Lsps5MaxWebhooks      int
-	EnableLsps5Https      bool // Enable HTTPS webhook transport
-	EnableLsps5Nostr      bool // Enable Nostr notification transport
+	EnableLsps5Https      bool   // Enable HTTPS webhook transport
+	EnableLsps5Nostr      bool   // Enable Nostr notification transport
+	Lsps5NostrPubkey      string // Hex-encoded Nostr public key for notifications
 }
 
 type Server struct {
@@ -236,6 +238,8 @@ func (s *Server) route(req *JsonRpcRequest, peer []byte) *JsonRpcResponse {
 	switch req.Method {
 	case "lsps0.list_protocols":
 		return s.handleLsps0ListProtocols(req)
+	case "lsps0.get_info":
+		return s.handleLsps0GetInfo(req)
 	case "lsps2.get_versions":
 		return s.handleLsps2GetVersions(req)
 	case "lsps2.get_info":

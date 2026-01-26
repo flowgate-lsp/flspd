@@ -11,8 +11,9 @@ import (
 )
 
 type extendedParams struct {
-	Token  string                  `json:"token"`
-	Params common.OpeningFeeParams `json:"fees_params"`
+	Token   string                  `json:"token"`
+	OrderId string                  `json:"order_id,omitempty"`
+	Params  common.OpeningFeeParams `json:"fees_params"`
 }
 
 type PostgresOpeningStore struct {
@@ -236,10 +237,27 @@ func (s *PostgresOpeningStore) CountLsps5Webhooks(clientNodeId string) (int, err
 
 func (s *PostgresOpeningStore) GetReservedLiquidity() (uint64, error) {
 	var reserved uint64
+	// Only count CREATED orders from the last 24 hours as reserved
+	// Older unpaid orders are considered expired/abandoned
 	err := s.pool.QueryRow(context.Background(),
-		`SELECT COALESCE(SUM(lsp_balance_loki), 0) FROM lsps1.orders WHERE order_state = 'CREATED'`).Scan(&reserved)
+		`SELECT COALESCE(SUM(lsp_balance_loki), 0) FROM lsps1.orders 
+		 WHERE order_state = 'CREATED' 
+		 AND created_at > NOW() - INTERVAL '24 hours'`).Scan(&reserved)
 	if err != nil {
 		return 0, err
 	}
 	return reserved, nil
+}
+
+// ExpireStaleOrders marks CREATED orders older than 24 hours as EXPIRED
+func (s *PostgresOpeningStore) ExpireStaleOrders() (int64, error) {
+	result, err := s.pool.Exec(context.Background(),
+		`UPDATE lsps1.orders 
+		 SET order_state = 'EXPIRED' 
+		 WHERE order_state = 'CREATED' 
+		 AND created_at <= NOW() - INTERVAL '24 hours'`)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }

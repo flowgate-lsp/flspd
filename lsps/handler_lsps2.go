@@ -197,10 +197,16 @@ Loop:
 			return NewJsonRpcErrorResponse(req.Id, 203, "Payment size out of bounds", nil)
 		}
 
+		// Validation: Check min channel capacity (approximate neededSat as capacity)
+		neededSat := *paymentSize / 1000
+		if neededSat < s.nodesService.GetMinChannelCapacity() {
+			return NewJsonRpcErrorResponse(req.Id, 203, fmt.Sprintf("Payment size too small for channel creation (min %d)", s.nodesService.GetMinChannelCapacity()), nil)
+		}
+
 		// Validation: Check On-Chain Liquidity
 		// We approximate needed liquidity as the payment size (converted to sats).
 		// Note: PaymentSizeMloki is milliloki, we need sats (loki). 1 Loki = 1000 mLoki.
-		neededSat := *paymentSize / 1000
+		// neededSat is already calculated above
 		if err := s.liquidityManager.CheckOnChainLiquidity(context.Background(), neededSat); err != nil {
 			log.Warn().
 				Err(err).

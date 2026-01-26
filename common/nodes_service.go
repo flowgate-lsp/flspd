@@ -26,6 +26,7 @@ type Node struct {
 type NodesService interface {
 	GetNode(token string) (*Node, error)
 	GetNodes() []*Node
+	GetMinChannelCapacity() uint64
 }
 type nodesService struct {
 	nodes      []*Node
@@ -64,4 +65,14 @@ func (s *nodesService) GetNode(token string) (*Node, error) {
 
 func (s *nodesService) GetNodes() []*Node {
 	return s.nodes
+}
+
+// GetMinChannelCapacity returns the minimum channel capacity across all nodes.
+// If no nodes are configured, returns a default of 20000.
+func (s *nodesService) GetMinChannelCapacity() uint64 {
+	if len(s.nodes) == 0 {
+		return 20000
+	}
+	// Return the first node's config (all nodes should have same minimum in typical setup)
+	return s.nodes[0].NodeConfig.MinChannelCapacityLoki
 }

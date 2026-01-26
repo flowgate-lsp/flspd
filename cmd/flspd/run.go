@@ -3,8 +3,8 @@ package main
 import (
 	"context"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
+
 	"os"
 	"os/signal"
 	"strconv"
@@ -13,7 +13,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/flokiorg/flnd/funding"
+	"github.com/nbd-wtf/go-nostr"
 	"github.com/rs/zerolog/log"
+	"gopkg.in/yaml.v3"
 
 	ecies "github.com/ecies/go/v2"
 	btcec "github.com/flokiorg/go-flokicoin/crypto"
@@ -40,9 +43,28 @@ const (
 	DefaultFeeParamsValidity     = time.Hour      // Fee params validity duration
 	DefaultLsps1MaxPendingOrders = 50             // Max pending LSPS1 orders per peer
 	DefaultLsps5MaxWebhooks      = 100            // Max LSPS5 webhooks per client
+
+	// LSP Policy Limits
+	AbsoluteMinChannelCapacityLoki = 20000 // Hard floor for channel size enforced by LSP
 )
 
 func runLspd(cliCtx *cli.Context) error {
+	// Sanity Checks: Ensure LSP policy complies with Network limits
+
+	// LSP Min Capacity must be >= Network Min Funding
+	if AbsoluteMinChannelCapacityLoki < uint64(funding.MinChanFundingSize) {
+		return fmt.Errorf("configuration error: AbsoluteMinChannelCapacityLoki (%d) is less than network limit (%d)", AbsoluteMinChannelCapacityLoki, funding.MinChanFundingSize)
+	}
+
+	// LSP Min Capacity must be <= Network Max Funding (otherwise we can never open a standard channel)
+	if AbsoluteMinChannelCapacityLoki > uint64(funding.MaxFlcFundingAmount) {
+		return fmt.Errorf("configuration error: AbsoluteMinChannelCapacityLoki (%d) exceeds standard maximum funding amount (%d)", AbsoluteMinChannelCapacityLoki, funding.MaxFlcFundingAmount)
+	}
+
+	// Network Min Funding must be <= Network Max Funding (Basic sanity of external package)
+	if funding.MinChanFundingSize > funding.MaxFlcFundingAmount {
+		return fmt.Errorf("external consistency error: Network MinChanFundingSize (%d) > MaxFlcFundingAmount (%d)", funding.MinChanFundingSize, funding.MaxFlcFundingAmount)
+	}
 	common.InitLogger()
 	log.Info().Msgf(`Starting flspd, tag='%s', revision='%s'`, build.GetTag(), build.GetRevision())
 	// Load nodes configuration
@@ -64,7 +86,7 @@ func runLspd(cliCtx *cli.Context) error {
 	}
 
 	var nodeConfigs []*config.NodeConfig
-	err = json.Unmarshal(nodesContent, &nodeConfigs)
+	err = yaml.Unmarshal(nodesContent, &nodeConfigs)
 	if err != nil {
 		log.Fatal().Msgf("failed to unmarshal nodes config from file: %v", err)
 	}
@@ -138,8 +160,9 @@ func runLspd(cliCtx *cli.Context) error {
 				maxPaymentSize = DefaultMaxPaymentSizeLoki
 			}
 
-			// Proportional from FeeRate (assuming FeeRate is ratio, e.g. 0.000001 for 1ppm)
-			proportional := uint32(node.NodeConfig.FeeRate * 1_000_000)
+			// Proportional from ChannelFeePermyriad (in basis points of basis points)
+			// ChannelFeePermyriad is per 10,000. PPM is per 1,000,000. So multiply by 100.
+			proportional := uint32(node.NodeConfig.ChannelFeePermyriad * 100)
 
 			params := common.OpeningFeeParams{
 				MinFeeMloki:          uint64(node.NodeConfig.ChannelMinimumFeeMloki),
@@ -168,18 +191,23 @@ func runLspd(cliCtx *cli.Context) error {
 	// Configure Nostr transport if private key is provided
 	lspNostrPrivKey := os.Getenv("LSP_NOSTR_PRIVATE_KEY")
 	if lspNostrPrivKey != "" {
-		relays := strings.Split(os.Getenv("LSP_NOSTR_RELAYS"), ",")
-		if len(relays) > 0 {
-			nostrTransport := notifications.NewNostrTransport(lspNostrPrivKey)
-			notificationService.AddTransport(nostrTransport)
-			log.Info().Msg("Nostr notification transport enabled")
+		var err error
+		lspNostrPrivKey, err = common.ParsePrivateKey(lspNostrPrivKey)
+		if err != nil {
+			log.Fatal().Err(err).Msg("Invalid LSP_NOSTR_PRIVATE_KEY")
 		}
+
+		nostrTransport := notifications.NewNostrTransport(lspNostrPrivKey)
+		notificationService.AddTransport(nostrTransport)
+		log.Info().Msg("Nostr notification transport enabled")
 	}
 
 	go notificationService.Start(ctx)
 	openingService := common.NewOpeningService(openingStore, nodesService)
 	notificationCleanupService := notifications.NewCleanupService(notificationsStore)
 	go notificationCleanupService.Start(ctx)
+	orderCleanupService := lsps.NewOrderCleanupService(openingStore, 24*time.Hour)
+	go orderCleanupService.Start()
 	channelSync := history.NewChannelSync(nodes, historyStore)
 	go channelSync.ChannelsSynchronize(ctx)
 
@@ -207,7 +235,7 @@ func runLspd(cliCtx *cli.Context) error {
 		client.StartListeners()
 
 		// Start LSPS1 settlement service for this node
-		settlementSvc := lsps.NewLsps1SettlementService(client, openingStore, historyStore, node.NodeConfig, feeEstimator, feeStrategy)
+		settlementSvc := lsps.NewLsps1SettlementService(client, openingStore, historyStore, node.NodeConfig, feeEstimator, feeStrategy, notificationService)
 		err = settlementSvc.Start(ctx)
 		if err != nil {
 			log.Error().Err(err).Msg("Failed to start LSPS1 settlement service")
@@ -235,9 +263,22 @@ func runLspd(cliCtx *cli.Context) error {
 		if lsps5MaxWebhooks <= 0 {
 			lsps5MaxWebhooks = DefaultLsps5MaxWebhooks
 		}
+
+		var lspNostrPubkey string
+		if lspNostrPrivKey != "" {
+			var err error
+			lspNostrPubkey, err = nostr.GetPublicKey(lspNostrPrivKey)
+			if err != nil {
+				log.Error().Err(err).Msg("Failed to derive Nostr public key")
+			}
+		}
+
 		lspsConfig := lsps.Config{
 			Lsps1MaxPendingOrders: lsps1MaxOrders,
 			Lsps5MaxWebhooks:      lsps5MaxWebhooks,
+			EnableLsps5Https:      true,
+			EnableLsps5Nostr:      lspNostrPrivKey != "",
+			Lsps5NostrPubkey:      lspNostrPubkey,
 		}
 
 		liquidityManager := lsps.NewLiquidityManager(client, openingStore)
@@ -270,6 +311,8 @@ func runLspd(cliCtx *cli.Context) error {
 		for _, settlementSvc := range settlementServices {
 			settlementSvc.Stop()
 		}
+
+		orderCleanupService.Stop()
 
 		cancel()
 	}
@@ -330,14 +373,37 @@ func initializeNodes(configs []*config.NodeConfig) ([]*common.Node, error) {
 
 	nodes := []*common.Node{}
 	for _, config := range configs {
-		pk, err := hex.DecodeString(config.FlspdPrivateKey)
+		hexKey, err := common.ParsePrivateKey(config.FlspdPrivateKey)
 		if err != nil {
-			return nil, fmt.Errorf("hex.DecodeString(config.flspdPrivateKey=%v) error: %v", config.FlspdPrivateKey, err)
+			return nil, fmt.Errorf("ParsePrivateKey(config.flspdPrivateKey) error: %v", err)
+		}
+
+		pk, err := hex.DecodeString(hexKey)
+		if err != nil {
+			return nil, fmt.Errorf("hex.DecodeString error: %v", err)
 		}
 
 		eciesPrivateKey := ecies.NewPrivateKeyFromBytes(pk)
 		eciesPublicKey := eciesPrivateKey.PublicKey
 		privateKey, publicKey := btcec.PrivKeyFromBytes(pk)
+
+		// Validate minimum channel capacity against LSP Policy (which is verified against Network limits)
+		if config.MinChannelCapacityLoki > 0 && config.MinChannelCapacityLoki < AbsoluteMinChannelCapacityLoki {
+			return nil, fmt.Errorf("minChannelCapacityLoki must be >= %d (LSP Limit), got %d", AbsoluteMinChannelCapacityLoki, config.MinChannelCapacityLoki)
+		}
+		if config.MinChannelCapacityLoki == 0 {
+			config.MinChannelCapacityLoki = AbsoluteMinChannelCapacityLoki
+		}
+
+		// Validate wumbo limits (PublicChannelAmount or explicit wumbo needs)
+		if config.PublicChannelAmount > int64(funding.MaxFlcFundingAmountWumbo) {
+			return nil, fmt.Errorf("publicChannelAmount %d exceeds MaxFlcFundingAmountWumbo %d", config.PublicChannelAmount, funding.MaxFlcFundingAmountWumbo)
+		}
+		// Warn if exceeding standard limit but under wumbo
+		if config.PublicChannelAmount > int64(funding.MaxFlcFundingAmount) {
+			log.Warn().Msgf("PublicChannelAmount %d exceeds standard MaxFlcFundingAmount %d. Ensure wumbo is enabled.", config.PublicChannelAmount, funding.MaxFlcFundingAmount)
+		}
+
 		node := &common.Node{
 			NodeConfig:      config,
 			PrivateKey:      privateKey,

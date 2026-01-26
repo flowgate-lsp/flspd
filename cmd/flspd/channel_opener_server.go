@@ -157,7 +157,7 @@ func (s *channelOpenerServer) RegisterPayment(
 		MaxClientToSelfDelay: pi.OpeningFeeParams.MaxClientToSelfDelay,
 		Promise:              pi.OpeningFeeParams.Promise,
 	}
-	err = s.store.RegisterPayment(token, params, pi.Destination, pi.PaymentHash, pi.PaymentSecret, pi.IncomingAmountMloki, pi.OutgoingAmountMloki, pi.Tag)
+	err = s.store.RegisterPayment(token, "", params, pi.Destination, pi.PaymentHash, pi.PaymentSecret, pi.IncomingAmountMloki, pi.OutgoingAmountMloki, pi.Tag)
 	if err != nil {
 		log.Error().Msgf("RegisterPayment() error: %v", err)
 		return nil, fmt.Errorf("RegisterPayment() error: %w", err)

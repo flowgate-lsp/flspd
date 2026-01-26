@@ -80,4 +80,5 @@ type OpeningStore interface {
 	CountLsps1Orders(clientNodeId string, state string, excludeExpiredBefore *time.Time) (int, error)
 	CountLsps5Webhooks(clientNodeId string) (int, error)
 	GetReservedLiquidity() (uint64, error)
+	ExpireStaleOrders() (int64, error)
 }

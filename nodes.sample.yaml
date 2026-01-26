@@ -1,0 +1,115 @@
+# FLSPD Nodes Configuration
+# This file contains the configuration for the LSP nodes.
+# It is a YAML list of node configurations.
+
+- # --- Identity & Connection ---
+  # Name of the LSP. If empty, the node's alias will be taken instead.
+  # The name is returned in the ChannelInformation api endpoint as a friendly name.
+  name: "FLSP"
+
+  # The public key of the lightning node. If empty, the node's pubkey will be taken instead.
+  # The pubkey is returned in the ChannelInformation api endpoint so clients can connect to the node.
+  nodePubkey: "REPLACE_WITH_PUBKEY"
+
+  # Hex encoded private key of the LSP. This is used to decrypt traffic from clients.
+  # Note this is not the private key of the node itself, but a separate key for the LSP service.
+  flspdPrivateKey: "REPLACE_WITH_PRIVKEY"
+
+  # Tokens used to authenticate to flspd. These tokens must be unique for each
+  # configured node, so it's obvious which node an RPC call is meant for.
+  tokens:
+    - "REPLACE_WITH_TOKEN"
+
+  # The network location of the lightning node, e.g. `12.34.56.78:9012` or `localhost:10011`.
+  host: "127.0.0.1:5521"
+
+  # Configuration for connecting to the LND node.
+  flnd:
+    # Address to the grpc api.
+    address: "flnd:10005"
+    
+    # Disable TLS verification (useful for testing/internal networks).
+    disableTls: false
+    
+    # TLS certificate for the grpc api (hex encoded or path).
+    cert: "REPLACE_WITH_HEX_CERT"
+    
+    # Macaroon to use (hex encoded or path).
+    macaroon: "REPLACE_WITH_HEX_MACAROON"
+
+  # --- Zero Conf & Channel Opening ---
+  # Minimum number of confirmations inputs must have for zero-conf channel opens.
+  # If 0, zero-conf is allowed. Can be overridden by jitEnabled=true.
+  minConfs: 6
+
+  # Minimum timelock delta required for the opened channel.
+  # Used in routing policy validation and channel opening requests.
+  timeLockDelta: 400
+
+  # Number of blocks after which an opened channel is considered confirmed.
+  targetConf: 6
+
+  # Channel capacity in loki added on top of the incoming payment amount when opening a new zero-conf channel.
+  additionalChannelCapacity: 21_000
+
+  # Minimum fee in milliloki charged for opening a channel.
+  # Used to populate OpeningFeeParams and as a fallback min fee.
+  channelMinimumFeeMloki: 2_000_000
+
+  # Fee for opening a zero conf channel per 10000 loki (basis points).
+  # Primarily used as a fallback for legacy clients or internal defaults.
+  channelFeePermyriad: 40
+
+  # Duration in seconds used to calculate the MinLifetime block height for OpeningFeeParams.
+  # MinLifetime = maxInactiveDuration / 600.
+  maxInactiveDuration: 3_888_000
+
+  # --- JIT Channels ---
+  # If true, enables JIT channels to override MinConfs to 0 (implicit zero conf).
+  jitEnabled: false
+  
+  # Minimum payment size in milliloki allowed for JIT channels.
+  minPaymentSizeMloki: 0
+
+  # Maximum payment size in milliloki allowed for JIT channels.
+  maxPaymentSizeMloki: 10_000_000_000
+
+  # Minimum channel capacity in loki. Must be >= 20000 (LND minimum).
+  minChannelCapacityLoki: 20_000
+
+  # Maximum client CLTV delay for JIT channels (optional, default 10000).
+  jitMaxClientToSelfDelay: 10_000
+
+  # Validity duration in seconds for the JIT fee parameters (optional, default 86400 / 24h).
+  jitValidUntilSeconds: 86_400
+
+  # --- LSPS1 Limits (Optional) ---
+  # Minimum required channel confirmations for LSPS1 orders (default 0).
+  lsps1MinRequiredChannelConfirmations: 0
+
+  # Minimum funding confirms within blocks for LSPS1 orders (default 1).
+  lsps1MinFundingConfirmsWithinBlocks: 1
+
+  # Maximum channel expiry in blocks (default 201600 / ~140 days).
+  lsps1MaxChannelExpiryBlocks: 201_600
+
+  # Duration in seconds before an LSPS1 order expires if not funded (default 86400 / 24h).
+  lsps1OrderExpirySeconds: 86_400
+
+  # Maximum initial client balance in Loki for LSPS1 orders (default 100000000).
+  lsps1MaxClientBalanceLoki: 100_000_000
+
+  # Maximum initial LSP balance in Loki for LSPS1 orders (default 100000000).
+  lsps1MaxLspBalanceLoki: 100_000_000
+
+  # --- Routing Policy & Fees ---
+  # The fee rate for routing payments (proportional, e.g. 0.000001 = 1ppm).
+  # Used for channel routing policy and calculating OpeningFeeParams proportional fee.
+  feeRate: 0.000001
+  
+  # The base fee in milliloki for routing payments over the channel.
+  baseFeeMloki: 1000
+  
+  # Smallest HTLC amount in milliloki routed over channels.
+  # Returned in the ChannelInformation RPC.
+  minHtlcMloki: 600

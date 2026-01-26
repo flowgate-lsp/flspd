@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	"fmt"
 	"math/big"
 	"time"
 
@@ -185,13 +186,22 @@ func (i *Interceptor) Intercept(req common.InterceptRequest) common.InterceptRes
 		if channelPoint == nil {
 			// TODO: When opening_fee_params is enforced, turn this check in a temporary channel failure.
 			if params == nil {
+				validity := time.Hour * 24
+				if i.config.JitValidUntilSeconds > 0 {
+					validity = time.Duration(i.config.JitValidUntilSeconds) * time.Second
+				}
+				maxDelay := uint32(10000)
+				if i.config.JitMaxClientToSelfDelay > 0 {
+					maxDelay = i.config.JitMaxClientToSelfDelay
+				}
+
 				log.Warn().Msgf("Intercept: DEPRECATED fee mechanism used, applying defaults. paymentHash=%s", reqPaymentHashStr)
 				params = &common.OpeningFeeParams{
 					MinFeeMloki:          uint64(i.config.ChannelMinimumFeeMloki),
 					Proportional:         uint32(i.config.ChannelFeePermyriad * 100),
-					ValidUntil:           time.Now().UTC().Add(time.Duration(time.Hour * 24)).Format(format.TIME_FORMAT),
+					ValidUntil:           time.Now().UTC().Add(validity).Format(format.TIME_FORMAT),
 					MinLifetime:          uint32(i.config.MaxInactiveDuration / 600),
-					MaxClientToSelfDelay: uint32(10000),
+					MaxClientToSelfDelay: maxDelay,
 				}
 			}
 
@@ -207,6 +217,9 @@ func (i *Interceptor) Intercept(req common.InterceptRequest) common.InterceptRes
 			validUntil, err := time.Parse(format.TIME_FORMAT, params.ValidUntil)
 			if err != nil {
 				log.Error().Msgf("paymentHash: %s, time.Parse(%s, %s) failed. Failing channel open: %v", reqPaymentHashStr, format.TIME_FORMAT, params.ValidUntil, err)
+				if data.orderId != "" {
+					go i.notificationService.NotifyOrderStateChanged(hex.EncodeToString(nextHop), data.orderId, "FAILED", "", fmt.Sprintf("invalid valid_until format: %v", err))
+				}
 				return common.InterceptResult{
 					Action:      common.INTERCEPT_FAIL_HTLC_WITH_CODE,
 					FailureCode: common.FAILURE_TEMPORARY_CHANNEL_FAILURE,
@@ -218,6 +231,9 @@ func (i *Interceptor) Intercept(req common.InterceptRequest) common.InterceptRes
 			if time.Now().UTC().After(validUntil) {
 				if !i.openingService.IsCurrentChainFeeCheaper(token, params) {
 					log.Warn().Msgf("Intercept: Expired payment registration, failing. paymentHash=%s validUntil=%s", reqPaymentHashStr, params.ValidUntil)
+					if data.orderId != "" {
+						go i.notificationService.NotifyOrderStateChanged(hex.EncodeToString(nextHop), data.orderId, "FAILED", "", "payment registration expired")
+					}
 					return common.InterceptResult{
 						Action:      common.INTERCEPT_FAIL_HTLC_WITH_CODE,
 						FailureCode: common.FAILURE_TEMPORARY_CHANNEL_FAILURE,
@@ -230,6 +246,9 @@ func (i *Interceptor) Intercept(req common.InterceptRequest) common.InterceptRes
 			channelPoint, err = i.openChannel(req.PaymentHash, destination, incomingAmountMloki, tag, data.isJit)
 			if err != nil {
 				log.Error().Msgf("paymentHash: %s, openChannel(%x, %v) err: %v", reqPaymentHashStr, destination, incomingAmountMloki, err)
+				if data.orderId != "" {
+					go i.notificationService.NotifyOrderStateChanged(hex.EncodeToString(nextHop), data.orderId, "FAILED", "", fmt.Sprintf("failed to open channel: %v", err))
+				}
 				return common.InterceptResult{
 					Action:      common.INTERCEPT_FAIL_HTLC_WITH_CODE,
 					FailureCode: common.FAILURE_TEMPORARY_CHANNEL_FAILURE,
@@ -237,8 +256,11 @@ func (i *Interceptor) Intercept(req common.InterceptRequest) common.InterceptRes
 			}
 		}
 
+		// Scale the forwarding amount proportionally for MPP parts
+		// For single-part: amt = outgoingAmountMloki (since req.IncomingAmountMloki == incomingAmountMloki)
+		// For MPP: each part contributes proportionally based on its incoming amount
 		var bigProd, bigAmt big.Int
-		amt := (bigAmt.Div(bigProd.Mul(big.NewInt(outgoingAmountMloki), big.NewInt(int64(req.OutgoingAmountMloki))), big.NewInt(incomingAmountMloki))).Int64()
+		amt := (bigAmt.Div(bigProd.Mul(big.NewInt(outgoingAmountMloki), big.NewInt(int64(req.IncomingAmountMloki))), big.NewInt(incomingAmountMloki))).Int64()
 
 		deadline := time.Now().Add(60 * time.Second)
 
@@ -319,6 +341,9 @@ func (i *Interceptor) Intercept(req common.InterceptRequest) common.InterceptRes
 		}
 
 		log.Warn().Msgf("Intercept: Channel open timed out. paymentHash=%s", reqPaymentHashStr)
+		if data.orderId != "" {
+			go i.notificationService.NotifyOrderStateChanged(hex.EncodeToString(nextHop), data.orderId, "FAILED", "", "channel open timed out")
+		}
 		return common.InterceptResult{
 			Action:      common.INTERCEPT_FAIL_HTLC_WITH_CODE,
 			FailureCode: common.FAILURE_TEMPORARY_CHANNEL_FAILURE,
@@ -415,6 +440,11 @@ func (i *Interceptor) openChannel(paymentHash, destination []byte, incomingAmoun
 		}
 	}
 
+	// Enforce Minimum Channel Capacity
+	if uint64(capacity) < i.config.MinChannelCapacityLoki {
+		return nil, fmt.Errorf("channel capacity %d is smaller than minimum %d", capacity, i.config.MinChannelCapacityLoki)
+	}
+
 	minConfs := i.config.MinConfs
 	if i.config.JitEnabled && isJit {
 		log.Debug().Msgf("Intercept: JIT enabled, overriding MinConfs to 0 for paymentHash=%x", paymentHash)
@@ -476,6 +506,7 @@ func (i *Interceptor) openChannel(paymentHash, destination []byte, incomingAmoun
 
 type interceptData struct {
 	token               string
+	orderId             string
 	params              *common.OpeningFeeParams
 	paymentHash         []byte
 	paymentSecret       []byte
@@ -488,7 +519,7 @@ type interceptData struct {
 }
 
 func (i *Interceptor) resolvePayment(req common.InterceptRequest) (*interceptData, error) {
-	token, params, paymentHash, paymentSecret, destination, incomingAmountMloki, outgoingAmountMloki, channelPoint, tag, err := i.store.PaymentInfo(req.PaymentHash)
+	token, orderId, params, paymentHash, paymentSecret, destination, incomingAmountMloki, outgoingAmountMloki, channelPoint, tag, err := i.store.PaymentInfo(req.PaymentHash)
 	isJit := false
 
 	// If err is nil but paymentHash/token is empty, it means not found in payments table.
@@ -511,13 +542,42 @@ func (i *Interceptor) resolvePayment(req common.InterceptRequest) (*interceptDat
 			paymentHash = req.PaymentHash
 			paymentSecret = []byte("lsps2-jit") // Mark as registered
 			if lsps2Order.PaymentSizeMloki != nil {
-				outgoingAmountMloki = int64(*lsps2Order.PaymentSizeMloki)
+				paymentSize := int64(*lsps2Order.PaymentSizeMloki)
+
+				// Calculate Fee matching computeOpeningFee in lsps/server.go
+				minFee := int64(lsps2Order.ParamsMinFeeMloki)
+				proportional := int64(lsps2Order.ParamsProportional)
+
+				// Fee = Ceil(Amount * Proportional / 1,000,000)
+				// Equivalent to (prod + 999999) / 1000000
+				prod := paymentSize * proportional
+				propFee := (prod + 999999) / 1_000_000
+
+				fee := minFee
+				if propFee > fee {
+					fee = propFee
+				}
+
+				outgoingAmountMloki = paymentSize - fee
+				if outgoingAmountMloki < 0 {
+					outgoingAmountMloki = 0
+				}
+
+				log.Info().Msgf("LSPS2 JIT: PaymentSize=%d, Fee=%d, Outgoing=%d", paymentSize, fee, outgoingAmountMloki)
+
+				// Validation: Ensure the sender paid enough to cover the PaymentSize (which fee is calculated from)
+				if int64(req.IncomingAmountMloki) < paymentSize {
+					log.Warn().Msgf("LSPS2 JIT: Underpayment detected. PaymentSize=%d > Incoming=%d", paymentSize, req.IncomingAmountMloki)
+					return nil, fmt.Errorf("underpayment: incoming amount %d is less than required payment size %d", req.IncomingAmountMloki, paymentSize)
+				}
 			}
 			incomingAmountMloki = int64(req.IncomingAmountMloki)
 			isJit = true
 
+			orderId = lsps2Order.Id
+
 			// Register the payment
-			err = i.store.RegisterPayment(token, params, destination, paymentHash, paymentSecret, incomingAmountMloki, outgoingAmountMloki, "")
+			err = i.store.RegisterPayment(token, orderId, params, destination, paymentHash, paymentSecret, incomingAmountMloki, outgoingAmountMloki, "")
 			if err != nil {
 				log.Error().Msgf("Failed to register LSPS2 payment: %v", err)
 				return nil, err
@@ -540,12 +600,21 @@ func (i *Interceptor) resolvePayment(req common.InterceptRequest) (*interceptDat
 
 					// Use default fee params for now as LSPS1 params aren't stored in DB in same format
 					// TODO: Store actual params from order creation
+					validity := time.Hour * 24
+					if i.config.JitValidUntilSeconds > 0 {
+						validity = time.Duration(i.config.JitValidUntilSeconds) * time.Second
+					}
+					maxDelay := uint32(10000)
+					if i.config.JitMaxClientToSelfDelay > 0 {
+						maxDelay = i.config.JitMaxClientToSelfDelay
+					}
+
 					params = &common.OpeningFeeParams{
 						MinFeeMloki:          uint64(i.config.ChannelMinimumFeeMloki),
 						Proportional:         uint32(i.config.ChannelFeePermyriad * 100),
-						ValidUntil:           time.Now().Add(24 * time.Hour).Format(format.TIME_FORMAT),
+						ValidUntil:           time.Now().Add(validity).Format(format.TIME_FORMAT),
 						MinLifetime:          uint32(i.config.MaxInactiveDuration / 600),
-						MaxClientToSelfDelay: uint32(10000),
+						MaxClientToSelfDelay: maxDelay,
 					}
 
 					paymentHash = req.PaymentHash
@@ -560,8 +629,10 @@ func (i *Interceptor) resolvePayment(req common.InterceptRequest) (*interceptDat
 					lsps1Tag := "lsps1.v1"
 					tag = &lsps1Tag
 
+					orderId = lsps1Order.OrderId
+
 					// Register this specific payment hash so we handle retries correctly
-					err = i.store.RegisterPayment(token, params, destination, paymentHash, paymentSecret, incomingAmountMloki, outgoingAmountMloki, lsps1Tag)
+					err = i.store.RegisterPayment(token, orderId, params, destination, paymentHash, paymentSecret, incomingAmountMloki, outgoingAmountMloki, lsps1Tag)
 					if err != nil {
 						log.Error().Msgf("Failed to register LSPS1 payment: %v", err)
 						return nil, err
@@ -577,6 +648,7 @@ func (i *Interceptor) resolvePayment(req common.InterceptRequest) (*interceptDat
 
 	return &interceptData{
 		token:               token,
+		orderId:             orderId,
 		params:              params,
 		paymentHash:         paymentHash,
 		paymentSecret:       paymentSecret,

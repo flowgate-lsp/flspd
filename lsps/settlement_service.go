@@ -3,6 +3,7 @@ package lsps
 import (
 	"context"
 	"encoding/hex"
+	"fmt"
 	"sync"
 
 	"github.com/flowgate-lsp/flspd/chain"
@@ -15,15 +16,16 @@ import (
 
 // Lsps1SettlementService monitors LND invoice settlements and processes LSPS1 orders
 type Lsps1SettlementService struct {
-	client       lightning.Client
-	openingStore common.OpeningStore
-	historyStore history.Store
-	config       *config.NodeConfig
-	feeEstimator chain.FeeEstimator
-	feeStrategy  chain.FeeStrategy
-	ctx          context.Context
-	cancel       context.CancelFunc
-	wg           sync.WaitGroup
+	client              lightning.Client
+	openingStore        common.OpeningStore
+	historyStore        history.Store
+	config              *config.NodeConfig
+	feeEstimator        chain.FeeEstimator
+	feeStrategy         chain.FeeStrategy
+	notificationService NotificationService
+	ctx                 context.Context
+	cancel              context.CancelFunc
+	wg                  sync.WaitGroup
 }
 
 // NewLsps1SettlementService creates a new settlement monitoring service
@@ -34,14 +36,16 @@ func NewLsps1SettlementService(
 	config *config.NodeConfig,
 	feeEstimator chain.FeeEstimator,
 	feeStrategy chain.FeeStrategy,
+	notificationService NotificationService,
 ) *Lsps1SettlementService {
 	return &Lsps1SettlementService{
-		client:       client,
-		openingStore: openingStore,
-		historyStore: historyStore,
-		config:       config,
-		feeEstimator: feeEstimator,
-		feeStrategy:  feeStrategy,
+		client:              client,
+		openingStore:        openingStore,
+		historyStore:        historyStore,
+		config:              config,
+		feeEstimator:        feeEstimator,
+		feeStrategy:         feeStrategy,
+		notificationService: notificationService,
 	}
 }
 
@@ -151,6 +155,11 @@ func (s *Lsps1SettlementService) processSettledInvoice(update *lightning.Invoice
 		Int64("client_balance", order.ClientBalanceLoki).
 		Msg("LSPS1 Settlement: Order marked as PAID")
 
+	// Notify client of state change
+	if s.notificationService != nil {
+		go s.notificationService.NotifyOrderStateChanged(order.PeerId, order.OrderId, string(Lsps1OrderStatePaid), "", "")
+	}
+
 	// Trigger automatic channel opening
 	go s.openChannelForOrder(order)
 }
@@ -166,6 +175,11 @@ func (s *Lsps1SettlementService) openChannelForOrder(order *common.Lsps1Order) {
 	peerId, err := hex.DecodeString(order.PeerId)
 	if err != nil {
 		log.Error().Err(err).Str("order_id", order.OrderId).Msg("LSPS1 Settlement: Failed to decode peer ID")
+		// Ideally notify failure here too, but can't without peerId maybe?
+		// We have peerId string in order.PeerId.
+		if s.notificationService != nil {
+			go s.notificationService.NotifyOrderStateChanged(order.PeerId, order.OrderId, string(Lsps1OrderStateFailed), "", "failed to decode peer id")
+		}
 		return
 	}
 
@@ -173,6 +187,9 @@ func (s *Lsps1SettlementService) openChannelForOrder(order *common.Lsps1Order) {
 	connected, err := s.client.IsConnected(peerId)
 	if err != nil {
 		log.Error().Err(err).Str("order_id", order.OrderId).Msg("LSPS1 Settlement: Failed to check peer connectivity")
+		if s.notificationService != nil {
+			go s.notificationService.NotifyOrderStateChanged(order.PeerId, order.OrderId, string(Lsps1OrderStateFailed), "", fmt.Sprintf("failed to check connectivity: %v", err))
+		}
 		return
 	}
 
@@ -182,6 +199,7 @@ func (s *Lsps1SettlementService) openChannelForOrder(order *common.Lsps1Order) {
 			Str("order_id", order.OrderId).
 			Str("peer_id", order.PeerId).
 			Msg("LSPS1 Settlement: Peer not connected, skipping automatic open (will be handled by JIT or manual)")
+		// Not a failure per se, just deferred. Do not notify FAILED.
 		return
 	}
 
@@ -221,6 +239,16 @@ func (s *Lsps1SettlementService) openChannelForOrder(order *common.Lsps1Order) {
 
 	if err != nil {
 		log.Error().Err(err).Str("order_id", order.OrderId).Msg("LSPS1 Settlement: Failed to open channel")
+
+		// Update state to FAILED
+		dbErr := s.openingStore.UpdateLsps1OrderState(order.OrderId, string(Lsps1OrderStateFailed), string(Lsps1OrderStatePaid))
+		if dbErr != nil {
+			log.Error().Err(dbErr).Str("order_id", order.OrderId).Msg("LSPS1 Settlement: Failed to update order state to FAILED")
+		}
+
+		if s.notificationService != nil {
+			go s.notificationService.NotifyOrderStateChanged(order.PeerId, order.OrderId, string(Lsps1OrderStateFailed), "", fmt.Sprintf("failed to open channel: %v", err))
+		}
 		return
 	}
 
@@ -244,5 +272,10 @@ func (s *Lsps1SettlementService) openChannelForOrder(order *common.Lsps1Order) {
 	err = s.openingStore.UpdateLsps1OrderState(order.OrderId, string(Lsps1OrderStateCompleted), string(Lsps1OrderStatePaid))
 	if err != nil {
 		log.Error().Err(err).Str("order_id", order.OrderId).Msg("LSPS1 Settlement: Failed to update order state to COMPLETED")
+	}
+
+	// Notify client of COMPLETED state with channel point
+	if s.notificationService != nil {
+		go s.notificationService.NotifyOrderStateChanged(order.PeerId, order.OrderId, string(Lsps1OrderStateCompleted), channelPoint.String(), "")
 	}
 }

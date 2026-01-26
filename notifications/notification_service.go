@@ -113,6 +113,12 @@ func (s *NotificationService) Notify(
 	for _, w := range webhooks {
 		go func(w *common.Lsps5Webhook) {
 			defer wg.Done()
+			log.Trace().
+				Str("component", string(common.LogComponentNotifications)).
+				Str("action", "dispatch_one").
+				Str("url", w.Url).
+				Str("transport", w.Transport).
+				Msg("Notifications: dispatching to single webhook")
 			currentNotified := s.deliverOne(ctx, lightning.Lsps5MethodPaymentIncoming, nil, w)
 			if currentNotified {
 				mtx.Lock()
@@ -235,6 +241,79 @@ func (s *NotificationService) NotifyLiquidityManagementRequest(
 	return notified, nil
 }
 
+// OrderStateChangedParams contains parameters for the order_state_changed notification
+type OrderStateChangedParams struct {
+	OrderId      string `json:"order_id"`
+	State        string `json:"state"`
+	ChannelPoint string `json:"channel_point,omitempty"`
+	Error        string `json:"error,omitempty"`
+}
+
+// NotifyOrderStateChanged sends the lsps5.order_state_changed notification
+// to all registered webhooks when an order transitions state (PAID, COMPLETED, etc.)
+func (s *NotificationService) NotifyOrderStateChanged(
+	pubkey string,
+	orderId string,
+	state string,
+	channelPoint string,
+	errorMsg string,
+) (bool, error) {
+	webhooks, err := s.openingStore.GetLsps5Webhooks(pubkey)
+	if err != nil {
+		log.Error().
+			Err(err).
+			Str("component", string(common.LogComponentNotifications)).
+			Str("action", string(common.LogActionFailure)).
+			Str("pubkey", pubkey).
+			Msg("Notifications: Failed to fetch webhooks for order_state_changed")
+		return false, err
+	}
+
+	params := &OrderStateChangedParams{
+		OrderId:      orderId,
+		State:        state,
+		ChannelPoint: channelPoint,
+		Error:        errorMsg,
+	}
+
+	log.Debug().
+		Str("component", string(common.LogComponentNotifications)).
+		Str("action", string(common.LogActionRequest)).
+		Str("pubkey", pubkey).
+		Str("order_id", orderId).
+		Str("state", state).
+		Int("webhooks_count", len(webhooks)).
+		Msg("Notifications: Dispatching lsps5.order_state_changed to all webhooks")
+
+	var mtx sync.Mutex
+	var wg sync.WaitGroup
+	wg.Add(len(webhooks))
+	notified := false
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*7)
+
+	for _, w := range webhooks {
+		go func(w *common.Lsps5Webhook) {
+			defer wg.Done()
+			log.Trace().
+				Str("component", string(common.LogComponentNotifications)).
+				Str("action", "dispatch_one").
+				Str("url", w.Url).
+				Str("transport", w.Transport).
+				Msg("Notifications: dispatching to single webhook")
+			currentNotified := s.deliverOne(ctx, lightning.Lsps5MethodOrderStateChanged, params, w)
+			if currentNotified {
+				mtx.Lock()
+				notified = true
+				mtx.Unlock()
+			}
+		}(w)
+	}
+
+	wg.Wait()
+	cancel()
+	return notified, nil
+}
+
 // NotifyOnionMessageIncoming sends the lsps5.onion_message_incoming notification.
 func (s *NotificationService) NotifyOnionMessageIncoming(
 	pubkey string,
@@ -278,6 +357,14 @@ func (s *NotificationService) deliverOne(
 	s.mtx.Lock()
 	transport, ok := s.transports[TransportType(webhook.Transport)]
 	s.mtx.Unlock()
+
+	log.Trace().
+		Str("component", string(common.LogComponentNotifications)).
+		Str("action", "deliver_one").
+		Str("method", method).
+		Str("url", webhook.Url).
+		Str("transport_type", webhook.Transport).
+		Msg("Notifications: deliverOne started")
 
 	if !ok {
 		log.Error().

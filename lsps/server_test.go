@@ -41,6 +41,11 @@ func (m *MockLndClient) AddInvoice(ctx context.Context, req *lnrpc.Invoice) (*ln
 	return args.Get(0).(*lnrpc.AddInvoiceResponse), args.Error(1)
 }
 
+func (m *MockLndClient) GetBlockHeight() (uint32, error) {
+	args := m.Called()
+	return args.Get(0).(uint32), args.Error(1)
+}
+
 type MockNodesService struct {
 	mock.Mock
 }
@@ -56,6 +61,11 @@ func (m *MockNodesService) GetNode(token string) (*common.Node, error) {
 func (m *MockNodesService) GetNodes() []*common.Node {
 	args := m.Called()
 	return args.Get(0).([]*common.Node)
+}
+
+func (m *MockNodesService) GetMinChannelCapacity() uint64 {
+	args := m.Called()
+	return args.Get(0).(uint64)
 }
 
 type MockOpeningService struct {
@@ -153,6 +163,11 @@ func (m *MockNotificationService) NotifyWebhookRegistered(pubkey string, webhook
 	return args.Bool(0)
 }
 
+func (m *MockNotificationService) NotifyOrderStateChanged(pubkey string, orderId string, state string, channelPoint string, errorMsg string) (bool, error) {
+	args := m.Called(pubkey, orderId, state, channelPoint, errorMsg)
+	return args.Bool(0), args.Error(1)
+}
+
 // Tests
 func TestLsps2Buy(t *testing.T) {
 	// Setup
@@ -178,6 +193,7 @@ func TestLsps2Buy(t *testing.T) {
 	}
 
 	mockNodes.On("GetNodes").Return([]*common.Node{node})
+	mockNodes.On("GetMinChannelCapacity").Return(uint64(20000))
 
 	// Valid Params
 	validUntil := time.Now().Add(24 * time.Hour).Format(time.RFC3339)
@@ -197,10 +213,10 @@ func TestLsps2Buy(t *testing.T) {
 			MinLifetime:          10080,
 			MaxClientToSelfDelay: 2016,
 			MinPaymentSizeMloki:  "1000",
-			MaxPaymentSizeMloki:  "1000000",
+			MaxPaymentSizeMloki:  "100000000",
 			Promise:              "valid_promise",
 		},
-		PaymentSizeMloki: "100000",
+		PaymentSizeMloki: "50000000",
 	}
 	paramsBytes, _ := json.Marshal(buyParams)
 	req := &JsonRpcRequest{
@@ -262,6 +278,7 @@ func TestLsps2Buy_PaymentSizeValidation(t *testing.T) {
 	// Mock Liquidity Checks (Assuming they pass for validation tests unless specific failure tested)
 	// Actually for validation failure BEFORE liquidity check, we don't need to mock it.
 	// But let's mock it for the ones that reach it.
+	mockNodes.On("GetMinChannelCapacity").Return(uint64(0)).Maybe()
 
 	// Case 1: Payment Size Too Small (Fee >= Amount) -> Reaches liquidity check first?
 	// Handler sequence:
@@ -355,6 +372,9 @@ func TestLsps1CreateOrder(t *testing.T) {
 	}
 	mockOpening.On("GetFeeParamsMenu", "test-token", node.PrivateKey).Return(fees, nil)
 	mockOpening.On("CountLsps1Orders", mock.Anything, "CREATED", mock.AnythingOfType("*time.Time")).Return(0, nil)
+
+	// Mock Min Channel Capacity
+	mockNodes.On("GetMinChannelCapacity").Return(uint64(20000))
 
 	// Mock Liquidity Check (Success)
 	mockLiquidity.On("CheckOnChainLiquidity", mock.Anything, mock.Anything).Return(nil)

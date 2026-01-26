@@ -130,6 +130,7 @@ func TestMatrixProcessSettledInvoice(t *testing.T) {
 					// Open Channel
 					if tt.openChannelError != nil {
 						mockClient.On("OpenChannel", mock.Anything).Return(nil, tt.openChannelError)
+						mockStore.On("UpdateLsps1OrderState", tt.order.OrderId, string(Lsps1OrderStateFailed), string(Lsps1OrderStatePaid)).Return(nil)
 					} else {
 						chanPoint := &wire.OutPoint{Hash: chainhash.Hash{}, Index: 0}
 						mockClient.On("OpenChannel", mock.Anything).Return(chanPoint, nil)
@@ -143,7 +144,7 @@ func TestMatrixProcessSettledInvoice(t *testing.T) {
 				}
 			}
 
-			svc := NewLsps1SettlementService(mockClient, mockStore, mockHistory, &config.NodeConfig{}, mockFee, chain.FeeStrategyEconomy)
+			svc := NewLsps1SettlementService(mockClient, mockStore, mockHistory, &config.NodeConfig{}, mockFee, chain.FeeStrategyEconomy, nil)
 
 			svc.processSettledInvoice(&lightning.InvoiceUpdate{
 				PaymentRequest: tt.invoice,

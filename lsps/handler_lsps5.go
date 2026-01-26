@@ -83,6 +83,11 @@ func (s *Server) handleLsps5SetWebhook(req *JsonRpcRequest, peer []byte) *JsonRp
 	if transport == "" {
 		transport = "push"
 	}
+	log.Trace().
+		Str("component", string(common.LogComponentLSPS5)).
+		Str("action", string(common.LogActionValidate)).
+		Str("transport", transport).
+		Msg("LSPS5: set_webhook transport selection")
 
 	if transport == "push" {
 		// Check if HTTPS transport is enabled
@@ -110,9 +115,20 @@ func (s *Server) handleLsps5SetWebhook(req *JsonRpcRequest, peer []byte) *JsonRp
 		}
 		// Use library validation for URI
 		if _, _, err := lsps5.ParseLsp5Uri(params.Webhook); err != nil {
+			log.Debug().
+				Err(err).
+				Str("component", string(common.LogComponentLSPS5)).
+				Str("action", string(common.LogActionValidate)).
+				Str("uri", params.Webhook).
+				Msg("LSPS5: set_webhook invalid nostr URI")
 			return NewJsonRpcErrorResponse(req.Id, Lsps5ErrorUrlParseError, fmt.Sprintf("invalid_nostr_uri: %v", err), nil)
 		}
 	} else {
+		log.Warn().
+			Str("component", string(common.LogComponentLSPS5)).
+			Str("action", string(common.LogActionReject)).
+			Str("transport", transport).
+			Msg("LSPS5: set_webhook unsupported transport")
 		return NewJsonRpcErrorResponse(req.Id, -32602, "unsupported_transport", nil)
 	}
 
@@ -127,6 +143,10 @@ func (s *Server) handleLsps5SetWebhook(req *JsonRpcRequest, peer []byte) *JsonRp
 			Msg("LSPS5: Failed to fetch existing webhooks")
 		return NewJsonRpcErrorResponse(req.Id, -32603, "Internal error", nil)
 	}
+	log.Trace().
+		Str("component", string(common.LogComponentLSPS5)).
+		Int("existing_count", len(existingWebhooks)).
+		Msg("LSPS5: set_webhook fetched existing webhooks")
 
 	noChange := false
 	found := false
@@ -152,6 +172,15 @@ func (s *Server) handleLsps5SetWebhook(req *JsonRpcRequest, peer []byte) *JsonRp
 		CreatedAt:    time.Now(),
 	}
 
+	log.Trace().
+		Str("component", string(common.LogComponentLSPS5)).
+		Str("action", "registering").
+		Str("transport", transport).
+		Str("url", params.Webhook).
+		Bool("no_change", noChange).
+		Bool("found", found).
+		Msg("LSPS5: set_webhook proceeding to register")
+
 	if !noChange {
 		err = s.openingService.RegisterLsps5Webhook(webhook)
 		if err != nil {
@@ -165,6 +194,7 @@ func (s *Server) handleLsps5SetWebhook(req *JsonRpcRequest, peer []byte) *JsonRp
 
 		// bLIP-55: Send lsps5.webhook_registered notification to newly registered webhook
 		if s.notificationService != nil {
+			log.Trace().Msg("LSPS5: set_webhook triggering immediate notification")
 			go s.notificationService.NotifyWebhookRegistered(peerId, webhook)
 		}
 	}

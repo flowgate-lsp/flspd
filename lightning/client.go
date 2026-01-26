@@ -36,11 +36,20 @@ type OpenChannelRequest struct {
 	AnnounceChannel bool
 }
 
+type HTLC struct {
+	Incoming         bool
+	AmountMloki      uint64
+	HashLock         []byte
+	ExpirationHeight uint32
+	HtlcIndex        uint64
+}
+
 type Channel struct {
 	AliasScid     *ShortChannelID
 	ConfirmedScid *ShortChannelID
 	ChannelPoint  *wire.OutPoint
 	PeerId        []byte
+	PendingHtlcs  []HTLC
 }
 
 type Client interface {
@@ -55,6 +64,7 @@ type Client interface {
 	ListChannels() ([]*Channel, error)
 	SubscribeInvoices() (<-chan *InvoiceUpdate, <-chan error, error)
 	WalletBalance(ctx context.Context) (*WalletBalanceResult, error)
+	GetBlockHeight() (uint32, error)
 }
 
 type WalletBalanceResult struct {

@@ -60,6 +60,12 @@ func (t *HTTPSTransport) Send(ctx context.Context, webhookURL string, method str
 	// Generate ISO8601 timestamp per bLIP-55: YYYY-MM-DDThh:mm:ss.uuuZ
 	timestamp := time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
 
+	log.Trace().
+		Str("component", string(common.LogComponentNotifications)).
+		Str("action", "signing").
+		Str("timestamp", timestamp).
+		Msg("HTTPSTransport: signing message")
+
 	// Sign the message per bLIP-55 specification
 	signature, err := lightning.SignLsps5Message(privKey, timestamp, body)
 	if err != nil {
@@ -87,6 +93,13 @@ func (t *HTTPSTransport) Send(ctx context.Context, webhookURL string, method str
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("x-lsps5-timestamp", timestamp)
 	req.Header.Set("x-lsps5-signature", signature)
+
+	log.Trace().
+		Str("component", string(common.LogComponentNotifications)).
+		Str("action", "sending_http").
+		Str("url", webhookURL).
+		Str("signature", signature).
+		Msg("HTTPSTransport: sending request")
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

@@ -49,6 +49,7 @@ func TestTableHandleLsps1CreateOrder(t *testing.T) {
 				})).Return(nil)
 				store.On("GetFeeParamsMenu", mock.Anything, mock.Anything).Return([]*common.OpeningFeeParams{}, nil)
 				nodes.On("GetNodes").Return([]*common.Node{{NodeConfig: &config.NodeConfig{FeeRate: 0.000001}}}, nil)
+				nodes.On("GetMinChannelCapacity").Return(uint64(20000))
 				liquidity.On("CheckOnChainLiquidity", mock.Anything, mock.Anything).Return(nil)
 			},
 			config:             lspsConfig{Lsps1MaxPendingOrders: 5},
@@ -63,7 +64,8 @@ func TestTableHandleLsps1CreateOrder(t *testing.T) {
 			},
 			peerId: "02677063d89856f4d04be859e9a4d3393165b6f3cd78641bc3c4ef9ca2fde37f",
 			mockSetup: func(store *MockOpeningStore, lnd *MockLightningClient, nodes *MockNodesService, liquidity *MockLiquidityManager) {
-				// No mocks expected called
+				// GetNodes is now called early for config values
+				nodes.On("GetNodes").Return([]*common.Node{{NodeConfig: &config.NodeConfig{}}}, nil).Maybe()
 			},
 			config:               lspsConfig{Lsps1MaxPendingOrders: 5},
 			expectedError:        -32602,
@@ -77,7 +79,8 @@ func TestTableHandleLsps1CreateOrder(t *testing.T) {
 			},
 			peerId: "02677063d89856f4d04be859e9a4d3393165b6f3cd78641bc3c4ef9ca2fde37f",
 			mockSetup: func(store *MockOpeningStore, lnd *MockLightningClient, nodes *MockNodesService, liquidity *MockLiquidityManager) {
-				// No mocks expected called
+				// GetNodes is now called early for config values
+				nodes.On("GetNodes").Return([]*common.Node{{NodeConfig: &config.NodeConfig{}}}, nil).Maybe()
 			},
 			config:               lspsConfig{Lsps1MaxPendingOrders: 5},
 			expectedError:        100,                            // Application specific error
@@ -93,6 +96,7 @@ func TestTableHandleLsps1CreateOrder(t *testing.T) {
 				store.On("GetFeeParamsMenu", mock.Anything, mock.Anything).Return([]*common.OpeningFeeParams{}, nil)
 				store.On("CountLsps1Orders", mock.Anything, string(Lsps1OrderStateCreated), mock.Anything).Return(5, nil) // Already 5
 				nodes.On("GetNodes").Return([]*common.Node{{NodeConfig: &config.NodeConfig{FeeRate: 0.000001}}}, nil)
+				nodes.On("GetMinChannelCapacity").Return(uint64(20000))
 				liquidity.On("CheckOnChainLiquidity", mock.Anything, mock.Anything).Return(nil)
 			},
 			config:               lspsConfig{Lsps1MaxPendingOrders: 5},

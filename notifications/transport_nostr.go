@@ -49,6 +49,12 @@ func (t *NostrTransport) Send(ctx context.Context, targetUri string, method stri
 		return fmt.Errorf("no relays specified in URI")
 	}
 
+	log.Trace().
+		Str("action", "parsed_uri").
+		Str("target_pubkey", targetPubkey).
+		Int("relays_count", len(relays)).
+		Msg("NostrTransport: preparing event")
+
 	// 2. Create Event (Pure Logic - returns unsigned)
 	ev, err := t.lsps5.CreateNotificationEvent(targetPubkey, method, params)
 	if err != nil {
@@ -60,6 +66,11 @@ func (t *NostrTransport) Send(ctx context.Context, targetUri string, method stri
 		return fmt.Errorf("failed to sign event: %v", err)
 	}
 
+	log.Trace().
+		Str("action", "signed_event").
+		Str("event_id", ev.ID).
+		Msg("NostrTransport: event signed")
+
 	// 4. Publish to Relays (Transport Logic)
 	var wg sync.WaitGroup
 	var success bool
@@ -69,6 +80,7 @@ func (t *NostrTransport) Send(ctx context.Context, targetUri string, method stri
 		wg.Add(1)
 		go func(relayUrl string) {
 			defer wg.Done()
+			log.Trace().Str("relay", relayUrl).Msg("NostrTransport: connecting to relay")
 			relay, err := t.relayPool.GetOrConnect(ctx, relayUrl)
 			if err != nil {
 				log.Warn().Err(err).Str("relay", relayUrl).Msg("Failed to connect to Nostr relay")

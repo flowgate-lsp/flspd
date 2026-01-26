@@ -22,7 +22,7 @@ func NewPostgresInterceptStore(pool *pgxpool.Pool) *PostgresInterceptStore {
 	return &PostgresInterceptStore{pool: pool}
 }
 
-func (s *PostgresInterceptStore) PaymentInfo(htlcPaymentHash []byte) (string, *common.OpeningFeeParams, []byte, []byte, []byte, int64, int64, *wire.OutPoint, *string, error) {
+func (s *PostgresInterceptStore) PaymentInfo(htlcPaymentHash []byte) (string, string, *common.OpeningFeeParams, []byte, []byte, []byte, int64, int64, *wire.OutPoint, *string, error) {
 	var (
 		p, tag                                   *string
 		paymentHash, paymentSecret, destination  []byte
@@ -39,7 +39,7 @@ func (s *PostgresInterceptStore) PaymentInfo(htlcPaymentHash []byte) (string, *c
 		if err == pgx.ErrNoRows {
 			err = nil
 		}
-		return "", nil, nil, nil, nil, 0, 0, nil, nil, err
+		return "", "", nil, nil, nil, nil, 0, 0, nil, nil, err
 	}
 
 	var cp *wire.OutPoint
@@ -55,10 +55,10 @@ func (s *PostgresInterceptStore) PaymentInfo(htlcPaymentHash []byte) (string, *c
 		err = json.Unmarshal([]byte(*p), &extParams)
 		if err != nil {
 			log.Error().Msgf("Failed to unmarshal OpeningFeeParams '%s': %v", *p, err)
-			return "", nil, nil, nil, nil, 0, 0, nil, nil, err
+			return "", "", nil, nil, nil, nil, 0, 0, nil, nil, err
 		}
 	}
-	return extParams.Token, &extParams.Params, paymentHash, paymentSecret, destination, incomingAmountMloki, outgoingAmountMloki, cp, tag, nil
+	return extParams.Token, extParams.OrderId, &extParams.Params, paymentHash, paymentSecret, destination, incomingAmountMloki, outgoingAmountMloki, cp, tag, nil
 }
 
 func (s *PostgresInterceptStore) SetFundingTx(paymentHash []byte, channelPoint *wire.OutPoint) error {
@@ -71,7 +71,7 @@ func (s *PostgresInterceptStore) SetFundingTx(paymentHash []byte, channelPoint *
 	return err
 }
 
-func (s *PostgresInterceptStore) RegisterPayment(token string, params *common.OpeningFeeParams, destination, paymentHash, paymentSecret []byte, incomingAmountMloki, outgoingAmountMloki int64, tag string) error {
+func (s *PostgresInterceptStore) RegisterPayment(token string, orderId string, params *common.OpeningFeeParams, destination, paymentHash, paymentSecret []byte, incomingAmountMloki, outgoingAmountMloki int64, tag string) error {
 	var t *string
 	if tag != "" {
 		t = &tag
@@ -80,7 +80,7 @@ func (s *PostgresInterceptStore) RegisterPayment(token string, params *common.Op
 	p := []byte{}
 	if params != nil {
 		var err error
-		p, err = json.Marshal(extendedParams{Token: token, Params: *params})
+		p, err = json.Marshal(extendedParams{Token: token, OrderId: orderId, Params: *params})
 		if err != nil {
 			log.Error().Msgf("Failed to marshal OpeningFeeParams: %v", err)
 			return err

@@ -12,19 +12,19 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// LSPS1 Constants (Limits)
+// LSPS1 Defaults (Limits)
 const (
-	Lsps1MinRequiredChannelConfirmations = 0
-	Lsps1MinFundingConfirmsWithinBlocks  = 1
-	Lsps1SupportsZeroChannelReserve      = true
-	Lsps1MaxChannelExpiryBlocks          = 201600 // ~140 days (1 minute blocks)
-	Lsps1MinInitialClientBalanceLoki     = 0
-	Lsps1MaxInitialClientBalanceLoki     = 100_000_000 // 100 Loki Coins? Or 100M sat-equivalent? 100M units.
-	Lsps1MinInitialLspBalanceLoki        = 0
-	Lsps1MaxInitialLspBalanceLoki        = 100_000_000
-	Lsps1MinChannelBalanceLoki           = 50_000
-	Lsps1MaxChannelBalanceLoki           = 100_000_000
-	Lsps1OrderExpiryDuration             = 24 * time.Hour // Invoice and order expiry time
+	DefaultLsps1MinRequiredChannelConfirmations = 0
+	DefaultLsps1MinFundingConfirmsWithinBlocks  = 1
+	DefaultLsps1SupportsZeroChannelReserve      = true
+	DefaultLsps1MaxChannelExpiryBlocks          = 201600 // ~140 days (1 minute blocks)
+	DefaultLsps1MinInitialClientBalanceLoki     = 0
+	DefaultLsps1MaxInitialClientBalanceLoki     = 100_000_000 // 100 Loki Coins? Or 100M sat-equivalent? 100M units.
+	DefaultLsps1MinInitialLspBalanceLoki        = 0
+	DefaultLsps1MaxInitialLspBalanceLoki        = 100_000_000
+	DefaultLsps1MinChannelBalanceLoki           = 50_000
+	DefaultLsps1MaxChannelBalanceLoki           = 100_000_000
+	DefaultLsps1OrderExpiryDuration             = 24 * time.Hour // Invoice and order expiry time
 )
 
 // Lsps1OrderState defines the state of an LSPS1 order
@@ -63,22 +63,83 @@ type Lsps1GetInfoResponse struct {
 	MaxChannelBalanceLoki           string `json:"max_channel_balance_loki"`
 }
 
+func (s *Server) getLsps1ConfigValues() (uint16, uint16, uint32, time.Duration, uint64, uint64) {
+	minConf := uint16(DefaultLsps1MinRequiredChannelConfirmations)
+	// minConf default is 0, so if config is 0 it matches. If user wants other, they set it.
+	// But actually we have no way to distinguish distinct 0 from unset 0 without pointer.
+	// Assuming 0 is the intended default always.
+	// If the user sets it to 6 in config, we use 6.
+	// Wait, we need to read from config.
+	nodes := s.nodesService.GetNodes()
+	var cfgMinConf uint16
+	var cfgFundingConf uint16
+	var cfgMaxExpiry uint32
+	var cfgOrderExpiry uint32
+	var cfgMaxClient uint64
+	var cfgMaxLsp uint64
+
+	if len(nodes) > 0 && nodes[0].NodeConfig != nil {
+		c := nodes[0].NodeConfig
+		cfgMinConf = c.Lsps1MinRequiredChannelConfirmations
+		cfgFundingConf = c.Lsps1MinFundingConfirmsWithinBlocks
+		cfgMaxExpiry = c.Lsps1MaxChannelExpiryBlocks
+		cfgOrderExpiry = c.Lsps1OrderExpirySeconds
+		cfgMaxClient = c.Lsps1MaxClientBalanceLoki
+		cfgMaxLsp = c.Lsps1MaxLspBalanceLoki
+	}
+
+	minReqConf := minConf
+	if cfgMinConf > 0 {
+		minReqConf = cfgMinConf
+	}
+
+	fundingConf := uint16(DefaultLsps1MinFundingConfirmsWithinBlocks)
+	if cfgFundingConf > 0 {
+		fundingConf = cfgFundingConf
+	}
+
+	maxExpiry := uint32(DefaultLsps1MaxChannelExpiryBlocks)
+	if cfgMaxExpiry > 0 {
+		maxExpiry = cfgMaxExpiry
+	}
+
+	orderExpiry := DefaultLsps1OrderExpiryDuration
+	if cfgOrderExpiry > 0 {
+		orderExpiry = time.Duration(cfgOrderExpiry) * time.Second
+	}
+
+	maxClient := uint64(DefaultLsps1MaxInitialClientBalanceLoki)
+	if cfgMaxClient > 0 {
+		maxClient = cfgMaxClient
+	}
+
+	maxLsp := uint64(DefaultLsps1MaxInitialLspBalanceLoki)
+	if cfgMaxLsp > 0 {
+		maxLsp = cfgMaxLsp
+	}
+
+	return minReqConf, fundingConf, maxExpiry, orderExpiry, maxClient, maxLsp
+}
+
 func (s *Server) handleLsps1GetInfo(req *JsonRpcRequest) *JsonRpcResponse {
 	log.Trace().
 		Str("component", string(common.LogComponentLSPS1)).
 		Str("action", string(common.LogActionRequest)).
 		Msg("LSPS1: Received get_info request")
+
+	minReqConf, fundingConf, maxExpiry, _, maxClient, maxLsp := s.getLsps1ConfigValues()
+
 	resp := Lsps1GetInfoResponse{
-		MinRequiredChannelConfirmations: Lsps1MinRequiredChannelConfirmations,
-		MinFundingConfirmsWithinBlocks:  Lsps1MinFundingConfirmsWithinBlocks,
-		SupportsZeroChannelReserve:      Lsps1SupportsZeroChannelReserve,
-		MaxChannelExpiryBlocks:          Lsps1MaxChannelExpiryBlocks,
-		MinInitialClientBalanceLoki:     fmt.Sprintf("%d", Lsps1MinInitialClientBalanceLoki),
-		MaxInitialClientBalanceLoki:     fmt.Sprintf("%d", Lsps1MaxInitialClientBalanceLoki),
-		MinInitialLspBalanceLoki:        fmt.Sprintf("%d", Lsps1MinInitialLspBalanceLoki),
-		MaxInitialLspBalanceLoki:        fmt.Sprintf("%d", Lsps1MaxInitialLspBalanceLoki),
-		MinChannelBalanceLoki:           fmt.Sprintf("%d", Lsps1MinChannelBalanceLoki),
-		MaxChannelBalanceLoki:           fmt.Sprintf("%d", Lsps1MaxChannelBalanceLoki),
+		MinRequiredChannelConfirmations: minReqConf,
+		MinFundingConfirmsWithinBlocks:  fundingConf,
+		SupportsZeroChannelReserve:      DefaultLsps1SupportsZeroChannelReserve,
+		MaxChannelExpiryBlocks:          maxExpiry,
+		MinInitialClientBalanceLoki:     fmt.Sprintf("%d", DefaultLsps1MinInitialClientBalanceLoki),
+		MaxInitialClientBalanceLoki:     fmt.Sprintf("%d", maxClient),
+		MinInitialLspBalanceLoki:        fmt.Sprintf("%d", DefaultLsps1MinInitialLspBalanceLoki),
+		MaxInitialLspBalanceLoki:        fmt.Sprintf("%d", maxLsp),
+		MinChannelBalanceLoki:           fmt.Sprintf("%d", DefaultLsps1MinChannelBalanceLoki),
+		MaxChannelBalanceLoki:           fmt.Sprintf("%d", DefaultLsps1MaxChannelBalanceLoki),
 	}
 	log.Trace().
 		Str("component", string(common.LogComponentLSPS1)).
@@ -88,8 +149,9 @@ func (s *Server) handleLsps1GetInfo(req *JsonRpcRequest) *JsonRpcResponse {
 }
 
 // isOrderExpired checks if an order is expired based on the invoice expiry duration
-func isOrderExpired(createdAt time.Time) bool {
-	expiryTime := createdAt.Add(Lsps1OrderExpiryDuration)
+func (s *Server) isOrderExpired(createdAt time.Time) bool {
+	_, _, _, orderExpiry, _, _ := s.getLsps1ConfigValues()
+	expiryTime := createdAt.Add(orderExpiry)
 	return time.Now().After(expiryTime)
 }
 
@@ -161,8 +223,19 @@ func (s *Server) handleLsps1CreateOrder(req *JsonRpcRequest, peer []byte) *JsonR
 	}
 
 	// Validation: Check bounds
-	if clientBalance < Lsps1MinInitialClientBalanceLoki || clientBalance > Lsps1MaxInitialClientBalanceLoki {
-		return NewJsonRpcErrorResponse(req.Id, 100, "Client balance out of bounds", nil)
+	_, _, _, orderExpiry, minClient, maxClient := s.getLsps1ConfigValues()
+	_, _, _, _, _, maxLsp := s.getLsps1ConfigValues() // Retrieve maxLsp separately to keep previous variables valid if needed, or just map all.
+
+	if clientBalance < uint64(DefaultLsps1MinInitialClientBalanceLoki) || clientBalance > maxClient {
+		return NewJsonRpcErrorResponse(req.Id, 100, "Client balance out of bounds", map[string]interface{}{
+			"min": minClient,
+			"max": maxClient,
+		})
+	}
+	if lspBalance > maxLsp {
+		return NewJsonRpcErrorResponse(req.Id, 100, "LSP balance out of bounds", map[string]interface{}{
+			"max": maxLsp,
+		})
 	}
 
 	// Validation: Check On-Chain Liquidity
@@ -174,6 +247,22 @@ func (s *Server) handleLsps1CreateOrder(req *JsonRpcRequest, peer []byte) *JsonR
 			Str("action", string(common.LogActionReject)).
 			Msg("LSPS1: Order rejected - insufficient on-chain liquidity")
 		return NewJsonRpcErrorResponse(req.Id, 1, "Client rejected: insufficient liquidity", nil)
+	}
+
+	// Validation: Check minimum channel capacity
+	channelCapacity := clientBalance + lspBalance
+	minCapacity := s.nodesService.GetMinChannelCapacity()
+	if channelCapacity < minCapacity {
+		log.Warn().
+			Str("component", string(common.LogComponentLSPS1)).
+			Str("action", string(common.LogActionReject)).
+			Uint64("requested_capacity", channelCapacity).
+			Uint64("min_capacity", minCapacity).
+			Msg("LSPS1: Order rejected - channel capacity too small")
+		return NewJsonRpcErrorResponse(req.Id, 100, fmt.Sprintf("Channel capacity too small, minimum is %d", minCapacity), map[string]interface{}{
+			"min_capacity": minCapacity,
+			"requested":    channelCapacity,
+		})
 	}
 
 	// Calculate Fee
@@ -214,7 +303,13 @@ func (s *Server) handleLsps1CreateOrder(req *JsonRpcRequest, peer []byte) *JsonR
 			capacity := clientBalance + lspBalance
 			proportionalFee := (capacity * uint64(f.Proportional)) / 1_000_000
 			minFeeLoki := f.MinFeeMloki / 1000
-			feeLoki = minFeeLoki + proportionalFee
+
+			// Use Max(Min, Proportional) logic
+			if proportionalFee > minFeeLoki {
+				feeLoki = proportionalFee
+			} else {
+				feeLoki = minFeeLoki
+			}
 		} else {
 			// Fallback default
 			feeLoki = 1000 // 1000 loki default fee?
@@ -226,7 +321,7 @@ func (s *Server) handleLsps1CreateOrder(req *JsonRpcRequest, peer []byte) *JsonR
 	// DOS Protection: Limit pending orders per peer
 	// Only count orders created within the last 24 hours (non-expired)
 	peerId := hex.EncodeToString(peer)
-	cutoffTime := time.Now().Add(-Lsps1OrderExpiryDuration)
+	cutoffTime := time.Now().Add(-orderExpiry)
 	pendingCount, err := s.openingService.CountLsps1Orders(peerId, string(Lsps1OrderStateCreated), &cutoffTime)
 	if err == nil && pendingCount >= s.config.Lsps1MaxPendingOrders {
 		return NewJsonRpcErrorResponse(req.Id, -32603, fmt.Sprintf("Too many pending orders (max %d)", s.config.Lsps1MaxPendingOrders), nil)
@@ -239,7 +334,7 @@ func (s *Server) handleLsps1CreateOrder(req *JsonRpcRequest, peer []byte) *JsonR
 	inv, err := s.lndClient.AddInvoice(context.Background(), &lnrpc.Invoice{
 		Memo:    memo,
 		Value:   int64(orderTotal),
-		Expiry:  int64(Lsps1OrderExpiryDuration.Seconds()),
+		Expiry:  int64(orderExpiry.Seconds()),
 		Private: true,
 	})
 	if err != nil {
@@ -253,7 +348,7 @@ func (s *Server) handleLsps1CreateOrder(req *JsonRpcRequest, peer []byte) *JsonR
 
 	orderID, _ := generateUUID()
 	now := time.Now()
-	expiry := now.Add(Lsps1OrderExpiryDuration)
+	expiry := now.Add(orderExpiry)
 
 	// Persist Order
 	order := &common.Lsps1Order{
@@ -335,6 +430,8 @@ func (s *Server) handleLsps1GetOrder(req *JsonRpcRequest) *JsonRpcResponse {
 		Interface("params", params).
 		Msg("LSPS1: Received get_order request")
 
+	_, _, _, orderExpiry, _, _ := s.getLsps1ConfigValues()
+
 	order, err := s.openingService.GetLsps1Order(params.OrderId)
 	if err != nil {
 		// Assume error means not found for now, or distinguish DB error?
@@ -345,12 +442,12 @@ func (s *Server) handleLsps1GetOrder(req *JsonRpcRequest) *JsonRpcResponse {
 	// TODO: Check if payment is actually paid by querying LND if state is EXPECT_PAYMENT?
 	// For now, trust DB state.
 
-	expiry := order.CreatedAt.Add(Lsps1OrderExpiryDuration)
+	expiry := order.CreatedAt.Add(orderExpiry)
 
 	// Check if order is expired and override state if necessary
 	orderState := order.OrderState
 	paymentState := order.PaymentState
-	if orderState == string(Lsps1OrderStateCreated) && isOrderExpired(order.CreatedAt) {
+	if orderState == string(Lsps1OrderStateCreated) && s.isOrderExpired(order.CreatedAt) {
 		orderState = string(Lsps1OrderStateExpired)
 		paymentState = string(Lsps1PaymentStateExpired)
 	}

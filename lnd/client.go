@@ -348,9 +348,6 @@ func (c *LndClient) GetChannel(peerID []byte, channelPoint wire.OutPoint) (*ligh
 	}
 
 	channelPointStr := channelPoint.String()
-	if err != nil {
-		return nil, err
-	}
 
 	for _, c := range r.Channels {
 		log.Trace().Msgf("LND: getChannel(%x) found channel %v", peerID, c.ChanId)
@@ -583,11 +580,24 @@ func (c *LndClient) ListChannels() ([]*lightning.Channel, error) {
 			log.Debug().Err(err).Str("point", c.ChannelPoint).Msg("LND: failed to parse outpoint in ListChannels")
 		}
 
+		// Map pending HTLCs
+		var pendingHtlcs []lightning.HTLC
+		for _, h := range c.PendingHtlcs {
+			pendingHtlcs = append(pendingHtlcs, lightning.HTLC{
+				Incoming:         h.Incoming,
+				AmountMloki:      uint64(h.Amount),
+				HashLock:         h.HashLock,
+				ExpirationHeight: h.ExpirationHeight,
+				HtlcIndex:        h.HtlcIndex,
+			})
+		}
+
 		result[i] = &lightning.Channel{
 			AliasScid:     alias,
 			ConfirmedScid: confirmedScid,
 			ChannelPoint:  outpoint,
 			PeerId:        peerId,
+			PendingHtlcs:  pendingHtlcs,
 		}
 	}
 
@@ -611,6 +621,14 @@ func (c *LndClient) ListChannels() ([]*lightning.Channel, error) {
 	}
 
 	return result, nil
+}
+
+func (c *LndClient) GetBlockHeight() (uint32, error) {
+	info, err := c.client.GetInfo(context.Background(), &lnrpc.GetInfoRequest{})
+	if err != nil {
+		return 0, err
+	}
+	return info.BlockHeight, nil
 }
 
 func mapScidsFromChannel(c *lnrpc.Channel) (*lightning.ShortChannelID, *lightning.ShortChannelID) {

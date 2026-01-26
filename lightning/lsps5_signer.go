@@ -61,6 +61,7 @@ const (
 	Lsps5MethodWebhookRegistered          = "lsps5.webhook_registered"
 	Lsps5MethodPaymentIncoming            = "lsps5.payment_incoming"
 	Lsps5MethodExpirySoon                 = "lsps5.expiry_soon"
+	Lsps5MethodOrderStateChanged          = "lsps5.order_state_changed"
 	Lsps5MethodLiquidityManagementRequest = "lsps5.liquidity_management_request"
 	Lsps5MethodOnionMessageIncoming       = "lsps5.onion_message_incoming"
 	Lsps5MethodGoodbye                    = "lsps5.goodbye"

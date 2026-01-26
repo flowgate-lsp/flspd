@@ -6,9 +6,9 @@ import (
 )
 
 type InterceptStore interface {
-	PaymentInfo(htlcPaymentHash []byte) (string, *common.OpeningFeeParams, []byte, []byte, []byte, int64, int64, *wire.OutPoint, *string, error)
+	PaymentInfo(htlcPaymentHash []byte) (string, string, *common.OpeningFeeParams, []byte, []byte, []byte, int64, int64, *wire.OutPoint, *string, error)
 	SetFundingTx(paymentHash []byte, channelPoint *wire.OutPoint) error
-	RegisterPayment(token string, params *common.OpeningFeeParams, destination, paymentHash, paymentSecret []byte, incomingAmountMloki, outgoingAmountMloki int64, tag string) error
+	RegisterPayment(token string, orderId string, params *common.OpeningFeeParams, destination, paymentHash, paymentSecret []byte, incomingAmountMloki, outgoingAmountMloki int64, tag string) error
 	GetLsps2Order(scid uint64) (*common.Lsps2BuyRegistration, error)
 	GetPaidLsps1Order(clientNodeId string) (*common.Lsps1Order, error)
 }
