@@ -12,7 +12,7 @@ require (
 	github.com/elementsproject/glightning v0.0.0-20230525134205-ef34d849f564
 	github.com/flokiorg/flnd v0.1.18-beta
 	github.com/flokiorg/go-flokicoin v0.25.12-alpha
-	github.com/flowgate-lsp/nostr-lsps5 v1.0.1
+	github.com/flowgate-lsp/nostr-lsps5 v1.0.2
 	github.com/golang-migrate/migrate/v4 v4.19.1
 	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
 	github.com/jackc/pgtype v1.14.0
@@ -208,5 +208,3 @@ require (
 )
 
 replace google.golang.org/protobuf => github.com/lightninglabs/protobuf-go-hex-display v1.30.0-hex-display
-
-replace github.com/flowgate-lsp/nostr-lsps5 => ./nostr-lsps5
