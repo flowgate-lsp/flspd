@@ -8,4 +8,5 @@ lspd_revenue_cli
 .env
 nodes.json
 *.log
-data/
+data
+
