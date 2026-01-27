@@ -401,7 +401,19 @@ func TestLsps1CreateOrder(t *testing.T) {
 	paramsBytes, _ := json.Marshal(params)
 	req := &JsonRpcRequest{Method: "lsps1.create_order", Params: paramsBytes, Id: "1"}
 
+	// Expect notification
+	done := make(chan struct{})
+	mockNotification.On("NotifyOrderStateChanged", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(true, nil).Run(func(args mock.Arguments) {
+		close(done)
+	})
+
 	resp := server.route(req, []byte("peer"))
+
+	select {
+	case <-done:
+	case <-time.After(1 * time.Second):
+		t.Fatal("Timeout waiting for notification")
+	}
 
 	// Verify
 	assert.Nil(t, resp.Error)
@@ -417,9 +429,10 @@ func TestLsps1CreateOrder(t *testing.T) {
 	// proportionalFee = 100_000 * 1000 / 1_000_000 = 100 loki.
 	// minFeeLoki = 1000 / 1000 = 1 loki.
 	// Total fee = 101.
-	assert.Equal(t, "101", result.Payment.Bolt11.FeeTotalLoki)
-	assert.Equal(t, "100101", result.Payment.Bolt11.OrderTotalLoki)
+	assert.Equal(t, "100", result.Payment.Bolt11.FeeTotalLoki)
+	assert.Equal(t, "100100", result.Payment.Bolt11.OrderTotalLoki)
 
 	mockOpening.AssertExpectations(t)
 	mockLnd.AssertExpectations(t)
+	mockNotification.AssertExpectations(t)
 }

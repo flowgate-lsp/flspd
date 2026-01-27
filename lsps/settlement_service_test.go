@@ -283,7 +283,7 @@ func TestProcessSettledInvoice_Success(t *testing.T) {
 	invoice := "lnbc1test..."
 	order := &common.Lsps1Order{
 		OrderId:           "test-order-123",
-		PeerId:            "testpeer",
+		PeerId:            "deadbeef",
 		OrderState:        "CREATED",
 		PaymentState:      "CREATED",
 		ClientBalanceLoki: 1000000,
@@ -292,11 +292,20 @@ func TestProcessSettledInvoice_Success(t *testing.T) {
 	mockStore.On("GetLsps1OrderByPaymentInvoice", invoice).Return(order, nil)
 	mockStore.On("UpdateLsps1OrderState", "test-order-123", "PAID", "PAID").Return(nil)
 
+	// Mock connectivity check to return false, so we stop after PAID notification
+	// "deadbeef" decoded is [222 173 190 239]
+	peerIdBytes, _ := hex.DecodeString("deadbeef")
+	mockClient.On("IsConnected", peerIdBytes).Return(false, nil)
+
 	historyStore := new(MockHistoryStore)
 	feeEstimator := new(MockFeeEstimator)
+	mockNotification := new(MockNotificationService)
 	conf := &config.NodeConfig{}
 
-	svc := NewLsps1SettlementService(mockClient, mockStore, historyStore, conf, feeEstimator, chain.FeeStrategyEconomy, nil)
+	svc := NewLsps1SettlementService(mockClient, mockStore, historyStore, conf, feeEstimator, chain.FeeStrategyEconomy, mockNotification)
+
+	// Expect notification
+	mockNotification.On("NotifyOrderStateChanged", "deadbeef", "test-order-123", "PAID", "", "").Return(true, nil)
 
 	update := &lightning.InvoiceUpdate{
 		State:          lightning.InvoiceStateSettled,
@@ -306,7 +315,11 @@ func TestProcessSettledInvoice_Success(t *testing.T) {
 
 	svc.processSettledInvoice(update)
 
+	// Wait for goroutines (notification is async)
+	time.Sleep(50 * time.Millisecond)
+
 	mockStore.AssertExpectations(t)
+	mockNotification.AssertExpectations(t)
 }
 
 func (m *MockLightningClient) AddInvoice(ctx context.Context, invoice *lnrpc.Invoice) (*lnrpc.AddInvoiceResponse, error) {
@@ -396,7 +409,15 @@ func TestProcessSettledInvoice_TriggerChannelOpen(t *testing.T) {
 	mockStore.On("UpdateLsps1OrderFunding", "test-order-123", chanPoint.Hash.String(), 0).Return(nil)
 	mockStore.On("UpdateLsps1OrderState", "test-order-123", "COMPLETED", "PAID").Return(nil)
 
-	svc := NewLsps1SettlementService(mockClient, mockStore, historyStore, conf, feeEstimator, chain.FeeStrategyEconomy, nil)
+	mockNotification := new(MockNotificationService)
+
+	// Expect notifications
+	// 1. PAID
+	mockNotification.On("NotifyOrderStateChanged", order.PeerId, "test-order-123", "PAID", "", "").Return(true, nil)
+	// 2. COMPLETED
+	mockNotification.On("NotifyOrderStateChanged", order.PeerId, "test-order-123", "COMPLETED", chanPoint.String(), "").Return(true, nil)
+
+	svc := NewLsps1SettlementService(mockClient, mockStore, historyStore, conf, feeEstimator, chain.FeeStrategyEconomy, mockNotification)
 
 	update := &lightning.InvoiceUpdate{
 		State:          lightning.InvoiceStateSettled,
@@ -411,6 +432,7 @@ func TestProcessSettledInvoice_TriggerChannelOpen(t *testing.T) {
 
 	mockStore.AssertExpectations(t)
 	mockClient.AssertExpectations(t)
+	mockNotification.AssertExpectations(t)
 }
 
 // TestProcessSettledInvoice_AlreadyPaid tests duplicate settlement

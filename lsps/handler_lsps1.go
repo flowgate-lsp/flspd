@@ -403,6 +403,11 @@ func (s *Server) handleLsps1CreateOrder(req *JsonRpcRequest, peer []byte) *JsonR
 		Channel: nil,
 	}
 
+	// Notify client of CREATED state
+	if s.notificationService != nil {
+		go s.notificationService.NotifyOrderStateChanged(peerId, resp.OrderId, string(Lsps1OrderStateCreated), "", "")
+	}
+
 	log.Trace().
 		Str("component", string(common.LogComponentLSPS1)).
 		Str("action", string(common.LogActionResponse)).
