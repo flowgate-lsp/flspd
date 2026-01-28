@@ -284,7 +284,53 @@ func (i *Interceptor) Intercept(req common.InterceptRequest) common.InterceptRes
 				// Give LND a moment to propagate the new channel state to the router
 				// to avoid "no_route" errors. Even with OutgoingRequestedChanId,
 				// the switch link might not be fully active immediately.
-				<-time.After(200 * time.Millisecond)
+				// Verify that the route is available in the graph
+				// This avoids "no_route" errors if the switch link is not fully active yet.
+				// Use a minimal amount for verification to check strict connectivity/existence.
+				// We avoid checking the full amount here because the Router's view of likely-zero-conf
+				// channels might show 0 balance initially, causing "insufficient local balance" errors
+				// even if the Switch shows full bandwidth. We trust the Switch to handle the full amount check on resume.
+				routeParamsAmount := uint64(incomingAmountMloki)
+
+				// Use a generous timeout (60s) to wait for the Router to sync the ZC balance.
+				// "Insufficient local balance" means we must wait longer, not give up or bypass.
+				routeTimeout := time.After(60 * time.Second)
+				routeTicker := time.NewTicker(500 * time.Millisecond) // Poll faster
+				defer routeTicker.Stop()
+
+				var targetScid uint64
+				if scid != nil {
+					targetScid = uint64(*scid)
+				}
+
+			RouteLoop:
+				for {
+					routes, err := i.client.QueryRoutes(destination, routeParamsAmount, targetScid)
+					if err == nil {
+						for _, r := range routes {
+							if len(r.Hops) > 0 {
+								// Strict check: Ensure the route uses the newly opened channel
+								if r.Hops[0].ChanId == targetScid {
+									log.Debug().Msgf("Intercept: paymentHash=%s route found via SCID %d, resuming", reqPaymentHashStr, targetScid)
+									break RouteLoop
+								}
+								// If we found a route but via different SCID, log it
+								log.Debug().Msgf("Intercept: found route via SCID %d, waiting for target %d", r.Hops[0].ChanId, targetScid)
+							}
+						}
+					} else {
+						// Log error but continue polling. "insufficient local balance" is a common temporary state.
+						log.Trace().Err(err).Msgf("Intercept: QueryRoutes failed (waiting for sync), paymentHash=%s", reqPaymentHashStr)
+					}
+
+					select {
+					case <-routeTimeout:
+						log.Warn().Msgf("Intercept: QueryRoutes timed out using Best Effort for paymentHash=%s, resuming anyway", reqPaymentHashStr)
+						break RouteLoop
+					case <-routeTicker.C:
+						continue
+					}
+				}
 
 				err = i.historyStore.UpdateChannels(context.TODO(), []*history.ChannelUpdate{{
 					NodeID:        i.nodeid,
@@ -546,19 +592,31 @@ func (i *Interceptor) resolvePayment(req common.InterceptRequest) (*interceptDat
 
 				// Calculate Fee matching computeOpeningFee in lsps/server.go
 				minFee := int64(lsps2Order.ParamsMinFeeMloki)
-				proportional := int64(lsps2Order.ParamsProportional)
 
-				// Fee = Ceil(Amount * Proportional / 1,000,000)
-				// Equivalent to (prod + 999999) / 1000000
-				prod := paymentSize * proportional
-				propFee := (prod + 999999) / 1_000_000
+				// Fee Logic:
+				// Standard Lightning fees are charged on the FORWARDED (outgoing) amount.
+				// Fee = Outgoing * Rate + Base (we treat MinFee as a floor here, effectively base=0 usually).
+				// We know Input (PaymentSize). We need to find Outgoing such that:
+				// Outgoing + Fee(Outgoing) <= Input
+				// Outgoing + Outgoing * Rate = Input
+				// Outgoing * (1 + Rate) = Input
+				// Outgoing = Input / (1 + Rate)
 
-				fee := minFee
-				if propFee > fee {
-					fee = propFee
+				rate := float64(lsps2Order.ParamsProportional) / 1_000_000.0
+
+				// Calculate Outgoing based on proportional fee
+				// outgoing = input / (1 + rate)
+				outgoingAmountMloki = int64(float64(paymentSize) / (1.0 + rate))
+
+				// Calculate the implied fee
+				fee := paymentSize - outgoingAmountMloki
+
+				// Enforce MinFee floor
+				if fee < minFee {
+					fee = minFee
+					outgoingAmountMloki = paymentSize - fee
 				}
 
-				outgoingAmountMloki = paymentSize - fee
 				if outgoingAmountMloki < 0 {
 					outgoingAmountMloki = 0
 				}

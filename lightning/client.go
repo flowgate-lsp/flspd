@@ -65,6 +65,7 @@ type Client interface {
 	SubscribeInvoices() (<-chan *InvoiceUpdate, <-chan error, error)
 	WalletBalance(ctx context.Context) (*WalletBalanceResult, error)
 	GetBlockHeight() (uint32, error)
+	QueryRoutes(destination []byte, amountMloki uint64, outgoingChanId uint64) ([]*Route, error)
 }
 
 type WalletBalanceResult struct {
@@ -89,4 +90,23 @@ type InvoiceUpdate struct {
 	PaymentRequest string
 	AmountMloki    uint64
 	SettleDate     time.Time
+}
+
+type Route struct {
+	TotalTimeLock uint32
+	TotalFees     int64
+	TotalAmt      int64
+	Hops          []*Hop
+}
+
+type Hop struct {
+	ChanId           uint64
+	ChanCapacity     int64
+	AmtToForward     int64
+	Fee              int64
+	Expiry           uint32
+	AmtToForwardMsat int64
+	FeeMsat          int64
+	PubKey           string
+	CustomRecords    map[uint64][]byte
 }

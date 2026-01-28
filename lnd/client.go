@@ -302,10 +302,13 @@ func (c *LndClient) OpenChannel(req *lightning.OpenChannelRequest) (*wire.OutPoi
 		}
 	}
 
-	if req.FeeLokiPerVByte != nil {
+	if req.FeeLokiPerVByte != nil && *req.FeeLokiPerVByte > 0 {
 		lnReq.SatPerVbyte = uint64(math.Ceil(*req.FeeLokiPerVByte))
 	} else if req.TargetConf != nil {
 		lnReq.TargetConf = int32(*req.TargetConf)
+	} else {
+		// Default to 6 confirmations if nothing is specified to avoid LND warning
+		lnReq.TargetConf = 6
 	}
 
 	channelPoint, err := c.client.OpenChannelSync(context.Background(), lnReq)
@@ -671,4 +674,47 @@ func (c *LndClient) WalletBalance(ctx context.Context) (*lightning.WalletBalance
 		ConfirmedBalance:   resp.ConfirmedBalance,
 		UnconfirmedBalance: resp.UnconfirmedBalance,
 	}, nil
+}
+
+func (c *LndClient) QueryRoutes(destination []byte, amountMloki uint64, outgoingChanId uint64) ([]*lightning.Route, error) {
+	pubKey := hex.EncodeToString(destination)
+	req := &lnrpc.QueryRoutesRequest{
+		PubKey:            pubKey,
+		AmtMsat:           int64(amountMloki),
+		UseMissionControl: false,
+	}
+	if outgoingChanId != 0 {
+		req.OutgoingChanIds = []uint64{outgoingChanId}
+	}
+
+	resp, err := c.client.QueryRoutes(context.Background(), req)
+	if err != nil {
+		return nil, err
+	}
+
+	var routes []*lightning.Route
+	for _, r := range resp.Routes {
+		var hops []*lightning.Hop
+		for _, h := range r.Hops {
+			hops = append(hops, &lightning.Hop{
+				ChanId:           h.ChanId,
+				ChanCapacity:     h.ChanCapacity,
+				AmtToForward:     h.AmtToForward,
+				Fee:              h.Fee,
+				Expiry:           h.Expiry,
+				AmtToForwardMsat: h.AmtToForwardMsat,
+				FeeMsat:          h.FeeMsat,
+				PubKey:           h.PubKey,
+				CustomRecords:    h.CustomRecords,
+			})
+		}
+
+		routes = append(routes, &lightning.Route{
+			TotalTimeLock: r.TotalTimeLock,
+			TotalFees:     r.TotalFees,
+			TotalAmt:      r.TotalAmt,
+			Hops:          hops,
+		})
+	}
+	return routes, nil
 }

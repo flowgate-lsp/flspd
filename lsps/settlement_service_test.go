@@ -229,6 +229,14 @@ func (m *MockLightningClient) WalletBalance(ctx context.Context) (*lightning.Wal
 	return args.Get(0).(*lightning.WalletBalanceResult), args.Error(1)
 }
 
+func (m *MockLightningClient) QueryRoutes(destination []byte, amountMloki uint64, outgoingChanId uint64) ([]*lightning.Route, error) {
+	args := m.Called(destination, amountMloki)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]*lightning.Route), args.Error(1)
+}
+
 // MockHistoryStore for testing
 type MockHistoryStore struct {
 	mock.Mock
