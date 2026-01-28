@@ -72,18 +72,27 @@ func (t *NostrTransport) Send(ctx context.Context, targetUri string, method stri
 		Msg("NostrTransport: event signed")
 
 	// 4. Publish to Relays (Transport Logic)
+	// Optimistic publish: Return success as soon as ONE relay accepts it.
+	// We use a context cancel to stopping waiting for others (though we let them finish in bg usually).
+	// Actually, better to just return early and let others finish or fail in background to maximize propagation without blocking caller.
+
+	successChan := make(chan bool, len(relays))
 	var wg sync.WaitGroup
-	var success bool
-	var mtx sync.Mutex
 
 	for _, url := range relays {
 		wg.Add(1)
 		go func(relayUrl string) {
 			defer wg.Done()
+
+			// Use separate context or same ctx?
+			// If we return early, we don't want to cancel the connection attempt for others if we want redundancy.
+			// But for latency, we just care about one.
+
 			log.Trace().Str("relay", relayUrl).Msg("NostrTransport: connecting to relay")
 			relay, err := t.relayPool.GetOrConnect(ctx, relayUrl)
 			if err != nil {
 				log.Warn().Err(err).Str("relay", relayUrl).Msg("Failed to connect to Nostr relay")
+				// successChan <- false // Don't block
 				return
 			}
 
@@ -94,22 +103,40 @@ func (t *NostrTransport) Send(ctx context.Context, targetUri string, method stri
 				return
 			}
 
-			mtx.Lock()
-			success = true
-			mtx.Unlock()
 			log.Debug().Str("relay", relayUrl).Msg("Published LSPS5 notification")
+			select {
+			case successChan <- true:
+			default:
+			}
 		}(url)
 	}
 
-	// Wait logic could be optimized to not wait for ALL if one succeeds, but simple WG is fine for now
-	// To avoid blocking too long, we can wrap in a channel with timeout if context doesn't handle it
-	wg.Wait()
+	// Wait for first success or all done
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
 
-	if !success {
-		return fmt.Errorf("failed to publish to any relay")
+	select {
+	case <-successChan:
+		// At least one succeeded
+		return nil
+	case <-done:
+		// All finished, if we didn't receive success, check if we failed?
+		// We only send to successChan on success.
+		// If we are here, it means we didn't get a success yet?
+		// Actually if buffered channel has item, select picks it.
+		// If done closed, we check channel one last time.
+		select {
+		case <-successChan:
+			return nil
+		default:
+			return fmt.Errorf("failed to publish to any relay")
+		}
+	case <-ctx.Done():
+		return ctx.Err()
 	}
-
-	return nil
 }
 
 // RelayPool manages persistent connections to relays
@@ -122,24 +149,24 @@ func NewRelayPool() *RelayPool {
 }
 
 func (rp *RelayPool) GetOrConnect(ctx context.Context, url string) (*nostr.Relay, error) {
+	// Connect timeout
+	connectCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
 	if val, ok := rp.relays.Load(url); ok {
 		relay := val.(*nostr.Relay)
 		if relay.IsConnected() {
 			return relay, nil
 		}
-		// If not connected, maybe try to reconnect? nostr.Relay has internal reconnect logic often?
-		// But if CreateConnection failed earlier, it might be dead.
-		// For simplicity, if not connected, let's try to connect again or assume the library handles it.
-		// go-nostr relays usually maintain connection if created with RelayConnect.
-		// If it's closed, we might need to recreate.
+
+		log.Debug().Str("relay", url).Msg("NostrRelay: connection lost, reconnecting")
+		if err := relay.Connect(connectCtx); err != nil {
+			return nil, fmt.Errorf("failed to reconnect: %w", err)
+		}
 		return relay, nil
 	}
 
-	// Connect
-	// Set a timeout for connection
-	connectCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-
+	// Connect new
 	relay, err := nostr.RelayConnect(connectCtx, url)
 	if err != nil {
 		return nil, err

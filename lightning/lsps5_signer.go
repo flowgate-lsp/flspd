@@ -22,6 +22,11 @@ type Lsps5ExpirySoonParams struct {
 	Timeout int `json:"timeout"`
 }
 
+// Lsps5PaymentIncomingParams contains parameters for the payment_incoming notification
+type Lsps5PaymentIncomingParams struct {
+	PaymentHash string `json:"payment_hash"`
+}
+
 // CreateLsps5Notification creates a JSON-RPC 2.0 notification object as per bLIP-55
 func CreateLsps5Notification(method string, params interface{}) ([]byte, error) {
 	if params == nil {

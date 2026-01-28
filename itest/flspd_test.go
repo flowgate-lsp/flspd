@@ -179,4 +179,8 @@ var allTestCases = []*testCase{
 		name: "testNostrNotification",
 		test: testNostrNotification,
 	},
+	{
+		name: "testNostrNotificationRetry",
+		test: testNostrNotificationRetry,
+	},
 }

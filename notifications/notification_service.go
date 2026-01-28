@@ -18,14 +18,16 @@ type NotificationService struct {
 	recentNotifications map[string]time.Time
 	openingStore        common.OpeningStore
 	nodesService        common.NodesService
+	store               Store
 	transports          map[TransportType]NotificationTransport
 }
 
-func NewNotificationService(openingStore common.OpeningStore, nodesService common.NodesService) *NotificationService {
+func NewNotificationService(openingStore common.OpeningStore, nodesService common.NodesService, store Store) *NotificationService {
 	s := &NotificationService{
 		openingStore:        openingStore,
 		recentNotifications: make(map[string]time.Time),
 		nodesService:        nodesService,
+		store:               store,
 		transports:          make(map[TransportType]NotificationTransport),
 	}
 
@@ -53,6 +55,9 @@ func (s *NotificationService) SetNodePrivKey(privKey interface{}) {
 }
 
 func (s *NotificationService) Start(ctx context.Context) {
+	// Start retry worker
+	go s.runWorker(ctx)
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -67,6 +72,60 @@ func (s *NotificationService) Start(ctx context.Context) {
 			}
 		}
 		s.mtx.Unlock()
+	}
+}
+
+func (s *NotificationService) runWorker(ctx context.Context) {
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			s.processPending(ctx)
+		}
+	}
+}
+
+func (s *NotificationService) processPending(ctx context.Context) {
+	items, err := s.store.GetPending(ctx, 50)
+	if err != nil {
+		log.Error().Err(err).Msg("Notifications: failed to fetch pending items")
+		return
+	}
+
+	for _, item := range items {
+		// Prepare temp webhook
+		webhook := &common.Lsps5Webhook{
+			Url:       item.TargetURL,
+			Transport: item.Transport,
+		}
+
+		// Attempt delivery
+		// We use a short context for single retry
+		retryCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		success := s.deliverOne(retryCtx, item.Method, item.Params, webhook)
+		cancel()
+
+		var status string
+		var nextRetry time.Time
+
+		if success {
+			status = "completed"
+		} else {
+			// Exponential backoff: 10s * 2^attempts
+			backoff := time.Duration(10*(1<<item.Attempts)) * time.Second
+			if backoff > 24*time.Hour {
+				status = "permanent_fail"
+			} else {
+				status = "failed"
+				nextRetry = time.Now().Add(backoff)
+			}
+		}
+
+		_ = s.store.UpdateStatus(ctx, item.ID, status, nextRetry)
 	}
 }
 
@@ -119,7 +178,9 @@ func (s *NotificationService) Notify(
 				Str("url", w.Url).
 				Str("transport", w.Transport).
 				Msg("Notifications: dispatching to single webhook")
-			currentNotified := s.deliverOne(ctx, lightning.Lsps5MethodPaymentIncoming, nil, w)
+			currentNotified := s.enqueueAndDeliver(ctx, pubkey, w, lightning.Lsps5MethodPaymentIncoming, &lightning.Lsps5PaymentIncomingParams{
+				PaymentHash: paymenthash,
+			})
 			if currentNotified {
 				mtx.Lock()
 				notified = true
@@ -162,7 +223,7 @@ func (s *NotificationService) NotifyWebhookRegistered(
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*7)
 	defer cancel()
 
-	return s.deliverOne(ctx, lightning.Lsps5MethodWebhookRegistered, nil, webhook)
+	return s.enqueueAndDeliver(ctx, pubkey, webhook, lightning.Lsps5MethodWebhookRegistered, map[string]interface{}{})
 }
 
 // NotifyExpirySoon sends the lsps5.expiry_soon notification to all registered webhooks
@@ -194,7 +255,7 @@ func (s *NotificationService) NotifyExpirySoon(
 	for _, w := range webhooks {
 		go func(w *common.Lsps5Webhook) {
 			defer wg.Done()
-			currentNotified := s.deliverOne(ctx, lightning.Lsps5MethodExpirySoon, params, w)
+			currentNotified := s.enqueueAndDeliver(ctx, pubkey, w, lightning.Lsps5MethodExpirySoon, params)
 			if currentNotified {
 				mtx.Lock()
 				notified = true
@@ -227,7 +288,7 @@ func (s *NotificationService) NotifyLiquidityManagementRequest(
 	for _, w := range webhooks {
 		go func(w *common.Lsps5Webhook) {
 			defer wg.Done()
-			currentNotified := s.deliverOne(ctx, lightning.Lsps5MethodLiquidityManagementRequest, nil, w)
+			currentNotified := s.enqueueAndDeliver(ctx, pubkey, w, lightning.Lsps5MethodLiquidityManagementRequest, map[string]interface{}{})
 			if currentNotified {
 				mtx.Lock()
 				notified = true
@@ -300,7 +361,7 @@ func (s *NotificationService) NotifyOrderStateChanged(
 				Str("url", w.Url).
 				Str("transport", w.Transport).
 				Msg("Notifications: dispatching to single webhook")
-			currentNotified := s.deliverOne(ctx, lightning.Lsps5MethodOrderStateChanged, params, w)
+			currentNotified := s.enqueueAndDeliver(ctx, pubkey, w, lightning.Lsps5MethodOrderStateChanged, params)
 			if currentNotified {
 				mtx.Lock()
 				notified = true
@@ -333,7 +394,7 @@ func (s *NotificationService) NotifyOnionMessageIncoming(
 	for _, w := range webhooks {
 		go func(w *common.Lsps5Webhook) {
 			defer wg.Done()
-			currentNotified := s.deliverOne(ctx, lightning.Lsps5MethodOnionMessageIncoming, nil, w)
+			currentNotified := s.enqueueAndDeliver(ctx, pubkey, w, lightning.Lsps5MethodOnionMessageIncoming, map[string]interface{}{})
 			if currentNotified {
 				mtx.Lock()
 				notified = true
@@ -389,6 +450,45 @@ func (s *NotificationService) deliverOne(
 	}
 
 	return true
+}
+
+func (s *NotificationService) enqueueAndDeliver(
+	ctx context.Context,
+	pubkey string,
+	webhook *common.Lsps5Webhook,
+	method string,
+	params interface{},
+) bool {
+	// 1. Enqueue
+	id, err := s.store.Enqueue(ctx, pubkey, webhook.Url, webhook.Transport, method, params)
+	if err != nil {
+		log.Error().Err(err).Str("url", webhook.Url).Msg("Notifications: failed to enqueue")
+		// If enqueue fails, we might still try to deliver?
+		// Or fail safe? Let's try to deliver anyway but we won't have persistence.
+		return s.deliverOne(ctx, method, params, webhook)
+	}
+
+	// 2. Attempt Delivery
+	success := s.deliverOne(ctx, method, params, webhook)
+
+	// 3. Update Status
+	var status string
+	var nextRetry time.Time
+
+	if success {
+		status = "completed"
+	} else {
+		status = "failed"
+		nextRetry = time.Now().Add(10 * time.Second) // Initial retry
+	}
+
+	// Use background context for database update to ensure it isn't cancelled by the delivery timeout
+	updateCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	_ = s.store.UpdateStatus(updateCtx, id, status, nextRetry)
+
+	return success
 }
 
 func paymentIdentifier(pubkey string, paymentHash string) string {

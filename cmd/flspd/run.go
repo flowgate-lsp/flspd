@@ -186,7 +186,7 @@ func runLspd(cliCtx *cli.Context) error {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	notificationService := notifications.NewNotificationService(openingStore, nodesService)
+	notificationService := notifications.NewNotificationService(openingStore, nodesService, notificationsStore)
 
 	// Configure Nostr transport if private key is provided
 	lspNostrPrivKey := os.Getenv("LSP_NOSTR_PRIVATE_KEY")
