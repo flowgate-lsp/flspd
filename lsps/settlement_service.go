@@ -212,7 +212,10 @@ func (s *Lsps1SettlementService) openChannelForOrder(order *common.Lsps1Order) {
 		}
 	}
 
-	capacity := uint64(order.LspBalanceLoki + order.ClientBalanceLoki)
+	capacity := uint64(order.LspBalanceLoki+order.ClientBalanceLoki) + uint64(s.config.AdditionalChannelCapacity)
+	if capacity < s.config.MinChannelCapacityLoki {
+		capacity = s.config.MinChannelCapacityLoki
+	}
 
 	// Open channel
 	log.Info().

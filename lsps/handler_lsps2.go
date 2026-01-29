@@ -199,8 +199,21 @@ Loop:
 
 		// Validation: Check min channel capacity (approximate neededSat as capacity)
 		neededSat := *paymentSize / 1000
-		if neededSat < s.nodesService.GetMinChannelCapacity() {
-			return NewJsonRpcErrorResponse(req.Id, 203, fmt.Sprintf("Payment size too small for channel creation (min %d)", s.nodesService.GetMinChannelCapacity()), nil)
+		additional := uint64(validNode.NodeConfig.AdditionalChannelCapacity)
+		physicalFloor := s.nodesService.GetMinChannelCapacity()
+		businessFloor := uint64(0)
+		if validNode.NodeConfig.JitMinChannelBalanceLoki != nil {
+			businessFloor = *validNode.NodeConfig.JitMinChannelBalanceLoki
+		}
+
+		// Enforce Physical Floor
+		if neededSat+additional < physicalFloor {
+			return NewJsonRpcErrorResponse(req.Id, 203, fmt.Sprintf("Payment size too small even with %d padding (min %d)", additional, physicalFloor), nil)
+		}
+
+		// Enforce Business Limit
+		if neededSat+additional < businessFloor {
+			return NewJsonRpcErrorResponse(req.Id, 203, fmt.Sprintf("Payment size too small even with %d padding (business min %d)", additional, businessFloor), nil)
 		}
 
 		// Validation: Check On-Chain Liquidity

@@ -345,12 +345,35 @@ func TestLsps1CreateOrder(t *testing.T) {
 
 	// Test Data
 	privKey, pubKey := btcec.PrivKeyFromBytes([]byte("testprivkey1111111111111111111"))
+	minClient := uint64(0)
+	maxClient := uint64(100_000_000)
+	minLsp := uint64(0)
+	maxLsp := uint64(100_000_000)
+	minReqConf := uint16(0)
+	minFundingConf := uint16(1)
+	supportsZeroReserve := true
+	maxExpiry := uint32(201600)
+	orderExpiry := uint32(86400)
+	minChan := uint64(20000)
+	maxChan := uint64(100_000_000)
+
 	node := &common.Node{
 		PublicKey:  pubKey,
 		PrivateKey: privKey,
 		Tokens:     []string{"test-token"},
 		NodeConfig: &config.NodeConfig{
-			TimeLockDelta: 144,
+			TimeLockDelta:                        144,
+			Lsps1MinRequiredChannelConfirmations: &minReqConf,
+			Lsps1MinFundingConfirmsWithinBlocks:  &minFundingConf,
+			Lsps1SupportsZeroChannelReserve:      &supportsZeroReserve,
+			Lsps1MaxChannelExpiryBlocks:          &maxExpiry,
+			Lsps1OrderExpirySeconds:              &orderExpiry,
+			Lsps1MinInitialClientBalanceLoki:     &minClient,
+			Lsps1MaxInitialClientBalanceLoki:     &maxClient,
+			Lsps1MinInitialLspBalanceLoki:        &minLsp,
+			Lsps1MaxInitialLspBalanceLoki:        &maxLsp,
+			Lsps1MinChannelBalanceLoki:           &minChan,
+			Lsps1MaxChannelBalanceLoki:           &maxChan,
 		},
 	}
 

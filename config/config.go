@@ -67,6 +67,9 @@ type NodeConfig struct {
 	// when a new zero conf channel is opened. In loki.
 	AdditionalChannelCapacity int64 `json:"additionalChannelCapacity,string" yaml:"additionalChannelCapacity"`
 
+	// Minimum channel capacity in loki. Must be >= 20000 (LND minimum).
+	MinChannelCapacityLoki uint64 `json:"minChannelCapacityLoki,string,omitempty" yaml:"minChannelCapacityLoki,omitempty"`
+
 	// The channel can be closed if not used this duration in seconds. This is
 	// not enforced by flspd, but gives an indication to clients.
 	// This field is for legacy support for clients that don't support
@@ -81,10 +84,7 @@ type NodeConfig struct {
 	MinPaymentSizeMloki uint64 `json:"minPaymentSizeMloki,string,omitempty" yaml:"minPaymentSizeMloki,omitempty"`
 
 	// Maximum payment size in mloki for JIT channels.
-	MaxPaymentSizeMloki uint64 `json:"maxPaymentSizeMloki,string,omitempty" yaml:"maxPaymentSizeMloki,omitempty"`
-
-	// Minimum channel capacity in loki. Must be >= 20000 (LND minimum).
-	MinChannelCapacityLoki uint64 `json:"minChannelCapacityLoki,string,omitempty" yaml:"minChannelCapacityLoki,omitempty"`
+	JitMaxPaymentSizeMloki uint64 `json:"jitMaxPaymentSizeMloki,string,omitempty" yaml:"jitMaxPaymentSizeMloki,omitempty"`
 
 	// If true, enables JIT channels to override MinConfs to 0 (implicit zero conf).
 	JitEnabled bool `json:"jitEnabled,omitempty" yaml:"jitEnabled,omitempty"`
@@ -93,27 +93,45 @@ type NodeConfig struct {
 	// Maximum ClientToSelfDelay for JIT channel opening fee params.
 	JitMaxClientToSelfDelay uint32 `json:"jitMaxClientToSelfDelay,string,omitempty" yaml:"jitMaxClientToSelfDelay,omitempty"`
 
-	// Validity duration for JIT channel opening fee params in seconds.
+	// JIT Valid Until duration in seconds.
 	JitValidUntilSeconds uint32 `json:"jitValidUntilSeconds,string,omitempty" yaml:"jitValidUntilSeconds,omitempty"`
+
+	// Minimum channel balance in Loki for JIT channels (LSPS2).
+	JitMinChannelBalanceLoki *uint64 `json:"jitMinChannelBalanceLoki,string,omitempty" yaml:"jitMinChannelBalanceLoki,omitempty"`
 
 	// LSPS1 Configuration
 	// Minimum required channel confirmations for LSPS1 orders.
-	Lsps1MinRequiredChannelConfirmations uint16 `json:"lsps1MinRequiredChannelConfirmations,string,omitempty" yaml:"lsps1MinRequiredChannelConfirmations,omitempty"`
+	Lsps1MinRequiredChannelConfirmations *uint16 `json:"lsps1MinRequiredChannelConfirmations,string,omitempty" yaml:"lsps1MinRequiredChannelConfirmations,omitempty"`
 
 	// Minimum funding confirms within blocks for LSPS1 orders.
-	Lsps1MinFundingConfirmsWithinBlocks uint16 `json:"lsps1MinFundingConfirmsWithinBlocks,string,omitempty" yaml:"lsps1MinFundingConfirmsWithinBlocks,omitempty"`
+	Lsps1MinFundingConfirmsWithinBlocks *uint16 `json:"lsps1MinFundingConfirmsWithinBlocks,string,omitempty" yaml:"lsps1MinFundingConfirmsWithinBlocks,omitempty"`
+
+	// Supports zero channel reserve.
+	Lsps1SupportsZeroChannelReserve *bool `json:"lsps1SupportsZeroChannelReserve,omitempty" yaml:"lsps1SupportsZeroChannelReserve,omitempty"`
 
 	// Maximum channel expiry blocks for LSPS1 orders.
-	Lsps1MaxChannelExpiryBlocks uint32 `json:"lsps1MaxChannelExpiryBlocks,string,omitempty" yaml:"lsps1MaxChannelExpiryBlocks,omitempty"`
+	Lsps1MaxChannelExpiryBlocks *uint32 `json:"lsps1MaxChannelExpiryBlocks,string,omitempty" yaml:"lsps1MaxChannelExpiryBlocks,omitempty"`
 
 	// Duration in seconds before an LSPS1 order expires if not funded.
-	Lsps1OrderExpirySeconds uint32 `json:"lsps1OrderExpirySeconds,string,omitempty" yaml:"lsps1OrderExpirySeconds,omitempty"`
+	Lsps1OrderExpirySeconds *uint32 `json:"lsps1OrderExpirySeconds,string,omitempty" yaml:"lsps1OrderExpirySeconds,omitempty"`
+
+	// Minimum initial client balance in Loki for LSPS1 orders.
+	Lsps1MinInitialClientBalanceLoki *uint64 `json:"lsps1MinInitialClientBalanceLoki,string,omitempty" yaml:"lsps1MinInitialClientBalanceLoki,omitempty"`
 
 	// Maximum initial client balance in Loki for LSPS1 orders.
-	Lsps1MaxClientBalanceLoki uint64 `json:"lsps1MaxClientBalanceLoki,string,omitempty" yaml:"lsps1MaxClientBalanceLoki,omitempty"`
+	Lsps1MaxInitialClientBalanceLoki *uint64 `json:"lsps1MaxInitialClientBalanceLoki,string,omitempty" yaml:"lsps1MaxInitialClientBalanceLoki,omitempty"`
+
+	// Minimum initial LSP balance in Loki for LSPS1 orders.
+	Lsps1MinInitialLspBalanceLoki *uint64 `json:"lsps1MinInitialLspBalanceLoki,string,omitempty" yaml:"lsps1MinInitialLspBalanceLoki,omitempty"`
 
 	// Maximum initial LSP balance in Loki for LSPS1 orders.
-	Lsps1MaxLspBalanceLoki uint64 `json:"lsps1MaxLspBalanceLoki,string,omitempty" yaml:"lsps1MaxLspBalanceLoki,omitempty"`
+	Lsps1MaxInitialLspBalanceLoki *uint64 `json:"lsps1MaxInitialLspBalanceLoki,string,omitempty" yaml:"lsps1MaxInitialLspBalanceLoki,omitempty"`
+
+	// Minimum channel balance in Loki for LSPS1 orders.
+	Lsps1MinChannelBalanceLoki *uint64 `json:"lsps1MinChannelBalanceLoki,string,omitempty" yaml:"lsps1MinChannelBalanceLoki,omitempty"`
+
+	// Maximum channel balance in Loki for LSPS1 orders.
+	Lsps1MaxChannelBalanceLoki *uint64 `json:"lsps1MaxChannelBalanceLoki,string,omitempty" yaml:"lsps1MaxChannelBalanceLoki,omitempty"`
 
 	// Set this field to connect to an LND node.
 	Lnd *LndConfig `json:"flnd,omitempty" yaml:"flnd,omitempty"`

@@ -37,79 +37,96 @@
     # Macaroon to use (hex encoded or path).
     macaroon: "REPLACE_WITH_HEX_MACAROON"
 
-  # --- Zero Conf & Channel Opening ---
+  # --- General Opening Policy ---
+  # Public channel amount is a reserved amount for public channels.
+  publicChannelAmount: 0
+
   # Minimum number of confirmations inputs must have for zero-conf channel opens.
-  # If 0, zero-conf is allowed. Can be overridden by jitEnabled=true.
   minConfs: 6
 
   # Minimum timelock delta required for the opened channel.
-  # Used in routing policy validation and channel opening requests.
   timeLockDelta: 400
 
   # Number of blocks after which an opened channel is considered confirmed.
   targetConf: 6
 
+  # Minimum channel capacity in loki. Must be >= 20000 (LND minimum).
+  minChannelCapacityLoki: 20_000
+
   # Channel capacity in loki added on top of the incoming payment amount when opening a new zero-conf channel.
   additionalChannelCapacity: 21_000
 
   # Minimum fee in milliloki charged for opening a channel.
-  # Used to populate OpeningFeeParams and as a fallback min fee.
-  channelMinimumFeeMloki: 2_000_000
+  channelMinimumFeeMloki: 1000
 
   # Fee for opening a zero conf channel per 10000 loki (basis points).
-  # Primarily used as a fallback for legacy clients or internal defaults.
   channelFeePermyriad: 40
 
-  # Duration in seconds used to calculate the MinLifetime block height for OpeningFeeParams.
-  # MinLifetime = maxInactiveDuration / 600.
+  # Duration in seconds used to calculate the MinLifetime block height.
   maxInactiveDuration: 3_888_000
 
-  # --- JIT Channels ---
+  # The maximum time to hold a htlc after sending a notification when the peer is offline.
+  notificationTimeout: "1m"
+
+  # --- JIT (LSPS2) Business Rules ---
   # If true, enables JIT channels to override MinConfs to 0 (implicit zero conf).
-  jitEnabled: false
+  jitEnabled: true
   
   # Minimum payment size in milliloki allowed for JIT channels.
-  minPaymentSizeMloki: 0
+  minPaymentSizeMloki: 1_000
 
   # Maximum payment size in milliloki allowed for JIT channels.
-  maxPaymentSizeMloki: 10_000_000_000
-
-  # Minimum channel capacity in loki. Must be >= 20000 (LND minimum).
-  minChannelCapacityLoki: 20_000
+  jitMaxPaymentSizeMloki: 300_000_000_000
 
   # Maximum client CLTV delay for JIT channels (optional, default 10000).
   jitMaxClientToSelfDelay: 10_000
 
-  # Validity duration in seconds for the JIT fee parameters (optional, default 86400 / 24h).
+  # Validity duration in seconds for the JIT fee parameters (optional, default 86400).
   jitValidUntilSeconds: 86_400
 
-  # --- LSPS1 Limits (Optional) ---
-  # Minimum required channel confirmations for LSPS1 orders (default 0).
+  # Minimum channel balance (Capacity) in Loki for JIT channels (LSPS2).
+  jitMinChannelBalanceLoki: 20_000
+
+  # --- Manual Orders (LSPS1) Business Rules ---
+  # Minimum required channel confirmations for LSPS1 orders.
   lsps1MinRequiredChannelConfirmations: 0
 
-  # Minimum funding confirms within blocks for LSPS1 orders (default 1).
+  # Minimum funding confirms within blocks for LSPS1 orders.
   lsps1MinFundingConfirmsWithinBlocks: 1
 
-  # Maximum channel expiry in blocks (default 201600 / ~140 days).
+  # Supports zero channel reserve for LSPS1 orders.
+  lsps1SupportsZeroChannelReserve: true
+
+  # Maximum channel expiry in blocks.
   lsps1MaxChannelExpiryBlocks: 201_600
 
-  # Duration in seconds before an LSPS1 order expires if not funded (default 86400 / 24h).
+  # Duration in seconds before an LSPS1 order expires if not funded.
   lsps1OrderExpirySeconds: 86_400
 
-  # Maximum initial client balance in Loki for LSPS1 orders (default 100000000).
-  lsps1MaxClientBalanceLoki: 100_000_000
+  # Minimum initial client balance in Loki for LSPS1 orders.
+  lsps1MinInitialClientBalanceLoki: 0
 
-  # Maximum initial LSP balance in Loki for LSPS1 orders (default 100000000).
-  lsps1MaxLspBalanceLoki: 100_000_000
+  # Maximum initial client balance in Loki for LSPS1 orders.
+  lsps1MaxInitialClientBalanceLoki: 100_000_000
+
+  # Minimum initial LSP balance in Loki for LSPS1 orders.
+  lsps1MinInitialLspBalanceLoki: 1
+
+  # Maximum initial LSP balance in Loki for LSPS1 orders.
+  lsps1MaxInitialLspBalanceLoki: 400_000_000
+
+  # Minimum channel balance (Capacity) in Loki for LSPS1 orders.
+  lsps1MinChannelBalanceLoki: 20_000
+
+  # Maximum channel balance (Capacity) in Loki for LSPS1 orders.
+  lsps1MaxChannelBalanceLoki: 500_000_000
 
   # --- Routing Policy & Fees ---
   # The fee rate for routing payments (proportional, e.g. 0.000001 = 1ppm).
-  # Used for channel routing policy and calculating OpeningFeeParams proportional fee.
   feeRate: 0.000001
   
   # The base fee in milliloki for routing payments over the channel.
   baseFeeMloki: 1000
   
   # Smallest HTLC amount in milliloki routed over channels.
-  # Returned in the ChannelInformation RPC.
   minHtlcMloki: 600

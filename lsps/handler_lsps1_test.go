@@ -19,12 +19,69 @@ func TestTableHandleLsps1CreateOrder(t *testing.T) {
 		name                 string
 		req                  Lsps1CreateOrderRequest
 		peerId               string
-		mockSetup            func(*MockOpeningStore, *MockLightningClient, *MockNodesService, *MockLiquidityManager)
+		mockSetup            func(*MockOpeningStore, *MockLightningClient, *MockNodesService, *MockLiquidityManager, *MockNotificationService)
 		config               lspsConfig
 		expectedError        int    // 0 means no error expected, otherwise JSON-RPC error code
 		expectedOrderState   string // Expected state in response (if success)
 		expectedErrorMessage string // Partial match for error message
 	}{
+		{
+			name: "Borderline Capacity - Small order accepted with padding",
+			req: Lsps1CreateOrderRequest{
+				ClientBalanceLoki:            "100",
+				LspBalanceLoki:               "0",
+				FundingConfirmsWithinBlocks:  1,
+				RequiredChannelConfirmations: 0,
+				ChannelExpiryBlocks:          201600,
+				Token:                        "",
+				AnnounceChannel:              false,
+			},
+			peerId: "02677063d89856f4d04be859e9a4d3393165b6f3cd78641bc3c4ef9ca2fde37f",
+			mockSetup: func(store *MockOpeningStore, lnd *MockLightningClient, nodes *MockNodesService, liquidity *MockLiquidityManager, notif *MockNotificationService) {
+				store.On("CountLsps1Orders", mock.Anything, string(Lsps1OrderStateCreated), mock.Anything).Return(0, nil)
+				lnd.On("AddInvoice", mock.Anything, mock.MatchedBy(func(inv *lnrpc.Invoice) bool {
+					return inv.Value >= 100 // Client balance + fee
+				})).Return(&lnrpc.AddInvoiceResponse{PaymentRequest: "lnbc1..."}, nil)
+				store.On("RegisterLsps1Order", mock.MatchedBy(func(order *common.Lsps1Order) bool {
+					return order.ClientBalanceLoki == 100 && order.LspBalanceLoki == 0 &&
+						order.OrderState == string(Lsps1OrderStateCreated)
+				})).Return(nil)
+				store.On("GetFeeParamsMenu", mock.Anything, mock.Anything).Return([]*common.OpeningFeeParams{}, nil)
+
+				minClient := uint64(0)
+				maxClient := uint64(100_000_000)
+				minLsp := uint64(0)
+				maxLsp := uint64(100_000_000)
+				minChan := uint64(20000)
+				maxChan := uint64(100_000_000)
+				minReqConf := uint16(0)
+				minFundingConf := uint16(1)
+				supportsZeroReserve := true
+				maxExpiry := uint32(201600)
+				orderExpiry := uint32(86400)
+
+				nodes.On("GetNodes").Return([]*common.Node{{NodeConfig: &config.NodeConfig{
+					Lsps1MinRequiredChannelConfirmations: &minReqConf,
+					Lsps1MinFundingConfirmsWithinBlocks:  &minFundingConf,
+					Lsps1SupportsZeroChannelReserve:      &supportsZeroReserve,
+					Lsps1MaxChannelExpiryBlocks:          &maxExpiry,
+					Lsps1OrderExpirySeconds:              &orderExpiry,
+					Lsps1MinInitialClientBalanceLoki:     &minClient,
+					Lsps1MaxInitialClientBalanceLoki:     &maxClient,
+					Lsps1MinInitialLspBalanceLoki:        &minLsp,
+					Lsps1MaxInitialLspBalanceLoki:        &maxLsp,
+					Lsps1MinChannelBalanceLoki:           &minChan,
+					Lsps1MaxChannelBalanceLoki:           &maxChan,
+					AdditionalChannelCapacity:            21000, // 100 + 21000 > 20000
+				}}}, nil)
+				nodes.On("GetMinChannelCapacity").Return(uint64(20000))
+				liquidity.On("CheckOnChainLiquidity", mock.Anything, mock.Anything).Return(nil)
+				notif.On("NotifyOrderStateChanged", mock.Anything, mock.Anything, "CREATED", "", "").Return(true, nil)
+			},
+			config:             lspsConfig{Lsps1MaxPendingOrders: 5},
+			expectedError:      0,
+			expectedOrderState: string(Lsps1OrderStateCreated),
+		},
 		{
 			name: "Success - Happy Path",
 			req: Lsps1CreateOrderRequest{
@@ -37,7 +94,7 @@ func TestTableHandleLsps1CreateOrder(t *testing.T) {
 				AnnounceChannel:              false,
 			},
 			peerId: "02677063d89856f4d04be859e9a4d3393165b6f3cd78641bc3c4ef9ca2fde37f",
-			mockSetup: func(store *MockOpeningStore, lnd *MockLightningClient, nodes *MockNodesService, liquidity *MockLiquidityManager) {
+			mockSetup: func(store *MockOpeningStore, lnd *MockLightningClient, nodes *MockNodesService, liquidity *MockLiquidityManager, notif *MockNotificationService) {
 				store.On("CountLsps1Orders", mock.Anything, string(Lsps1OrderStateCreated), mock.Anything).Return(0, nil)
 				lnd.On("AddInvoice", mock.Anything, mock.MatchedBy(func(inv *lnrpc.Invoice) bool {
 					return inv.Value >= 1000000 // At least client balance + fee
@@ -48,9 +105,36 @@ func TestTableHandleLsps1CreateOrder(t *testing.T) {
 						order.PaymentState == string(Lsps1PaymentStateExpectPayment)
 				})).Return(nil)
 				store.On("GetFeeParamsMenu", mock.Anything, mock.Anything).Return([]*common.OpeningFeeParams{}, nil)
-				nodes.On("GetNodes").Return([]*common.Node{{NodeConfig: &config.NodeConfig{FeeRate: 0.000001}}}, nil)
+
+				minClient := uint64(0)
+				maxClient := uint64(100_000_000)
+				minLsp := uint64(0)
+				maxLsp := uint64(100_000_000)
+				minChan := uint64(20000)
+				maxChan := uint64(100_000_000)
+				minReqConf := uint16(0)
+				minFundingConf := uint16(1)
+				supportsZeroReserve := true
+				maxExpiry := uint32(201600)
+				orderExpiry := uint32(86400)
+
+				nodes.On("GetNodes").Return([]*common.Node{{NodeConfig: &config.NodeConfig{
+					FeeRate:                              0.000001,
+					Lsps1MinRequiredChannelConfirmations: &minReqConf,
+					Lsps1MinFundingConfirmsWithinBlocks:  &minFundingConf,
+					Lsps1SupportsZeroChannelReserve:      &supportsZeroReserve,
+					Lsps1MaxChannelExpiryBlocks:          &maxExpiry,
+					Lsps1OrderExpirySeconds:              &orderExpiry,
+					Lsps1MinInitialClientBalanceLoki:     &minClient,
+					Lsps1MaxInitialClientBalanceLoki:     &maxClient,
+					Lsps1MinInitialLspBalanceLoki:        &minLsp,
+					Lsps1MaxInitialLspBalanceLoki:        &maxLsp,
+					Lsps1MinChannelBalanceLoki:           &minChan,
+					Lsps1MaxChannelBalanceLoki:           &maxChan,
+				}}}, nil)
 				nodes.On("GetMinChannelCapacity").Return(uint64(20000))
 				liquidity.On("CheckOnChainLiquidity", mock.Anything, mock.Anything).Return(nil)
+				notif.On("NotifyOrderStateChanged", mock.Anything, mock.Anything, "CREATED", "", "").Return(true, nil)
 			},
 			config:             lspsConfig{Lsps1MaxPendingOrders: 5},
 			expectedError:      0,
@@ -63,9 +147,32 @@ func TestTableHandleLsps1CreateOrder(t *testing.T) {
 				LspBalanceLoki:    "0",
 			},
 			peerId: "02677063d89856f4d04be859e9a4d3393165b6f3cd78641bc3c4ef9ca2fde37f",
-			mockSetup: func(store *MockOpeningStore, lnd *MockLightningClient, nodes *MockNodesService, liquidity *MockLiquidityManager) {
+			mockSetup: func(store *MockOpeningStore, lnd *MockLightningClient, nodes *MockNodesService, liquidity *MockLiquidityManager, notif *MockNotificationService) {
 				// GetNodes is now called early for config values
-				nodes.On("GetNodes").Return([]*common.Node{{NodeConfig: &config.NodeConfig{}}}, nil).Maybe()
+				minClient := uint64(0)
+				maxClient := uint64(100_000_000)
+				minLsp := uint64(0)
+				maxLsp := uint64(100_000_000)
+				minReqConf := uint16(0)
+				minFundingConf := uint16(1)
+				supportsZeroReserve := true
+				maxExpiry := uint32(201600)
+				orderExpiry := uint32(86400)
+				minChan := uint64(20000)
+				maxChan := uint64(100_000_000)
+				nodes.On("GetNodes").Return([]*common.Node{{NodeConfig: &config.NodeConfig{
+					Lsps1MinRequiredChannelConfirmations: &minReqConf,
+					Lsps1MinFundingConfirmsWithinBlocks:  &minFundingConf,
+					Lsps1SupportsZeroChannelReserve:      &supportsZeroReserve,
+					Lsps1MaxChannelExpiryBlocks:          &maxExpiry,
+					Lsps1OrderExpirySeconds:              &orderExpiry,
+					Lsps1MinInitialClientBalanceLoki:     &minClient,
+					Lsps1MaxInitialClientBalanceLoki:     &maxClient,
+					Lsps1MinInitialLspBalanceLoki:        &minLsp,
+					Lsps1MaxInitialLspBalanceLoki:        &maxLsp,
+					Lsps1MinChannelBalanceLoki:           &minChan,
+					Lsps1MaxChannelBalanceLoki:           &maxChan,
+				}}}, nil).Maybe()
 			},
 			config:               lspsConfig{Lsps1MaxPendingOrders: 5},
 			expectedError:        -32602,
@@ -78,9 +185,32 @@ func TestTableHandleLsps1CreateOrder(t *testing.T) {
 				LspBalanceLoki:    "0",
 			},
 			peerId: "02677063d89856f4d04be859e9a4d3393165b6f3cd78641bc3c4ef9ca2fde37f",
-			mockSetup: func(store *MockOpeningStore, lnd *MockLightningClient, nodes *MockNodesService, liquidity *MockLiquidityManager) {
+			mockSetup: func(store *MockOpeningStore, lnd *MockLightningClient, nodes *MockNodesService, liquidity *MockLiquidityManager, notif *MockNotificationService) {
 				// GetNodes is now called early for config values
-				nodes.On("GetNodes").Return([]*common.Node{{NodeConfig: &config.NodeConfig{}}}, nil).Maybe()
+				minClient := uint64(0)
+				maxClient := uint64(100_000_000)
+				minLsp := uint64(0)
+				maxLsp := uint64(100_000_000)
+				minReqConf := uint16(0)
+				minFundingConf := uint16(1)
+				supportsZeroReserve := true
+				maxExpiry := uint32(201600)
+				orderExpiry := uint32(86400)
+				minChan := uint64(20000)
+				maxChan := uint64(100_000_000)
+				nodes.On("GetNodes").Return([]*common.Node{{NodeConfig: &config.NodeConfig{
+					Lsps1MinRequiredChannelConfirmations: &minReqConf,
+					Lsps1MinFundingConfirmsWithinBlocks:  &minFundingConf,
+					Lsps1SupportsZeroChannelReserve:      &supportsZeroReserve,
+					Lsps1MaxChannelExpiryBlocks:          &maxExpiry,
+					Lsps1OrderExpirySeconds:              &orderExpiry,
+					Lsps1MinInitialClientBalanceLoki:     &minClient,
+					Lsps1MaxInitialClientBalanceLoki:     &maxClient,
+					Lsps1MinInitialLspBalanceLoki:        &minLsp,
+					Lsps1MaxInitialLspBalanceLoki:        &maxLsp,
+					Lsps1MinChannelBalanceLoki:           &minChan,
+					Lsps1MaxChannelBalanceLoki:           &maxChan,
+				}}}, nil).Maybe()
 			},
 			config:               lspsConfig{Lsps1MaxPendingOrders: 5},
 			expectedError:        100,                            // Application specific error
@@ -92,10 +222,37 @@ func TestTableHandleLsps1CreateOrder(t *testing.T) {
 				ClientBalanceLoki: "1000000",
 			},
 			peerId: "02677063d89856f4d04be859e9a4d3393165b6f3cd78641bc3c4ef9ca2fde37f",
-			mockSetup: func(store *MockOpeningStore, lnd *MockLightningClient, nodes *MockNodesService, liquidity *MockLiquidityManager) {
+			mockSetup: func(store *MockOpeningStore, lnd *MockLightningClient, nodes *MockNodesService, liquidity *MockLiquidityManager, notif *MockNotificationService) {
 				store.On("GetFeeParamsMenu", mock.Anything, mock.Anything).Return([]*common.OpeningFeeParams{}, nil)
 				store.On("CountLsps1Orders", mock.Anything, string(Lsps1OrderStateCreated), mock.Anything).Return(5, nil) // Already 5
-				nodes.On("GetNodes").Return([]*common.Node{{NodeConfig: &config.NodeConfig{FeeRate: 0.000001}}}, nil)
+				store.On("GetFeeParamsMenu", mock.Anything, mock.Anything).Return([]*common.OpeningFeeParams{}, nil)
+				store.On("CountLsps1Orders", mock.Anything, string(Lsps1OrderStateCreated), mock.Anything).Return(5, nil) // Already 5
+				minClient := uint64(0)
+				maxClient := uint64(100_000_000)
+				minLsp := uint64(0)
+				maxLsp := uint64(100_000_000)
+				minReqConf := uint16(0)
+				minFundingConf := uint16(1)
+				supportsZeroReserve := true
+				maxExpiry := uint32(201600)
+				orderExpiry := uint32(86400)
+				minChan := uint64(20000)
+				maxChan := uint64(100_000_000)
+
+				nodes.On("GetNodes").Return([]*common.Node{{NodeConfig: &config.NodeConfig{
+					FeeRate:                              0.000001,
+					Lsps1MinRequiredChannelConfirmations: &minReqConf,
+					Lsps1MinFundingConfirmsWithinBlocks:  &minFundingConf,
+					Lsps1SupportsZeroChannelReserve:      &supportsZeroReserve,
+					Lsps1MaxChannelExpiryBlocks:          &maxExpiry,
+					Lsps1OrderExpirySeconds:              &orderExpiry,
+					Lsps1MinInitialClientBalanceLoki:     &minClient,
+					Lsps1MaxInitialClientBalanceLoki:     &maxClient,
+					Lsps1MinInitialLspBalanceLoki:        &minLsp,
+					Lsps1MaxInitialLspBalanceLoki:        &maxLsp,
+					Lsps1MinChannelBalanceLoki:           &minChan,
+					Lsps1MaxChannelBalanceLoki:           &maxChan,
+				}}}, nil)
 				nodes.On("GetMinChannelCapacity").Return(uint64(20000))
 				liquidity.On("CheckOnChainLiquidity", mock.Anything, mock.Anything).Return(nil)
 			},
@@ -111,15 +268,17 @@ func TestTableHandleLsps1CreateOrder(t *testing.T) {
 			mockLnd := new(MockLightningClient)
 			mockNodes := new(MockNodesService)
 			mockLiquidity := new(MockLiquidityManager)
+			mockNotif := new(MockNotificationService)
 
-			tt.mockSetup(mockStore, mockLnd, mockNodes, mockLiquidity)
+			tt.mockSetup(mockStore, mockLnd, mockNodes, mockLiquidity, mockNotif)
 
 			server := &Server{
-				config:           Config{Lsps1MaxPendingOrders: tt.config.Lsps1MaxPendingOrders},
-				lndClient:        mockLnd,
-				nodesService:     mockNodes,
-				openingService:   mockStore,
-				liquidityManager: mockLiquidity,
+				config:              Config{Lsps1MaxPendingOrders: tt.config.Lsps1MaxPendingOrders},
+				lndClient:           mockLnd,
+				nodesService:        mockNodes,
+				openingService:      mockStore,
+				liquidityManager:    mockLiquidity,
+				notificationService: mockNotif,
 			}
 
 			// Marshal request

@@ -16,9 +16,9 @@ import (
 func TestHandleLsps1CreateOrder_Matrix(t *testing.T) {
 	// Setup constants from LSPS1 defaults/limits for testing
 	const (
-		MinClient      = uint64(DefaultLsps1MinInitialClientBalanceLoki)
-		MaxClient      = uint64(DefaultLsps1MaxInitialClientBalanceLoki)
-		MaxLsp         = uint64(DefaultLsps1MaxInitialLspBalanceLoki)
+		MinClient      = uint64(0)
+		MaxClient      = uint64(100_000_000)
+		MaxLsp         = uint64(100_000_000)
 		MinChan        = uint64(20000) // Assumed default from nodesService mock
 		ValidLsp       = uint64(50000)
 		ValidClient    = uint64(0)
@@ -30,7 +30,7 @@ func TestHandleLsps1CreateOrder_Matrix(t *testing.T) {
 		name          string
 		clientBalance string
 		lspBalance    string
-		mockSetup     func(*MockLiquidityManager, *MockNodesService, *MockOpeningService, *MockLndClient)
+		mockSetup     func(*MockLiquidityManager, *MockNodesService, *MockOpeningService, *MockLndClient, *MockNotificationService)
 		expectCode    int
 		expectMsg     string
 	}{
@@ -59,7 +59,7 @@ func TestHandleLsps1CreateOrder_Matrix(t *testing.T) {
 			name:          "Reject: Channel Capacity Too Small",
 			clientBalance: "0",
 			lspBalance:    "10000", // < MinChan (20000)
-			mockSetup: func(lm *MockLiquidityManager, ns *MockNodesService, os *MockOpeningService, lc *MockLndClient) {
+			mockSetup: func(lm *MockLiquidityManager, ns *MockNodesService, os *MockOpeningService, lc *MockLndClient, notif *MockNotificationService) {
 				lm.On("CheckOnChainLiquidity", mock.Anything, uint64(10000)).Return(nil)
 				ns.On("GetMinChannelCapacity").Return(MinChan)
 			},
@@ -70,7 +70,7 @@ func TestHandleLsps1CreateOrder_Matrix(t *testing.T) {
 			name:          "Success: Valid Inbound Order",
 			clientBalance: "0",
 			lspBalance:    "50000",
-			mockSetup: func(lm *MockLiquidityManager, ns *MockNodesService, os *MockOpeningService, lc *MockLndClient) {
+			mockSetup: func(lm *MockLiquidityManager, ns *MockNodesService, os *MockOpeningService, lc *MockLndClient, notif *MockNotificationService) {
 				lm.On("CheckOnChainLiquidity", mock.Anything, uint64(50000)).Return(nil)
 				ns.On("GetMinChannelCapacity").Return(MinChan)
 				ns.On("GetNodes").Return([]*common.Node{{NodeConfig: &config.NodeConfig{}}})
@@ -80,6 +80,7 @@ func TestHandleLsps1CreateOrder_Matrix(t *testing.T) {
 				os.On("CountLsps1Orders", mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
 				lc.On("AddInvoice", mock.Anything, mock.Anything).Return(&lnrpc.AddInvoiceResponse{PaymentRequest: "lnbc..."}, nil)
 				os.On("RegisterLsps1Order", mock.Anything).Return(nil)
+				notif.On("NotifyOrderStateChanged", mock.Anything, mock.Anything, "CREATED", "", "").Return(true, nil)
 			},
 			expectCode: 0, // Success (no error field in response, but test checks result != nil)
 		},
@@ -95,14 +96,34 @@ func TestHandleLsps1CreateOrder_Matrix(t *testing.T) {
 			mockNotif := new(MockNotificationService)
 
 			// Default mocks if not customized
-			// Default mocks if not customized
+			minClient := MinClient
+			maxClient := MaxClient
+			minLsp := uint64(0)
+			maxLsp := MaxLsp
+			minChan := MinChan
+			maxChan := uint64(100_000_000)
+			minReqConf := uint16(0)
+			minFundingConf := uint16(1)
+			supportsZeroReserve := true
+			maxExpiry := uint32(201600)
+			orderExpiry := uint32(86400)
+
 			mockNS.On("GetNodes").Return([]*common.Node{{NodeConfig: &config.NodeConfig{
-				Lsps1MaxClientBalanceLoki: MaxClient,
-				Lsps1MaxLspBalanceLoki:    MaxLsp,
+				Lsps1MinRequiredChannelConfirmations: &minReqConf,
+				Lsps1MinFundingConfirmsWithinBlocks:  &minFundingConf,
+				Lsps1SupportsZeroChannelReserve:      &supportsZeroReserve,
+				Lsps1MaxChannelExpiryBlocks:          &maxExpiry,
+				Lsps1OrderExpirySeconds:              &orderExpiry,
+				Lsps1MinInitialClientBalanceLoki:     &minClient,
+				Lsps1MaxInitialClientBalanceLoki:     &maxClient,
+				Lsps1MinInitialLspBalanceLoki:        &minLsp,
+				Lsps1MaxInitialLspBalanceLoki:        &maxLsp,
+				Lsps1MinChannelBalanceLoki:           &minChan,
+				Lsps1MaxChannelBalanceLoki:           &maxChan,
 			}}}).Maybe()
 
 			if tt.mockSetup != nil {
-				tt.mockSetup(mockLM, mockNS, mockOS, mockLC)
+				tt.mockSetup(mockLM, mockNS, mockOS, mockLC, mockNotif)
 			} else {
 				// Default permissive mocks for validations that proceed far enough to need them
 				mockLM.On("CheckOnChainLiquidity", mock.Anything, mock.Anything).Return(nil).Maybe()

@@ -486,9 +486,22 @@ func (i *Interceptor) openChannel(paymentHash, destination []byte, incomingAmoun
 		}
 	}
 
-	// Enforce Minimum Channel Capacity
+	// Enforce Minimum Channel Capacity (Physical Floor)
 	if uint64(capacity) < i.config.MinChannelCapacityLoki {
-		return nil, fmt.Errorf("channel capacity %d is smaller than minimum %d", capacity, i.config.MinChannelCapacityLoki)
+		return nil, fmt.Errorf("channel capacity %d is smaller than minimum %d (network floor)", capacity, i.config.MinChannelCapacityLoki)
+	}
+
+	// Enforce Business Limits for JIT
+	if i.config.JitEnabled && isJit {
+		// 1. Check Business Floor (Minimum Channel Size)
+		if i.config.JitMinChannelBalanceLoki != nil && uint64(capacity) < *i.config.JitMinChannelBalanceLoki {
+			return nil, fmt.Errorf("channel capacity %d is smaller than business minimum %d", capacity, *i.config.JitMinChannelBalanceLoki)
+		}
+
+		// 2. Check Maximum Payment Size
+		if i.config.JitMaxPaymentSizeMloki > 0 && uint64(incomingAmountMloki) > i.config.JitMaxPaymentSizeMloki {
+			return nil, fmt.Errorf("payment size %d exceeds maximum allowed %d", incomingAmountMloki, i.config.JitMaxPaymentSizeMloki)
+		}
 	}
 
 	minConfs := i.config.MinConfs
