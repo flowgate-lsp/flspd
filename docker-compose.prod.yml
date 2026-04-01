@@ -82,7 +82,7 @@ services:
       - "traefik.http.routers.flspd.middlewares=flspd-strip"
       
       # Dashboard Labels
-      - "traefik.http.routers.flspd-dash.rule=Host(`dash.flowgate.to`)"
+      - "traefik.http.routers.flspd-dash.rule=Host(`flsp.flowgate.to`) && (PathPrefix(`/dashboard`) || PathPrefix(`/dashboard/`))"
       - "traefik.http.routers.flspd-dash.entrypoints=web"
       - "traefik.http.services.flspd-dash.loadbalancer.server.port=8080"
 
