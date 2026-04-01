@@ -150,7 +150,12 @@ func (s *DashboardService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 2. Authorize
-	if s.adminPubKey != "" && session.PubKey != s.adminPubKey {
+	if s.adminPubKey == "" {
+		log.Error().Msg("Dashboard attempted to be accessed but adminPubKey is not configured")
+		http.Error(w, "Dashboard is disabled (misconfigured)", http.StatusForbidden)
+		return
+	}
+	if session.PubKey != s.adminPubKey {
 		log.Warn().Msgf("Unauthorized dashboard access attempt by %s", session.PubKey)
 		http.Error(w, "Forbidden", http.StatusForbidden)
 		return
@@ -380,10 +385,17 @@ func (s *DashboardService) handleGetOrderDetail(req *lsps.JsonRpcRequest) *lsps.
 
 func (s *DashboardService) handleWS(w http.ResponseWriter, r *http.Request) {
 	// Verify auth before upgrade
-	_, err := auth.VerifyNostrAuth(r)
+	session, err := auth.VerifyNostrAuth(r)
 	if err != nil {
 		log.Error().Err(err).Msg("Dashboard WebSocket auth failed")
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// Authorize
+	if s.adminPubKey == "" || session.PubKey != s.adminPubKey {
+		log.Warn().Msgf("Unauthorized dashboard WebSocket attempt by %s", session.PubKey)
+		http.Error(w, "Forbidden", http.StatusForbidden)
 		return
 	}
 	
