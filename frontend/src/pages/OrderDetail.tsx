@@ -144,12 +144,25 @@ export const OrderDetail: React.FC<OrderDetailProps> = ({ orderId, onBack }) => 
           {/* Persistent Cryptographic Identifiers */}
           <div className="space-y-6 pt-10 relative z-10">
             <h3 className="text-[10px] font-black text-on-surface-variant uppercase tracking-[0.4em] mb-4">Cryptographic Identity</h3>
-            <CopyableField
-              label="Peer Pubkey"
-              value={order.peer_id}
-              copied={copied}
-              onCopy={copyToClipboard}
-            />
+            <div className="space-y-4">
+              <div className="flex items-center gap-3">
+                <p className="text-[9px] font-mono text-on-surface-variant/40 uppercase tracking-[0.3em] font-black italic leading-none">Peer Identity</p>
+                {order.peer_alias && (
+                  <span 
+                    className="text-[10px] font-mono font-black uppercase italic px-2 py-0.5 rounded border border-current/20 bg-current/5"
+                    style={{ color: order.peer_color || '#00baff' }}
+                  >
+                    {order.peer_alias}
+                  </span>
+                )}
+              </div>
+              <CopyableField
+                label=""
+                value={order.peer_id}
+                copied={copied}
+                onCopy={copyToClipboard}
+              />
+            </div>
             {order.funding_txid && (
               <CopyableField
                 label="Funding Transmission Hash"

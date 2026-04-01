@@ -291,6 +291,14 @@ func (m *MockLightningClient) QueryRoutes(destination []byte, amountMloki uint64
 	return args.Get(0).([]*lightning.Route), args.Error(1)
 }
 
+func (m *MockLightningClient) GetNodeInfo(pubkey string) (*lightning.NodeInfo, error) {
+	args := m.Called(pubkey)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*lightning.NodeInfo), args.Error(1)
+}
+
 func (m *MockLightningClient) SubscribePeerOnline(ctx context.Context) (<-chan string, error) {
 	args := m.Called(ctx)
 	return args.Get(0).(<-chan string), args.Error(1)

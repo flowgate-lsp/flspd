@@ -63,8 +63,8 @@ export const CommandCenter: React.FC<{ onViewOrder?: (id: string) => void }> = (
               <Shield className="w-5 h-5 text-primary" />
             </div>
             <div>
-              <p className="text-[9px] font-mono font-bold text-on-surface-variant uppercase tracking-[0.2em] leading-none mb-2 flex items-center gap-2">
-                Node Protocol
+              <p className="text-[9px] font-mono font-bold text-on-surface-variant uppercase tracking-[0.2em] leading-none mb-2 flex items-center gap-3">
+                Node Protocol {summary?.node_name && <span className="text-primary/60 font-black italic">[{summary.node_name}]</span>}
                 <span className="w-1.5 h-1.5 rounded-full bg-secondary animate-glow-pulse" />
               </p>
               <div className="flex items-center gap-3">

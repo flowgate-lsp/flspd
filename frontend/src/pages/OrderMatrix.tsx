@@ -6,6 +6,14 @@ import { useDashboard } from '../hooks/useDashboard';
 import { useEvents } from '../hooks/useEvents';
 import { useNavigate } from '@tanstack/react-router';
 
+/* --- Utilities --- */
+
+const middleTrim = (str: string, layout: number = 6) => {
+  if (!str) return '...';
+  if (str.length <= layout * 2) return str;
+  return `${str.substring(0, layout)}...${str.substring(str.length - layout)}`;
+};
+
 interface OrderMatrixProps {
   onViewOrder: (id: string) => void;
   initialSearch?: string;
@@ -28,7 +36,8 @@ export const OrderMatrix: React.FC<OrderMatrixProps> = ({ onViewOrder, initialSe
 
   const filteredOrders = orders.filter(order => 
     order.order_id?.toLowerCase().includes(search.toLowerCase()) ||
-    order.peer_id?.toLowerCase().includes(search.toLowerCase())
+    order.peer_id?.toLowerCase().includes(search.toLowerCase()) ||
+    order.peer_alias?.toLowerCase().includes(search.toLowerCase())
   );
 
   if (loading && orders.length === 0) {
@@ -138,9 +147,27 @@ export const OrderMatrix: React.FC<OrderMatrixProps> = ({ onViewOrder, initialSe
                       </span>
                     </td>
                     <td className="px-8 py-6">
-                       <span className="text-[11px] font-mono text-on-surface-variant/70 block whitespace-nowrap opacity-60 group-hover:opacity-100 transition-opacity truncate max-w-[120px]" title={order.peer_id}>
-                         {order.peer_id}
-                       </span>
+                       <div className="flex items-center gap-3 group/peer">
+                         {order.peer_color && (
+                           <div 
+                             className="w-1.5 h-1.5 rounded-full shrink-0 shadow-[0_0_8px_currentColor]" 
+                             style={{ color: order.peer_color, backgroundColor: order.peer_color }} 
+                           />
+                         )}
+                         <div className="flex flex-col">
+                           <span className={cn(
+                             "text-[11px] font-mono font-black uppercase italic tracking-wider transition-colors",
+                             order.peer_alias ? "text-white" : "text-on-surface-variant/40"
+                           )}>
+                             {order.peer_alias || middleTrim(order.peer_id, 4)}
+                           </span>
+                           {order.peer_alias && (
+                             <span className="text-[9px] font-mono text-on-surface-variant/40 truncate max-w-[100px]" title={order.peer_id}>
+                               {middleTrim(order.peer_id, 6)}
+                             </span>
+                           )}
+                         </div>
+                       </div>
                     </td>
                     <td className="px-8 py-6">
                       <div className="flex flex-col gap-1">
@@ -221,7 +248,8 @@ export const OrderMatrix: React.FC<OrderMatrixProps> = ({ onViewOrder, initialSe
                 </div>
                 <div className="space-y-2 overflow-hidden">
                   <p className="text-[9px] font-mono text-on-surface-variant/50 uppercase tracking-[0.2em] leading-none font-black">Counterparty</p>
-                  <p className="text-[10px] font-mono text-white break-all tracking-tighter opacity-70 italic">{order.peer_id.substring(0, 32)}...</p>
+                  <p className="text-[11px] font-black text-white italic tracking-tighter leading-none mb-1">{order.peer_alias || 'Unknown Node'}</p>
+                  <p className="text-[9px] font-mono text-on-surface-variant/40 truncate italic tracking-widest">{middleTrim(order.peer_id, 8)}</p>
                 </div>
               </div>
               

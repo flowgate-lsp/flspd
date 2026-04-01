@@ -107,6 +107,14 @@ func (m *MockLightningClient) SubscribeCustomMessages(ctx context.Context, req *
 	return args.Get(0).(lnrpc.Lightning_SubscribeCustomMessagesClient), args.Error(1)
 }
 
+func (m *MockLightningClient) GetNodeInfo(pubkey string) (*lightning.NodeInfo, error) {
+	args := m.Called(pubkey)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*lightning.NodeInfo), args.Error(1)
+}
+
 // MockOpeningStore for testing
 type MockOpeningStore struct {
 	mock.Mock

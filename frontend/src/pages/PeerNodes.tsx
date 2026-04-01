@@ -1,11 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { GlassCard } from '../components/GlassCard';
-import { Users, Globe, ArrowUpRight, ArrowDownLeft, Search, ShieldCheck, Activity } from 'lucide-react';
+import { Users, Globe, ArrowUpRight, ArrowDownLeft, Search, ShieldCheck, Activity, Copy, Check, Info } from 'lucide-react';
 import { useDashboard } from '../hooks/useDashboard';
 import { formatSmart, cn } from '../lib/utils';
 
+/* --- Utilities --- */
+
 interface Peer {
   pub_key: string;
+  alias?: string;
+  color?: string;
   address: string;
   inbound: boolean;
   active: boolean;
@@ -41,6 +45,7 @@ export const PeerNodes: React.FC<PeerNodesProps> = ({ onViewPeerOrders }) => {
 
   const filteredPeers = peers.filter(p => 
     (p.pub_key?.toLowerCase() || '').includes(search.toLowerCase()) || 
+    (p.alias?.toLowerCase() || '').includes(search.toLowerCase()) ||
     (p.address?.toLowerCase() || '').includes(search.toLowerCase())
   );
 
@@ -63,7 +68,7 @@ export const PeerNodes: React.FC<PeerNodesProps> = ({ onViewPeerOrders }) => {
                <Search className="w-4 h-4 text-on-surface-variant group-focus-within:text-primary transition-colors" />
                <input 
                  type="text" 
-                 placeholder="Search Pubkeys..." 
+                 placeholder="Search Pubkeys or Aliases..." 
                  className="bg-transparent border-none outline-none text-[11px] font-mono text-white w-56 placeholder:text-on-surface-variant/30 uppercase tracking-widest"
                  value={search}
                  onChange={(e) => setSearch(e.target.value)}
@@ -87,77 +92,122 @@ export const PeerNodes: React.FC<PeerNodesProps> = ({ onViewPeerOrders }) => {
           <p className="text-on-surface-variant font-mono text-[9px] uppercase tracking-[0.3em] font-black italic opacity-40">No peer records identified in this sector</p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filteredPeers.map((peer, idx) => (
-            <GlassCard
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+          {filteredPeers.map((peer) => (
+            <PeerCard
               key={peer.pub_key}
-              className="p-6 border-white/5 hover:border-primary/30 transition-all duration-700 group relative overflow-hidden bg-surface-variant/20 hover:bg-white/[0.03]"
-            >
-              <div className={cn(
-                "absolute -top-16 -right-16 w-32 h-32 blur-[60px] opacity-10 group-hover:opacity-30 transition-opacity duration-1000 rounded-full pointer-events-none",
-                peer.active ? "bg-secondary" : "bg-error"
-              )} />
-
-              <div className="flex justify-between items-start mb-6">
-                <div className="p-3 rounded-2xl bg-black/40 border border-white/5 group-hover:scale-110 transition-transform duration-500">
-                  <Globe className={cn("w-5 h-5", peer.active ? "text-secondary" : "text-on-surface-variant/40")} />
-                </div>
-                <div className={cn(
-                  "flex items-center gap-2 px-3.5 py-1.5 rounded-xl border italic shadow-sm transition-all duration-500",
-                  peer.active ? "text-secondary border-secondary/20 bg-secondary/5" : "text-error border-error/20 bg-error/5"
-                )}>
-                  <Activity className={cn("w-1 h-1 rounded-full", peer.active ? "bg-secondary animate-pulse shadow-[0_0_8px_rgba(0,253,135,0.6)]" : "bg-error")} />
-                  <span className="text-[9px] font-mono font-black uppercase tracking-[0.2em] leading-none">{peer.active ? 'Online' : 'Offline'}</span>
-                </div>
-              </div>
-
-              <div className="mb-6 space-y-1.5">
-                <h3 className="text-xs font-black text-white italic tracking-tighter flex items-center gap-2">
-                  Peer Index #{idx + 1}
-                  {peer.inbound && <ShieldCheck className="w-3.5 h-3.5 text-primary opacity-50" />}
-                </h3>
-                <p className="text-[9px] font-mono text-on-surface-variant/60 truncate group-hover:text-white transition-colors">
-                  {peer.pub_key}
-                </p>
-              </div>
-
-              <div className="grid grid-cols-2 gap-8 mb-6">
-                <div className="space-y-1.5">
-                  <p className="text-[8px] font-mono text-on-surface-variant/50 uppercase tracking-[0.3em] font-black italic shadow-sm">Sent</p>
-                  <div className="flex items-center gap-2 text-white">
-                    <ArrowUpRight className="w-3 h-3 text-secondary" />
-                    <span className="text-[10px] font-black font-mono uppercase tracking-tighter">{formatSmart(peer.out_sat)}</span>
-                  </div>
-                </div>
-                <div className="space-y-1.5">
-                  <p className="text-[8px] font-mono text-on-surface-variant/50 uppercase tracking-[0.3em] font-black italic shadow-sm">Received</p>
-                  <div className="flex items-center gap-2 text-white">
-                    <ArrowDownLeft className="w-3 h-3 text-primary" />
-                    <span className="text-[10px] font-black font-mono uppercase tracking-tighter">{formatSmart(peer.in_sat)}</span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="pt-6 flex items-center justify-between border-t border-white/5">
-                <div className="text-[8px] font-mono text-on-surface-variant/40 truncate max-w-[130px] italic font-black uppercase tracking-widest" title={peer.address}>
-                  {peer.address || 'Direct Connect'}
-                </div>
-                {onViewPeerOrders && (
-                  <button 
-                    onClick={() => onViewPeerOrders(peer.pub_key)}
-                    className="flex items-center gap-2.5 px-4 py-2 rounded-xl bg-white/5 border border-white/5 text-[9px] font-black uppercase italic tracking-widest text-on-surface-variant hover:text-white hover:bg-primary/10 transition-all active:scale-95 group/btn"
-                  >
-                    Orders
-                    <span className="bg-primary/20 text-primary px-1.5 py-0.5 rounded-lg text-[8px] font-black group-hover/btn:bg-primary group-hover/btn:text-on-primary transition-all">
-                      {peer.order_count || 0}
-                    </span>
-                  </button>
-                )}
-              </div>
-            </GlassCard>
+              peer={peer}
+              onViewOrders={onViewPeerOrders}
+            />
           ))}
         </div>
       )}
     </div>
+  );
+};
+
+/* --- Sub-components & Helpers --- */
+
+interface PeerCardProps {
+  peer: Peer;
+  onViewOrders?: (pubkey: string) => void;
+}
+
+const PeerCard: React.FC<PeerCardProps> = ({ peer, onViewOrders }) => {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = () => {
+    const connectString = `${peer.pub_key}@${peer.address || 'unknown'}`;
+    navigator.clipboard.writeText(connectString);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const nodeColor = peer.color || '#00baff';
+
+  return (
+    <GlassCard 
+      onClick={() => onViewOrders?.(peer.pub_key)}
+      className="p-6 border-white/5 shadow-2xl bg-surface-variant/20 hover:border-white/10 group transition-all duration-500 overflow-hidden relative cursor-pointer active:scale-[0.99]"
+    >
+      {/* Header: Alias + Status Indicator */}
+      <div className="flex items-center justify-between mb-5">
+        <div className="flex items-center gap-3">
+          <div className={cn(
+             "w-2 h-2 rounded-full shadow-[0_0_8px_currentColor]",
+             peer.active ? "bg-secondary text-secondary animate-pulse" : "bg-on-surface-variant/20 text-on-surface-variant"
+          )} />
+          <h3 className="text-lg font-bold text-white tracking-tight uppercase leading-none truncate max-w-[200px]">
+            {peer.alias || "Unnamed Node"}
+          </h3>
+        </div>
+        <div className="px-2.5 py-1 rounded-lg border border-white/5 bg-white/5 text-[9px] font-mono text-on-surface-variant uppercase tracking-widest font-black italic">
+          {peer.active ? "Online" : "Offline"}
+        </div>
+      </div>
+
+      {/* Identity Strip: Unified 'pubkey@address' Format */}
+      <div 
+        onClick={(e) => e.stopPropagation()}
+        className="flex items-center gap-3 p-3 rounded-2xl bg-black/40 border border-white/5 mb-6 group-hover:bg-black/60 transition-all cursor-default"
+      >
+        <div className="flex items-center gap-3 flex-1 min-w-0">
+          <ShieldCheck className="w-3.5 h-3.5 text-primary shrink-0 opacity-40" />
+          <code className="text-[10px] font-mono text-white/50 break-all font-black tracking-widest uppercase">
+             {peer.pub_key}@{peer.address ? peer.address.split(':')[0] : 'local'}
+          </code>
+        </div>
+        <button 
+          onClick={(e) => {
+            e.stopPropagation();
+            handleCopy();
+          }}
+          className="p-2 rounded-xl bg-white/5 text-on-surface-variant hover:text-white hover:bg-white/10 transition-all active:scale-90 group/copy shrink-0"
+          title="Copy connect string (pubkey@address)"
+        >
+          {copied ? (
+            <div className="flex items-center gap-2">
+              <span className="text-[9px] font-black uppercase text-secondary">Copied!</span>
+              <Check className="w-3.5 h-3.5 text-secondary" />
+            </div>
+          ) : (
+            <Copy className="w-3.5 h-3.5 group-hover/copy:text-primary transition-colors" />
+          )}
+        </button>
+      </div>
+
+      {/* Clean Metrics Grid: Horizontal columns for high-density reading */}
+      <div className="grid grid-cols-3 gap-4">
+        <div className="space-y-1.5">
+          <div className="flex items-center gap-1.5">
+            <ArrowUpRight className="w-3 h-3 text-secondary" />
+            <span className="text-[9px] font-mono text-on-surface-variant uppercase tracking-widest font-black opacity-40">Sent</span>
+          </div>
+          <div className="text-sm font-black text-white italic tracking-tight">{formatSmart(peer.out_sat)}</div>
+        </div>
+
+        <div className="space-y-1.5">
+          <div className="flex items-center gap-1.5">
+            <ArrowDownLeft className="w-3 h-3 text-primary" />
+            <span className="text-[9px] font-mono text-on-surface-variant uppercase tracking-widest font-black opacity-40">Recv</span>
+          </div>
+          <div className="text-sm font-black text-white italic tracking-tight">{formatSmart(peer.in_sat)}</div>
+        </div>
+
+        <div className="space-y-1.5">
+          <div className="flex items-center gap-1.5">
+            <Activity className="w-3 h-3 text-tertiary" />
+            <span className="text-[9px] font-mono text-on-surface-variant uppercase tracking-widest font-black opacity-40">Orders</span>
+          </div>
+          <div className="text-sm font-black text-white italic tracking-tight">{peer.order_count}</div>
+        </div>
+      </div>
+
+      {/* Project Accent */}
+      <div 
+        className="absolute bottom-0 left-0 right-0 h-0.5 opacity-20" 
+        style={{ backgroundColor: nodeColor }} 
+      />
+    </GlassCard>
   );
 };

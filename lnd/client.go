@@ -634,6 +634,18 @@ func (c *LndClient) ListPeers() ([]*lightning.Peer, error) {
 
 	result := make([]*lightning.Peer, len(resp.Peers))
 	for i, p := range resp.Peers {
+		alias := ""
+		color := ""
+		
+		// Attempt to fetch node info for better UI experience (alias & color)
+		nodeInfo, err := c.client.GetNodeInfo(context.Background(), &lnrpc.NodeInfoRequest{
+			PubKey: p.PubKey,
+		})
+		if err == nil && nodeInfo.Node != nil {
+			alias = nodeInfo.Node.Alias
+			color = nodeInfo.Node.Color
+		}
+
 		result[i] = &lightning.Peer{
 			Pubkey:        p.PubKey,
 			Address:       p.Address,
@@ -641,9 +653,28 @@ func (c *LndClient) ListPeers() ([]*lightning.Peer, error) {
 			BytesSent:     p.BytesSent,
 			BytesReceived: p.BytesRecv,
 			Active:        true, // If they are in ListPeers, they are connected
+			Alias:         alias,
+			Color:         color,
 		}
 	}
 	return result, nil
+}
+
+func (c *LndClient) GetNodeInfo(pubkey string) (*lightning.NodeInfo, error) {
+	resp, err := c.client.GetNodeInfo(context.Background(), &lnrpc.NodeInfoRequest{
+		PubKey: pubkey,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if resp.Node == nil {
+		return nil, fmt.Errorf("node not found")
+	}
+	return &lightning.NodeInfo{
+		Pubkey: resp.Node.PubKey,
+		Alias:  resp.Node.Alias,
+		Color:  resp.Node.Color,
+	}, nil
 }
 
 func (c *LndClient) GetBlockHeight() (uint32, error) {

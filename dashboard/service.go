@@ -304,12 +304,14 @@ func (s *DashboardService) handleGetAnalytics(req *lsps.JsonRpcRequest) *lsps.Js
 	
 	// 2. History maps
 	revenueMap := make(map[string]int64)
+	volumeMap := make(map[string]int64)
 	countMap := make(map[string]int)
 	
 	now := time.Now()
 	for i := 0; i < analyticsHistoryDays; i++ {
 		day := now.AddDate(0, 0, -i).Format("2006-01-02")
 		revenueMap[day] = 0
+		volumeMap[day] = 0
 		countMap[day] = 0
 	}
 
@@ -318,10 +320,11 @@ func (s *DashboardService) handleGetAnalytics(req *lsps.JsonRpcRequest) *lsps.Js
 		
 		day := o.CreatedAt.Format("2006-01-02")
 		
-		// Map revenue history (Completed or Paid)
+		// Map revenue and volume history (Completed or Paid)
 		if o.OrderState == string(lsps.Lsps1OrderStateCompleted) || o.OrderState == string(lsps.Lsps1OrderStatePaid) {
 			if _, ok := revenueMap[day]; ok {
 				revenueMap[day] += o.OrderTotalLoki
+				volumeMap[day] += o.LspBalanceLoki
 			}
 			if o.OrderState == string(lsps.Lsps1OrderStateCompleted) {
 				totalRevenue += o.OrderTotalLoki
@@ -503,6 +506,23 @@ func (s *DashboardService) handleListOrders(req *lsps.JsonRpcRequest) *lsps.Json
 		return lsps.NewJsonRpcErrorResponse(req.Id, -32603, "Internal error", nil)
 	}
 
+	// Enrich with peer metadata
+	nodes := s.nodesService.GetNodes()
+	peerMap := make(map[string]*lightning.Peer)
+	if len(nodes) > 0 {
+		peers, _ := nodes[0].Client.ListPeers()
+		for _, p := range peers {
+			peerMap[p.Pubkey] = p
+		}
+	}
+
+	for i := range orders {
+		if p, ok := peerMap[orders[i].PeerId]; ok {
+			orders[i].PeerAlias = p.Alias
+			orders[i].PeerColor = p.Color
+		}
+	}
+
 	return lsps.NewJsonRpcResponse(req.Id, orders)
 }
 
@@ -530,6 +550,8 @@ func (s *DashboardService) handleListPeers(req *lsps.JsonRpcRequest) *lsps.JsonR
 			// Map to consistent JSON structure
 			enriched := map[string]interface{}{
 				"pub_key":        p.Pubkey,
+				"alias":          p.Alias,
+				"color":          p.Color,
 				"address":        p.Address,
 				"inbound":        p.Inbound,
 				"active":         p.Active,
@@ -673,6 +695,16 @@ func (s *DashboardService) handleGetOrderDetail(req *lsps.JsonRpcRequest) *lsps.
 	if err != nil {
 		log.Error().Err(err).Msgf("Dashboard: failed to get order %s", params.OrderId)
 		return lsps.NewJsonRpcErrorResponse(req.Id, -32603, "Order not found", nil)
+	}
+
+	// Enrich with peer metadata
+	nodes := s.nodesService.GetNodes()
+	if len(nodes) > 0 {
+		info, err := nodes[0].Client.GetNodeInfo(order.PeerId)
+		if err == nil && info != nil {
+			order.PeerAlias = info.Alias
+			order.PeerColor = info.Color
+		}
 	}
 
 	// Build a rich response with timeline events

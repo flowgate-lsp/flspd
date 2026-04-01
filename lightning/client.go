@@ -19,6 +19,14 @@ type Peer struct {
 	BytesSent     uint64 `json:"bytes_sent"`
 	BytesReceived uint64 `json:"bytes_received"`
 	Active        bool   `json:"active"`
+	Alias         string `json:"alias"`
+	Color         string `json:"color"`
+}
+
+type NodeInfo struct {
+	Pubkey string
+	Alias  string
+	Color  string
 }
 
 type GetChannelResult struct {
@@ -78,6 +86,7 @@ type Client interface {
 
 	GetBlockHeight() (uint32, error)
 	QueryRoutes(destination []byte, amountMloki uint64, outgoingChanId uint64) ([]*Route, error)
+	GetNodeInfo(pubkey string) (*NodeInfo, error)
 }
 
 type WalletBalanceResult struct {

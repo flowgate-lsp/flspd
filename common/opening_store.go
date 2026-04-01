@@ -53,6 +53,8 @@ type Lsps1Order struct {
 	RefundOnchainAddress         string    `json:"refund_onchain_address"`
 	OrderTotalLoki               int64     `json:"amount"` // Mapped to 'amount' for frontend simplicity
 	FeeTotalLoki                 int64     `json:"fee"`    // Mapped to 'fee' for frontend simplicity
+	PeerAlias                    string    `json:"peer_alias"`
+	PeerColor                    string    `json:"peer_color"`
 }
 
 type Lsps5Webhook struct {

@@ -12,8 +12,7 @@ import {
   Area,
   PieChart,
   Pie,
-  Cell,
-  Legend
+  Cell
 } from 'recharts';
 import { formatSmart } from '../lib/utils';
 import { useDashboard } from '../hooks/useDashboard';
@@ -58,6 +57,9 @@ export const Analytics: React.FC = () => {
     revenue_history, 
     order_distribution 
   } = data;
+
+  const totalOrders = order_distribution?.reduce((acc: number, curr: any) => acc + curr.value, 0) || 0;
+  const filteredDistribution = order_distribution?.filter((d: any) => d.value > 0) || [];
 
   return (
     <div className="p-6 md:p-10 max-w-7xl mx-auto space-y-12 animate-in fade-in slide-in-from-bottom-2 duration-500">
@@ -139,20 +141,19 @@ export const Analytics: React.FC = () => {
             </div>
             <div className="flex gap-6">
                <div className="flex items-center gap-2 text-[10px] font-mono text-on-surface-variant font-bold uppercase tracking-widest">
-                  <div className="w-2.5 h-2.5 rounded-full bg-primary shadow-[0_0_8px_rgba(0,186,255,0.4)]" /> Revenue
+                   <div className="w-2.5 h-2.5 rounded-full bg-primary shadow-[0_0_12px_rgba(0,186,255,0.6)]" /> Revenue (Fees)
                </div>
                <div className="flex items-center gap-2 text-[10px] font-mono text-on-surface-variant font-bold uppercase tracking-widest">
-                  <div className="w-2.5 h-2.5 rounded-full bg-secondary shadow-[0_0_8px_rgba(0,253,135,0.4)]" /> Volume
+                  <div className="w-2.5 h-2.5 rounded-full bg-secondary shadow-[0_0_12px_rgba(0,253,135,0.6)]" /> Capacity (Volume)
                </div>
             </div>
           </div>
           
-          <div className="flex-1 w-full relative">
+          <div className="mt-auto w-full h-[400px] relative px-2">
             {(!revenue_history || revenue_history.length === 0) ? (
               <NoData label="No revenue history recorded yet" />
             ) : (
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={revenue_history} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                <AreaChart data={revenue_history} width={800} height={400} margin={{ top: 10, right: 10, left: -20, bottom: 0 }} style={{ width: '100%' }}>
                 <defs>
                   <linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor="#00BAFF" stopOpacity={0.3}/>
@@ -165,13 +166,23 @@ export const Analytics: React.FC = () => {
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="#ffffff05" vertical={false} />
                 <XAxis 
-                  dataKey="day" 
-                  stroke="#94a3b830" 
-                  fontSize={10} 
+                  dataKey="date" 
+                  stroke="#94a3b820" 
+                  fontSize={9} 
                   tickLine={false} 
                   axisLine={false}
-                  dy={10}
+                  dy={15}
                   fontFamily="monospace"
+                  tickFormatter={(val) => {
+                    // val is "2026-04-01"
+                    if (!val || typeof val !== 'string') return '';
+                    const parts = val.split('-');
+                    if (parts.length < 3) return val;
+                    // Just return day/month or weekday if we can parse it simply
+                    const d = new Date(val);
+                    const days = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
+                    return isNaN(d.getTime()) ? parts[2] : days[d.getDay()];
+                  }}
                 />
                 <YAxis 
                   stroke="#94a3b830" 
@@ -196,7 +207,7 @@ export const Analytics: React.FC = () => {
                 />
                 <Area 
                   type="monotone" 
-                  dataKey="count" 
+                  dataKey="volume" 
                   stroke="#00FD87" 
                   strokeWidth={2} 
                   strokeDasharray="4 4"
@@ -205,7 +216,6 @@ export const Analytics: React.FC = () => {
                   animationDuration={2000}
                 />
                 </AreaChart>
-              </ResponsiveContainer>
             )}
           </div>
         </GlassCard>
@@ -219,49 +229,71 @@ export const Analytics: React.FC = () => {
             <h3 className="text-xs font-black text-white uppercase tracking-[0.2em]">Order Distribution</h3>
           </div>
           
-          <div className="flex-1 w-full relative">
+          <div className="flex-1 w-full relative flex flex-col items-center">
             {(!order_distribution || order_distribution.length === 0) ? (
               <NoData label="No orders distributed in this sector" />
             ) : (
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                <Pie
-                  data={order_distribution}
-                  cx="50%"
-                  cy="45%"
-                  innerRadius={65}
-                  outerRadius={105}
-                  paddingAngle={10}
-                  dataKey="value"
-                  stroke="none"
-                >
-                  {order_distribution?.map((entry: any, index: number) => (
-                    <Cell key={`cell-${index}`} fill={entry.color} />
-                  ))}
-                </Pie>
-                <Tooltip 
-                   contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #ffffff10', borderRadius: '16px', boxShadow: '0 20px 50px rgba(0,0,0,0.5)' }}
-                   itemStyle={{ fontSize: '11px', fontWeight: '900', textTransform: 'uppercase', fontFamily: 'monospace' }}
-                />
-                <Legend 
-                  verticalAlign="bottom" 
-                  align="center"
-                  iconType="circle"
-                  iconSize={8}
-                  formatter={(value) => <span className="text-[10px] uppercase font-mono text-on-surface-variant font-black tracking-[0.1em] ml-2">{value}</span>}
-                />
-                </PieChart>
-              </ResponsiveContainer>
-            )}
-            
-            {/* Center Label */}
-            {order_distribution?.length > 0 && (
-              <div className="absolute top-[45%] left-1/2 -translate-x-1/2 -translate-y-1/2 text-center pointer-events-none">
-                  <p className="text-[9px] font-mono text-on-surface-variant uppercase tracking-[0.3em] font-black opacity-50 mb-1">Total</p>
-                  <p className="text-3xl font-black text-white italic tracking-tighter leading-none">
-                    {order_distribution?.reduce((acc: number, curr: any) => acc + curr.value, 0) || 0}
-                  </p>
-              </div>
+              <>
+                <div className="w-full h-[280px] relative">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={filteredDistribution.length > 0 ? filteredDistribution : [{ name: 'EMPTY', value: 1, color: '#ffffff05' }]}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={65}
+                        outerRadius={95}
+                        paddingAngle={filteredDistribution.length > 1 ? 6 : 0}
+                        dataKey="value"
+                        nameKey="name"
+                        stroke="none"
+                        animationDuration={1500}
+                      >
+                        {(filteredDistribution.length > 0 ? filteredDistribution : [{ name: 'EMPTY', value: 1, color: '#ffffff05' }]).map((entry: any, index: number) => (
+                           <Cell 
+                             key={`cell-${index}`} 
+                             fill={entry.color} 
+                             stroke={entry.color}
+                             strokeOpacity={0.2}
+                             strokeWidth={1}
+                           />
+                        ))}
+                      </Pie>
+                      <Tooltip 
+                        content={<CustomTooltip />}
+                        cursor={{ stroke: '#ffffff10', strokeWidth: 1 }}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+
+                  {/* Center Label */}
+                  <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-center pointer-events-none">
+                      <p className="text-[8px] font-mono text-on-surface-variant uppercase tracking-[0.4em] font-black opacity-40 mb-1">Total Signals</p>
+                      <p className="text-4xl font-black text-white italic tracking-tighter leading-none shadow-sm">
+                        {totalOrders}
+                      </p>
+                  </div>
+                </div>
+
+                {/* Breakdown List */}
+                <div className="w-full mt-6 space-y-2.5 overflow-y-auto pr-2 custom-scrollbar">
+                  {order_distribution?.map((item: any) => {
+                    const percentage = totalOrders > 0 ? Math.round((item.value / totalOrders) * 100) : 0;
+                    return (
+                        <div key={item.name} className="flex items-center justify-between group py-1.5 border-b border-white/[0.02] last:border-0 hover:bg-white/[0.02] px-2 rounded-lg transition-colors">
+                          <div className="flex items-center gap-3">
+                            <div className="w-2 h-2 rounded-full shadow-[0_0_8px_rgba(255,255,255,0.1)]" style={{ backgroundColor: item.color }} />
+                            <span className="text-[10px] font-mono text-on-surface-variant group-hover:text-white transition-colors uppercase font-black tracking-widest">{item.name}</span>
+                          </div>
+                          <div className="flex items-center gap-4">
+                            <span className="text-[10px] font-mono text-white/40 font-bold italic">{percentage}%</span>
+                            <span className="text-[11px] font-mono text-white font-black italic min-w-[30px] text-right">{item.value}</span>
+                          </div>
+                        </div>
+                    );
+                  })}
+                </div>
+              </>
             )}
           </div>
         </GlassCard>
@@ -380,7 +412,7 @@ const CustomTooltip = ({ active, payload, label }: any) => {
                  <span className="text-[10px] font-mono text-white/50 uppercase font-black tracking-widest">{item.name}</span>
               </div>
               <span className="text-xs font-mono font-black italic tracking-tighter" style={{ color: item.stroke || item.fill }}>
-                {typeof item.value === 'number' && item.name === 'revenue' ? formatSmart(item.value) : item.value}
+                {typeof item.value === 'number' && (item.name === 'revenue' || item.name === 'volume') ? formatSmart(item.value) : item.value}
               </span>
             </div>
           ))}
