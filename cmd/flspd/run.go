@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 
+	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
@@ -24,6 +25,7 @@ import (
 	"github.com/flowgate-lsp/flspd/chain"
 	"github.com/flowgate-lsp/flspd/common"
 	"github.com/flowgate-lsp/flspd/config"
+	"github.com/flowgate-lsp/flspd/dashboard"
 	"github.com/flowgate-lsp/flspd/history"
 	"github.com/flowgate-lsp/flspd/interceptor"
 	"github.com/flowgate-lsp/flspd/lightning"
@@ -205,6 +207,33 @@ func runLspd(cliCtx *cli.Context) error {
 
 	go notificationService.Start(ctx)
 	openingService := common.NewOpeningService(openingStore, nodesService)
+
+	// Initialize Dashboard Service
+	dashboardAdminPubkey := os.Getenv("DASHBOARD_ADMIN_PUBKEY")
+	dashboardListenAddr := os.Getenv("DASHBOARD_LISTEN_ADDRESS")
+	if dashboardListenAddr == "" {
+		dashboardListenAddr = ":8080"
+	}
+
+	dashSvc := dashboard.NewDashboardService(
+		nodesService,
+		openingService,
+		openingStore,
+		historyStore,
+		dashboardAdminPubkey,
+		os.Getenv("NODES_CONFIG_PATH"),
+	)
+
+	// Start dashboard HTTP server
+	go func() {
+		log.Info().Msgf("Starting dashboard server on %s", dashboardListenAddr)
+		if err := http.ListenAndServe(dashboardListenAddr, dashSvc); err != nil {
+			log.Error().Err(err).Msg("Dashboard server failed")
+		}
+	}()
+
+	// Use bridge for notifications to update dashboard in real-time
+	dashBridge := NewDashboardNotificationBridge(notificationService, dashSvc)
 	notificationCleanupService := notifications.NewCleanupService(notificationsStore)
 	go notificationCleanupService.Start(ctx)
 	orderCleanupService := lsps.NewOrderCleanupService(openingStore, 24*time.Hour)
@@ -236,7 +265,7 @@ func runLspd(cliCtx *cli.Context) error {
 		client.StartListeners()
 
 		// Start LSPS1 settlement service for this node
-		settlementSvc := lsps.NewLsps1SettlementService(client, openingStore, historyStore, node.NodeConfig, feeEstimator, feeStrategy, notificationService)
+		settlementSvc := lsps.NewLsps1SettlementService(client, openingStore, historyStore, node.NodeConfig, feeEstimator, feeStrategy, dashBridge)
 		err = settlementSvc.Start(ctx)
 		if err != nil {
 			log.Error().Err(err).Msg("Failed to start LSPS1 settlement service")
@@ -247,7 +276,7 @@ func runLspd(cliCtx *cli.Context) error {
 		forwardSync := lnd.NewForwardSync(node.NodeId, client, historyStore)
 		go forwardSync.ForwardsSynchronize(ctx)
 		notificationService.SetNodePrivKey(node.PrivateKey)
-		handler := interceptor.NewInterceptHandler(client, node.NodeConfig, interceptStore, historyStore, openingService, feeEstimator, feeStrategy, notificationService, node.PrivateKey)
+		handler := interceptor.NewInterceptHandler(client, node.NodeConfig, interceptStore, historyStore, openingService, feeEstimator, feeStrategy, dashBridge, node.PrivateKey)
 		combinedHandler := common.NewCombinedHandler(handler)
 		htlcInterceptor, err = lnd.NewLndHtlcInterceptor(node.NodeConfig, client, combinedHandler)
 		if err != nil {
@@ -283,7 +312,7 @@ func runLspd(cliCtx *cli.Context) error {
 		}
 
 		liquidityManager := lsps.NewLiquidityManager(client, openingStore)
-		lspsServer := lsps.NewServer(lspsConfig, client, nodesService, openingService, liquidityManager, notificationService)
+		lspsServer := lsps.NewServer(lspsConfig, client, nodesService, openingService, liquidityManager, dashBridge)
 		lspsServer.Start()
 		lspsServers = append(lspsServers, lspsServer)
 	}
