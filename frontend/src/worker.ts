@@ -51,7 +51,11 @@ export default {
     }
 
     // Otherwise serve static assets (UI, CSS, JS, etc.)
-    return env.ASSETS.fetch(request);
+    const response = await env.ASSETS.fetch(request);
+    if (response.status === 404) {
+      return env.ASSETS.fetch(new Request(new URL('/index.html', url.origin), request));
+    }
+    return response;
   },
 };
 

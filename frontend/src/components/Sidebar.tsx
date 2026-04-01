@@ -1,5 +1,6 @@
 import React from 'react';
 import { List, Zap, Settings, Activity, Gauge, BarChart3 } from 'lucide-react';
+import { Link } from '@tanstack/react-router';
 import { cn } from '../lib/utils';
 import { useEvents } from '../hooks/useEvents';
 
@@ -14,10 +15,9 @@ const navItems = [
 
 interface SidebarProps {
   activePage: string;
-  onPageChange: (page: string) => void;
 }
 
-export const Sidebar: React.FC<SidebarProps> = ({ activePage, onPageChange }) => {
+export const Sidebar: React.FC<SidebarProps> = ({ activePage }) => {
   const { connected } = useEvents();
   return (
     <aside className="w-64 h-screen fixed left-0 top-0 bg-surface-container-lowest border-r border-white/5 flex flex-col p-6 z-50">
@@ -29,22 +29,29 @@ export const Sidebar: React.FC<SidebarProps> = ({ activePage, onPageChange }) =>
       </div>
 
       <nav className="flex-1 space-y-2">
-        {navItems.map((item) => (
-          <button
-            key={item.id}
-            onClick={() => onPageChange(item.id)}
-            className={cn(
-              "w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all duration-300 group hover:bg-white/5",
-              activePage === item.id ? "bg-primary/10 text-white" : "text-on-surface-variant hover:text-white"
-            )}
-          >
-            <item.icon className={cn(
-              "w-5 h-5 transition-colors",
-              activePage === item.id ? "text-primary" : "text-inherit group-hover:text-primary"
-            )} />
-            <span className="text-sm font-medium">{item.label}</span>
-          </button>
-        ))}
+        {navItems.map((item) => {
+          const to = item.id === 'overview' ? '/' : `/${item.id}`
+          return (
+            <Link
+              key={item.id}
+              to={to}
+              className={cn(
+                "w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all duration-300 group hover:bg-white/5",
+                activePage === item.id ? "bg-primary/10 text-white" : "text-on-surface-variant hover:text-white"
+              )}
+            >
+              {({ isActive }) => (
+                <>
+                  <item.icon className={cn(
+                    "w-5 h-5 transition-colors",
+                    isActive ? "text-primary" : "text-inherit group-hover:text-primary"
+                  )} />
+                  <span className="text-sm font-medium">{item.label}</span>
+                </>
+              )}
+            </Link>
+          )
+        })}
       </nav>
 
       <div className="mt-auto pt-6 border-t border-white/5">

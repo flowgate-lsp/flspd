@@ -4,6 +4,7 @@ import { Search, Filter, Download, MoreHorizontal, ExternalLink, RefreshCw, Load
 import { cn, formatLoki } from '../lib/utils';
 import { useDashboard } from '../hooks/useDashboard';
 import { useEvents } from '../hooks/useEvents';
+import { useNavigate } from '@tanstack/react-router';
 
 interface OrderMatrixProps {
   onViewOrder: (id: string) => void;
@@ -13,6 +14,11 @@ interface OrderMatrixProps {
 export const OrderMatrix: React.FC<OrderMatrixProps> = ({ onViewOrder, initialSearch = '' }) => {
   const { orders, loading, error, refreshOrders } = useDashboard();
   const [search, setSearch] = useState(initialSearch);
+  const navigate = useNavigate();
+
+  React.useEffect(() => {
+    setSearch(initialSearch);
+  }, [initialSearch]);
 
   useEvents((event) => {
     if (event.type === 'order_state_changed') {
@@ -76,7 +82,11 @@ export const OrderMatrix: React.FC<OrderMatrixProps> = ({ onViewOrder, initialSe
           <input 
             type="text" 
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => {
+              const val = e.target.value;
+              setSearch(val);
+              navigate({ to: '/orders', search: { q: val }, replace: true });
+            }}
             placeholder="Search by Order ID or Peer Pubkey..." 
             className="bg-transparent border-none outline-none text-sm text-white w-full placeholder:text-on-surface-variant/40"
           />
