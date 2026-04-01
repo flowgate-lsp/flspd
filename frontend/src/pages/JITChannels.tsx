@@ -4,12 +4,12 @@ import { Zap, Clock, CheckCircle2, ArrowUpRight, Hash, Database } from 'lucide-r
 import { useDashboard } from '../hooks/useDashboard';
 
 interface JitChannel {
-  OrderId: string;
-  PeerId: string;
-  OrderTotalLoki: number;
-  OrderState: string;
-  FundingTxid?: string;
-  CreatedAt: string;
+  order_id: string;
+  peer_id: string;
+  amount: number;
+  state: string;
+  funding_txid?: string;
+  created_at: string;
 }
 
 export const JITChannels: React.FC = () => {
@@ -78,7 +78,7 @@ export const JITChannels: React.FC = () => {
               <tbody className="divide-y divide-slate-800/50">
                 {channels.map((ch, idx) => (
                   <motion.tr
-                    key={ch.OrderId}
+                    key={ch.order_id}
                     initial={{ opacity: 0, x: -10 }}
                     animate={{ opacity: 1, x: 0 }}
                     transition={{ delay: idx * 0.03 }}
@@ -87,43 +87,43 @@ export const JITChannels: React.FC = () => {
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-2">
                         <Hash className="w-3.5 h-3.5 text-slate-500" />
-                        <span className="text-sm font-semibold text-white">{ch.OrderId.substring(0, 12)}...</span>
+                        <span className="text-sm font-semibold text-white">{ch.order_id?.substring(0, 12)}...</span>
                       </div>
                     </td>
                     <td className="px-6 py-4">
-                      <span className="text-xs font-mono text-slate-400" title={ch.PeerId}>
-                        {ch.PeerId.substring(0, 12)}...
+                      <span className="text-xs font-mono text-slate-400" title={ch.peer_id}>
+                        {ch.peer_id?.substring(0, 12)}...
                       </span>
                     </td>
                     <td className="px-6 py-4">
                       <div className="text-sm font-medium text-slate-300">
-                        {((ch.OrderTotalLoki || 0) / 1e5).toLocaleString()} FLC
+                        {((ch.amount || 0) / 1e5).toLocaleString()} FLC
                       </div>
                     </td>
                     <td className="px-6 py-4">
                       <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest ${
-                        ch.OrderState === 'COMPLETED' ? 'bg-emerald-500/10 text-emerald-400' :
-                        ch.OrderState === 'PAID' ? 'bg-indigo-500/10 text-indigo-400' :
+                        ch.state === 'COMPLETED' ? 'bg-emerald-500/10 text-emerald-400' :
+                        ch.state === 'PAID' ? 'bg-indigo-500/10 text-indigo-400' :
                         'bg-slate-500/10 text-slate-400'
                       }`}>
-                        {ch.OrderState === 'COMPLETED' ? <CheckCircle2 className="w-3 h-3" /> :
-                         ch.OrderState === 'PAID' ? <Zap className="w-3 h-3" /> :
+                        {ch.state === 'COMPLETED' ? <CheckCircle2 className="w-3 h-3" /> :
+                         ch.state === 'PAID' ? <Zap className="w-3 h-3" /> :
                          <Clock className="w-3 h-3" />}
-                        {ch.OrderState}
+                        {ch.state}
                       </div>
                     </td>
                     <td className="px-6 py-4 text-sm text-slate-400">
-                      {new Date(ch.CreatedAt).toLocaleDateString()}
+                      {new Date(ch.created_at).toLocaleDateString()}
                     </td>
                     <td className="px-6 py-4">
-                      {ch.FundingTxid ? (
+                      {ch.funding_txid ? (
                         <a 
-                          href={`https://explorer.lokichain.com/tx/${ch.FundingTxid}`} 
+                          href={`https://lokichain.info/tx/${ch.funding_txid}`} 
                           target="_blank" 
                           rel="noopener noreferrer"
                           className="flex items-center gap-1.5 text-indigo-400 hover:text-indigo-300 transition-colors text-xs group"
                         >
-                          <span className="font-mono">{ch.FundingTxid.substring(0, 8)}</span>
+                          <span className="font-mono">{ch.funding_txid.substring(0, 8)}</span>
                           <ArrowUpRight className="w-3 h-3 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform" />
                         </a>
                       ) : (

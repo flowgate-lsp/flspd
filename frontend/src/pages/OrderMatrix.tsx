@@ -204,7 +204,7 @@ export const OrderMatrix: React.FC<OrderMatrixProps> = ({ onViewOrder }) => {
               
               <div className="pt-4 border-t border-white/5 flex justify-between items-center">
                  <p className="text-[10px] font-mono text-on-surface-variant">
-                   {new Date(order.created_at * 1000).toLocaleString()}
+                   {new Date(order.created_at).toLocaleString()}
                  </p>
                  <div className="flex gap-2">
                    <button className="p-2 text-on-surface-variant bg-white/5 rounded-lg">

@@ -1,9 +1,11 @@
 #!/bin/bash
 
-# Stage all files related to the authentication, singleton WebSocket, currency renaming, and data mapping fixes
+# Stage all files related to the authentication, stability, and data mapping fixes
 git add auth/nostr.go \
         cmd/flspd/run.go \
         common/opening_store.go \
+        dashboard/service.go \
+        lightning/client.go \
         frontend/src/worker.ts \
         frontend/src/hooks/useAuth.ts \
         frontend/src/hooks/useEvents.ts \
@@ -16,18 +18,21 @@ git add auth/nostr.go \
         frontend/src/pages/OrderMatrix.tsx \
         frontend/src/pages/OrderDetail.tsx \
         frontend/src/pages/Analytics.tsx \
+        frontend/src/pages/PeerNodes.tsx \
+        frontend/src/pages/JITChannels.tsx \
         frontend/src/App.tsx \
         frontend/src/main.tsx \
         docker-compose.prod.yml
 
 # Commit with a detailed message
-git commit -m "fix(dashboard): resolve data mapping, auth state, and brand terminology
+git commit -m "fix(dashboard): unify data mapping, fix UI crashes and date parsing
 
-- Add JSON tags to Lsps1Order and fix field mapping (OrderId -> order_id, OrderTotalLoki -> amount)
-- Implement AuthProvider and AuthContext for shared global authentication state
-- Fix login redirect issue by lifting user state to context
-- Rebrand currency units to FLC and loki across UI and backend
-- Refactor WebSocket to a singleton context to fix redundant connections
-- Harden NIP-98 auth for proxied environments and trailing slash consistency"
+- Standardize all Go structs (Peer, Summary, Order) with lowercase JSON tags
+- Fix PeerNodes crash by referencing correct lowercase pub_key and address properties
+- Resolve 'Invalid Date' issues by supporting ISO string parsing in all components
+- Fix '0 loki' amount display by aligning frontend fields with backend tags
+- Implement AuthProvider for reliable login redirects and shared session state
+- Refactor WebSocket to a singleton context to prevent redundant connections
+- Update JITChannels and OrderMatrix for full consistency across the dashboard"
 
-echo "Changes successfully committed! Run 'git push' to sync your changes."
+echo "Stability and data mapping fixes successfully committed!"

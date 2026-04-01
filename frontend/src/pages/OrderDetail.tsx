@@ -74,8 +74,8 @@ export const OrderDetail: React.FC<OrderDetailProps> = ({ orderId, onBack }) => 
   const order = data.order;
   const timeline = data.timeline || [];
 
-  const stateColor = order.OrderState === 'COMPLETED' ? 'text-secondary' :
-                     order.OrderState === 'FAILED' ? 'text-error' : 'text-primary';
+  const stateColor = order.state === 'COMPLETED' ? 'text-secondary' :
+                     order.state === 'FAILED' ? 'text-error' : 'text-primary';
 
   return (
     <div className="p-4 md:p-10 max-w-5xl mx-auto space-y-8 animate-in fade-in duration-700">
@@ -95,7 +95,7 @@ export const OrderDetail: React.FC<OrderDetailProps> = ({ orderId, onBack }) => 
             </p>
           </div>
           <span className={cn("text-sm font-mono font-bold uppercase tracking-widest", stateColor)}>
-            {order.OrderState}
+            {order.state}
           </span>
         </div>
       </div>
@@ -106,37 +106,37 @@ export const OrderDetail: React.FC<OrderDetailProps> = ({ orderId, onBack }) => 
           <h2 className="text-sm font-bold text-white uppercase tracking-widest">Order Parameters</h2>
 
           <div className="grid grid-cols-2 gap-6">
-            <DetailRow label="LSP Balance" value={formatLoki(order.LspBalanceLoki)} />
-            <DetailRow label="Client Balance" value={formatLoki(order.ClientBalanceLoki)} />
-            <DetailRow label="Order Total" value={formatLoki(order.OrderTotalLoki)} highlight />
-            <DetailRow label="Fee Total" value={formatLoki(order.FeeTotalLoki)} />
-            <DetailRow label="Funding Confirms" value={`${order.FundingConfirmsWithinBlocks} blocks`} />
-            <DetailRow label="Channel Expiry" value={`${order.ChannelExpiryBlocks} blocks`} />
-            <DetailRow label="Announce Channel" value={order.AnnounceChannel ? 'Yes' : 'No'} />
-            <DetailRow label="Payment State" value={order.PaymentState} />
+            <DetailRow label="LSP Balance" value={formatLoki(order.lsp_balance_loki)} />
+            <DetailRow label="Client Balance" value={formatLoki(order.client_balance_loki)} />
+            <DetailRow label="Order Total" value={formatLoki(order.amount)} highlight />
+            <DetailRow label="Fee Total" value={formatLoki(order.fee)} />
+            <DetailRow label="Funding Confirms" value={`${order.funding_confirms_within_blocks} blocks`} />
+            <DetailRow label="Channel Expiry" value={`${order.channel_expiry_blocks} blocks`} />
+            <DetailRow label="Announce Channel" value={order.announce_channel ? 'Yes' : 'No'} />
+            <DetailRow label="Payment State" value={order.payment_state} />
           </div>
 
           {/* Copyable Fields */}
           <div className="space-y-3 pt-4 border-t border-white/5">
             <CopyableField
               label="Peer ID"
-              value={order.PeerId}
+              value={order.peer_id}
               copied={copied}
               onCopy={copyToClipboard}
             />
-            {order.FundingTxid && (
+            {order.funding_txid && (
               <CopyableField
                 label="Funding TX"
-                value={order.FundingTxid}
+                value={order.funding_txid}
                 copied={copied}
                 onCopy={copyToClipboard}
-                explorerUrl={`https://explorer.lokichain.org/tx/${order.FundingTxid}`}
+                explorerUrl={`https://explorer.lokichain.org/tx/${order.funding_txid}`}
               />
             )}
-            {order.RefundOnchainAddress && (
+            {order.refund_onchain_address && (
               <CopyableField
                 label="Refund Address"
-                value={order.RefundOnchainAddress}
+                value={order.refund_onchain_address}
                 copied={copied}
                 onCopy={copyToClipboard}
               />
@@ -167,7 +167,7 @@ export const OrderDetail: React.FC<OrderDetailProps> = ({ orderId, onBack }) => 
                     <p className="text-xs font-mono font-bold text-white uppercase tracking-wider">{event.event.replace(/_/g, ' ')}</p>
                     <p className="text-[10px] font-mono text-on-surface-variant mt-1">{event.detail}</p>
                     <p className="text-[10px] font-mono text-on-surface-variant/50 mt-0.5 italic">
-                      {new Date(event.timestamp * 1000).toLocaleString()}
+                      {new Date(event.timestamp).toLocaleString()}
                     </p>
                   </div>
                 </div>

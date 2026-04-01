@@ -178,7 +178,7 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({ onViewOrder }) => 
                       {item.state}
                     </span>
                     <p className="text-[10px] font-mono text-on-surface-variant mt-1 italic">
-                      {new Date(item.created_at * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      {new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                     </p>
                   </div>
                 </div>

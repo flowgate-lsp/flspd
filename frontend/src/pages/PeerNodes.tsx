@@ -4,12 +4,12 @@ import { Users, Globe, ArrowUpRight, ArrowDownLeft, Zap, Search, ShieldCheck, Ac
 import { useDashboard } from '../hooks/useDashboard';
 
 interface Peer {
-  Pubkey: string;
-  Address: string;
-  Inbound: boolean;
-  Active: boolean;
-  InSat: number;
-  OutSat: number;
+  pub_key: string;
+  address: string;
+  inbound: boolean;
+  active: boolean;
+  in_sat: number;
+  out_sat: number;
 }
 
 export const PeerNodes: React.FC = () => {
@@ -34,8 +34,8 @@ export const PeerNodes: React.FC = () => {
   }, [api]);
 
   const filteredPeers = peers.filter(p => 
-    p.Pubkey.toLowerCase().includes(search.toLowerCase()) || 
-    p.Address.toLowerCase().includes(search.toLowerCase())
+    (p.pub_key?.toLowerCase() || '').includes(search.toLowerCase()) || 
+    (p.address?.toLowerCase() || '').includes(search.toLowerCase())
   );
 
   return (
@@ -77,7 +77,7 @@ export const PeerNodes: React.FC = () => {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {filteredPeers.map((peer, idx) => (
             <motion.div
-              key={peer.Pubkey}
+              key={peer.pub_key}
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: idx * 0.05 }}
@@ -88,20 +88,20 @@ export const PeerNodes: React.FC = () => {
                   <Globe className="w-5 h-5 text-indigo-400" />
                 </div>
                 <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${
-                  peer.Active ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'
+                  peer.active ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'
                 }`}>
                   <Activity className="w-3 h-3" />
-                  {peer.Active ? 'Online' : 'Offline'}
+                  {peer.active ? 'Online' : 'Offline'}
                 </div>
               </div>
 
               <div>
                 <h3 className="text-sm font-semibold text-white mb-1 flex items-center gap-1.5 leading-none">
-                  Peer #{peer.Pubkey.substring(0, 8)}
-                  {peer.Inbound && <ShieldCheck className="w-3.5 h-3.5 text-slate-500" />}
+                  Peer #{peer.pub_key?.substring(0, 8)}
+                  {peer.inbound && <ShieldCheck className="w-3.5 h-3.5 text-slate-500" />}
                 </h3>
                 <p className="text-xs text-slate-500 font-mono truncate mb-4">
-                  {peer.Pubkey}
+                  {peer.pub_key}
                 </p>
               </div>
 
@@ -110,21 +110,21 @@ export const PeerNodes: React.FC = () => {
                   <label className="text-[10px] uppercase tracking-wider font-bold text-slate-500 mb-1 block">Sent</label>
                   <div className="flex items-center gap-1 text-slate-300">
                     <ArrowUpRight className="w-3 h-3 text-emerald-400" />
-                    <span className="text-sm font-medium">{(peer.InSat / 1e5).toFixed(2)} FLC</span>
+                    <span className="text-sm font-medium">{(peer.in_sat / 1e5).toFixed(2)} FLC</span>
                   </div>
                 </div>
                 <div>
                   <label className="text-[10px] uppercase tracking-wider font-bold text-slate-500 mb-1 block">Received</label>
                   <div className="flex items-center gap-1 text-slate-300">
                     <ArrowDownLeft className="w-3 h-3 text-indigo-400" />
-                    <span className="text-sm font-medium">{(peer.OutSat / 1e5).toFixed(2)} FLC</span>
+                    <span className="text-sm font-medium">{(peer.out_sat / 1e5).toFixed(2)} FLC</span>
                   </div>
                 </div>
               </div>
 
               <div className="flex items-center justify-between">
-                <div className="text-[10px] text-slate-500 truncate max-w-[140px]" title={peer.Address}>
-                  {peer.Address || 'No address info'}
+                <div className="text-[10px] text-slate-500 truncate max-w-[140px]" title={peer.address}>
+                  {peer.address || 'No address info'}
                 </div>
                 <button className="text-[10px] font-bold text-indigo-400 hover:text-indigo-300 transition-colors uppercase tracking-widest flex items-center gap-1">
                   Connect <Zap className="w-3 h-3" />
