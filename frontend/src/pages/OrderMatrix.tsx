@@ -7,11 +7,12 @@ import { useEvents } from '../hooks/useEvents';
 
 interface OrderMatrixProps {
   onViewOrder: (id: string) => void;
+  initialSearch?: string;
 }
 
-export const OrderMatrix: React.FC<OrderMatrixProps> = ({ onViewOrder }) => {
+export const OrderMatrix: React.FC<OrderMatrixProps> = ({ onViewOrder, initialSearch = '' }) => {
   const { orders, loading, error, refreshOrders } = useDashboard();
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(initialSearch);
 
   useEvents((event) => {
     if (event.type === 'order_state_changed') {
@@ -147,10 +148,23 @@ export const OrderMatrix: React.FC<OrderMatrixProps> = ({ onViewOrder }) => {
                     </td>
                     <td className="px-6 py-4 text-right">
                        <div className="flex items-center justify-end gap-3 opacity-0 group-hover:opacity-100 transition-all translate-x-2 group-hover:translate-x-0">
-                          <button title="View in Explorer" className="p-2 text-on-surface-variant hover:text-white hover:bg-white/10 rounded-lg transition-all border border-transparent hover:border-white/10">
-                             <ExternalLink className="w-4 h-4" />
-                          </button>
-                          <button title="Options" className="p-2 text-on-surface-variant hover:text-white hover:bg-white/10 rounded-lg transition-all border border-transparent hover:border-white/10">
+                          {order.funding_txid && (
+                            <a 
+                              href={`https://lokichain.info/tx/${order.funding_txid}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              title="View in Explorer" 
+                              onClick={(e) => e.stopPropagation()}
+                              className="p-2 text-on-surface-variant hover:text-white hover:bg-white/10 rounded-lg transition-all border border-transparent hover:border-white/10"
+                            >
+                               <ExternalLink className="w-4 h-4" />
+                            </a>
+                          )}
+                          <button 
+                            title="Options" 
+                            onClick={(e) => e.stopPropagation()}
+                            className="p-2 text-on-surface-variant hover:text-white hover:bg-white/10 rounded-lg transition-all border border-transparent hover:border-white/10"
+                          >
                              <MoreHorizontal className="w-4 h-4" />
                           </button>
                        </div>

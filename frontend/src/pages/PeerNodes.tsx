@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { Users, Globe, ArrowUpRight, ArrowDownLeft, Zap, Search, ShieldCheck, Activity } from 'lucide-react';
 import { useDashboard } from '../hooks/useDashboard';
+import { formatLoki } from '../lib/utils';
 
 interface Peer {
   pub_key: string;
@@ -10,9 +11,14 @@ interface Peer {
   active: boolean;
   in_sat: number;
   out_sat: number;
+  order_count?: number;
 }
 
-export const PeerNodes: React.FC = () => {
+interface PeerNodesProps {
+  onViewPeerOrders?: (peerId: string) => void;
+}
+
+export const PeerNodes: React.FC<PeerNodesProps> = ({ onViewPeerOrders }) => {
   const { api } = useDashboard();
   const [peers, setPeers] = useState<Peer[]>([]);
   const [loading, setLoading] = useState(true);
@@ -107,17 +113,17 @@ export const PeerNodes: React.FC = () => {
 
               <div className="grid grid-cols-2 gap-3 pb-4 border-b border-slate-800/50 mb-4">
                 <div>
-                  <label className="text-[10px] uppercase tracking-wider font-bold text-slate-500 mb-1 block">Sent</label>
+                  <label className="text-[10px] uppercase tracking-wider font-bold text-slate-500 mb-1 block scale-90 origin-left">Sent</label>
                   <div className="flex items-center gap-1 text-slate-300">
                     <ArrowUpRight className="w-3 h-3 text-emerald-400" />
-                    <span className="text-sm font-medium">{(peer.in_sat / 1e5).toFixed(2)} FLC</span>
+                    <span className="text-[11px] font-bold font-mono uppercase tracking-tight">{formatLoki(peer.in_sat)}</span>
                   </div>
                 </div>
                 <div>
-                  <label className="text-[10px] uppercase tracking-wider font-bold text-slate-500 mb-1 block">Received</label>
+                  <label className="text-[10px] uppercase tracking-wider font-bold text-slate-500 mb-1 block scale-90 origin-left">Received</label>
                   <div className="flex items-center gap-1 text-slate-300">
                     <ArrowDownLeft className="w-3 h-3 text-indigo-400" />
-                    <span className="text-sm font-medium">{(peer.out_sat / 1e5).toFixed(2)} FLC</span>
+                    <span className="text-[11px] font-bold font-mono uppercase tracking-tight">{formatLoki(peer.out_sat)}</span>
                   </div>
                 </div>
               </div>
@@ -126,9 +132,23 @@ export const PeerNodes: React.FC = () => {
                 <div className="text-[10px] text-slate-500 truncate max-w-[140px]" title={peer.address}>
                   {peer.address || 'No address info'}
                 </div>
-                <button className="text-[10px] font-bold text-indigo-400 hover:text-indigo-300 transition-colors uppercase tracking-widest flex items-center gap-1">
-                  Connect <Zap className="w-3 h-3" />
-                </button>
+                <div className="flex gap-2">
+                  {onViewPeerOrders && (
+                    <button 
+                      onClick={() => onViewPeerOrders(peer.pub_key)}
+                      className="text-[10px] font-bold text-slate-400 hover:text-white transition-colors uppercase tracking-widest flex items-center gap-2 border border-slate-800 hover:border-slate-700 px-2 py-1 rounded-lg bg-slate-900/50"
+                    >
+                      <Activity className="w-3 h-3 text-indigo-400" />
+                      Orders
+                      <span className="bg-indigo-500/20 text-indigo-300 px-1.5 py-0.5 rounded text-[8px] font-mono">
+                        {peer.order_count || 0}
+                      </span>
+                    </button>
+                  )}
+                  <button className="text-[10px] font-bold text-indigo-400 hover:text-indigo-300 transition-colors uppercase tracking-widest flex items-center gap-1 border border-indigo-500/20 hover:border-indigo-500/40 px-2 py-1 rounded-lg bg-indigo-500/5">
+                    Connect <Zap className="w-3 h-3" />
+                  </button>
+                </div>
               </div>
             </motion.div>
           ))}

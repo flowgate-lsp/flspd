@@ -373,6 +373,13 @@ func (s *DashboardService) handleListPeers(req *lsps.JsonRpcRequest) *lsps.JsonR
 	nodes := s.nodesService.GetNodes()
 	var allPeers []interface{}
 
+	// 1. Get order counts per peer
+	orderCounts := make(map[string]int)
+	orders, _ := s.openingStore.ListLsps1Orders(1000, 0)
+	for _, o := range orders {
+		orderCounts[o.PeerId]++
+	}
+
 	for _, node := range nodes {
 		peers, err := node.Client.ListPeers()
 		if err != nil {
@@ -380,7 +387,20 @@ func (s *DashboardService) handleListPeers(req *lsps.JsonRpcRequest) *lsps.JsonR
 			continue
 		}
 		for _, p := range peers {
-			allPeers = append(allPeers, p)
+			// Enrich with order count
+			count := orderCounts[p.Pubkey]
+			
+			// Map to consistent JSON structure
+			enriched := map[string]interface{}{
+				"pub_key":        p.Pubkey,
+				"address":        p.Address,
+				"inbound":        p.Inbound,
+				"active":         p.Active,
+				"in_sat":         p.BytesSent, // bytes_sent as in_sat for simplicity if desired, or as is
+				"out_sat":        p.BytesReceived,
+				"order_count":    count,
+			}
+			allPeers = append(allPeers, enriched)
 		}
 	}
 
@@ -472,21 +492,21 @@ func (s *DashboardService) handleGetOrderDetail(req *lsps.JsonRpcRequest) *lsps.
 
 	// Build a rich response with timeline events
 	timeline := []map[string]interface{}{
-		{"event": "ORDER_CREATED", "timestamp": order.CreatedAt.Unix(), "detail": "Order registered by peer"},
+		{"event": "ORDER_CREATED", "timestamp": order.CreatedAt.Format(time.RFC3339), "detail": "Order registered by peer"},
 	}
 	if order.PaymentState == "PAID" || order.OrderState == "COMPLETED" {
 		timeline = append(timeline, map[string]interface{}{
-			"event": "PAYMENT_RECEIVED", "timestamp": order.CreatedAt.Add(5 * time.Minute).Unix(), "detail": "Invoice payment confirmed",
+			"event": "PAYMENT_RECEIVED", "timestamp": order.CreatedAt.Add(5 * time.Minute).Format(time.RFC3339), "detail": "Invoice payment confirmed",
 		})
 	}
 	if order.FundingTxid != nil && *order.FundingTxid != "" {
 		timeline = append(timeline, map[string]interface{}{
-			"event": "CHANNEL_FUNDED", "timestamp": order.CreatedAt.Add(10 * time.Minute).Unix(), "detail": "Funding TX: " + *order.FundingTxid,
+			"event": "CHANNEL_FUNDED", "timestamp": order.CreatedAt.Add(10 * time.Minute).Format(time.RFC3339), "detail": "Funding TX: " + *order.FundingTxid,
 		})
 	}
 	if order.OrderState == "COMPLETED" {
 		timeline = append(timeline, map[string]interface{}{
-			"event": "ORDER_COMPLETED", "timestamp": order.CreatedAt.Add(30 * time.Minute).Unix(), "detail": "Channel confirmed on-chain",
+			"event": "ORDER_COMPLETED", "timestamp": order.CreatedAt.Add(30 * time.Minute).Format(time.RFC3339), "detail": "Channel confirmed on-chain",
 		})
 	}
 

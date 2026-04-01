@@ -17,6 +17,7 @@ function App() {
   const { user, loading } = useAuth()
   const [currentPage, setCurrentPage] = useState('overview')
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null)
+  const [initialSearch, setInitialSearch] = useState<string | null>(null)
 
   if (loading) return null
 
@@ -34,14 +35,19 @@ function App() {
     setCurrentPage('orders');
   }
 
+  const handleViewPeerOrders = (peerId: string) => {
+    setInitialSearch(peerId);
+    setCurrentPage('orders');
+  }
+
   const renderPage = () => {
     switch (currentPage) {
       case 'overview': return <CommandCenter onViewOrder={handleViewOrder} />;
-      case 'orders': return <OrderMatrix onViewOrder={handleViewOrder} />;
+      case 'orders': return <OrderMatrix onViewOrder={handleViewOrder} initialSearch={initialSearch || ''} />;
       case 'order-detail': return selectedOrderId
         ? <OrderDetail orderId={selectedOrderId} onBack={handleBackFromOrder} />
-        : <OrderMatrix onViewOrder={handleViewOrder} />;
-      case 'nodes': return <PeerNodes />;
+        : <OrderMatrix onViewOrder={handleViewOrder} initialSearch={initialSearch || ''} />;
+      case 'nodes': return <PeerNodes onViewPeerOrders={handleViewPeerOrders} />;
       case 'jit': return <JITChannels />;
       case 'analytics': return <Analytics />;
       case 'settings': return <Settings />;

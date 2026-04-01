@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { Zap, Clock, CheckCircle2, ArrowUpRight, Hash, Database } from 'lucide-react';
 import { useDashboard } from '../hooks/useDashboard';
+import { formatLoki } from '../lib/utils';
 
 interface JitChannel {
   order_id: string;
@@ -96,8 +97,8 @@ export const JITChannels: React.FC = () => {
                       </span>
                     </td>
                     <td className="px-6 py-4">
-                      <div className="text-sm font-medium text-slate-300">
-                        {((ch.amount || 0) / 1e5).toLocaleString()} FLC
+                      <div className="text-xs font-bold font-mono text-slate-300 uppercase tracking-tight">
+                        {formatLoki(ch.amount)}
                       </div>
                     </td>
                     <td className="px-6 py-4">

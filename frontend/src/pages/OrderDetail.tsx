@@ -130,7 +130,7 @@ export const OrderDetail: React.FC<OrderDetailProps> = ({ orderId, onBack }) => 
                 value={order.funding_txid}
                 copied={copied}
                 onCopy={copyToClipboard}
-                explorerUrl={`https://explorer.lokichain.org/tx/${order.funding_txid}`}
+                explorerUrl={`https://lokichain.info/tx/${order.funding_txid}`}
               />
             )}
             {order.refund_onchain_address && (
