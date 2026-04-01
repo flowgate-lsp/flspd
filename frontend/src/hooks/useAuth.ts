@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react';
+import { nip19, finalizeEvent, getPublicKey } from 'nostr-tools';
 
 interface NostrUser {
   pubkey: string;
+  nsec: string;
 }
 
 export const useAuth = () => {
@@ -16,19 +18,19 @@ export const useAuth = () => {
     setLoading(false);
   }, []);
 
-  const login = async () => {
-    if (!(window as any).nostr) {
-      alert('Nostr extension (NIP-07) not found. Please install Alby or similar.');
-      return;
-    }
-
+  const login = async (nsec: string) => {
     try {
-      const pubkey = await (window as any).nostr.getPublicKey();
-      const newUser = { pubkey };
+      const { type, data: privkey } = nip19.decode(nsec);
+      if (type !== 'nsec') throw new Error('Not an nsec');
+      
+      const pubkey = getPublicKey(privkey as Uint8Array);
+      const newUser = { pubkey, nsec };
+      
       localStorage.setItem('flspd_auth', JSON.stringify(newUser));
       setUser(newUser);
     } catch (err) {
       console.error('Login failed', err);
+      throw err;
     }
   };
 
@@ -38,22 +40,29 @@ export const useAuth = () => {
   };
 
   const getAuthHeader = async (url: string, method: string) => {
-    if (!user || !(window as any).nostr) return '';
+    if (!user || !user.nsec) return '';
     
-    // NIP-98 HTTP Authentication
-    const event = {
-      kind: 27235,
-      created_at: Math.floor(Date.now() / 1000),
-      tags: [
-        ['u', url],
-        ['method', method],
-      ],
-      content: '',
-    };
+    try {
+      const { data: privkey } = nip19.decode(user.nsec);
+      
+      // NIP-98 HTTP Authentication
+      const event = {
+        kind: 27235,
+        created_at: Math.floor(Date.now() / 1000),
+        tags: [
+          ['u', url],
+          ['method', method],
+        ],
+        content: '',
+      };
 
-    const signedEvent = await (window as any).nostr.signEvent(event);
-    const encodedEvent = btoa(JSON.stringify(signedEvent));
-    return `Nostr ${encodedEvent}`;
+      const signedEvent = finalizeEvent(event, privkey as Uint8Array);
+      const encodedEvent = btoa(JSON.stringify(signedEvent));
+      return `Nostr ${encodedEvent}`;
+    } catch (err) {
+      console.error('Failed to get auth header', err);
+      return '';
+    }
   };
 
   return { user, loading, login, logout, getAuthHeader };
