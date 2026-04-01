@@ -16,7 +16,7 @@ import {
 } from 'recharts';
 import { formatSmart } from '../lib/utils';
 import { useDashboard } from '../hooks/useDashboard';
-import { TrendingUp, Users, Zap, Award, Loader2, BarChart3, PieChart as PieIcon, Activity, CornerUpRight } from 'lucide-react';
+import { TrendingUp, Users, Zap, Award, Loader2, BarChart3, PieChart as PieIcon, Activity } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 export const Analytics: React.FC = () => {
@@ -131,7 +131,7 @@ export const Analytics: React.FC = () => {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-10 items-start">
         {/* Main Revenue Chart */}
-        <GlassCard className="lg:col-span-2 p-8 flex flex-col h-[520px]">
+        <GlassCard className="lg:col-span-2 p-8 flex flex-col h-[520px] bg-black/40 border-white/5">
           <div className="flex items-center justify-between mb-10 pb-5">
             <div className="flex items-center gap-4">
               <div className="p-2 rounded-lg bg-primary/5">
@@ -221,7 +221,7 @@ export const Analytics: React.FC = () => {
         </GlassCard>
 
         {/* Order Composition (Pie) */}
-        <GlassCard className="lg:col-span-1 p-8 flex flex-col h-[520px]">
+        <GlassCard className="lg:col-span-1 p-8 flex flex-col h-[520px] bg-black/40 border-white/5">
           <div className="flex items-center gap-4 mb-10 pb-5">
             <div className="p-2 rounded-lg bg-secondary/5">
               <PieIcon className="w-4 h-4 text-secondary" />
@@ -235,7 +235,15 @@ export const Analytics: React.FC = () => {
             ) : (
               <>
                 <div className="w-full h-[280px] relative">
-                  <ResponsiveContainer width="100%" height="100%">
+                  {/* Center Label */}
+                  <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-center pointer-events-none z-0">
+                      <p className="text-[8px] font-mono text-on-surface-variant uppercase tracking-[0.4em] font-black opacity-40 mb-1">Total Signals</p>
+                      <p className="text-4xl font-black text-white italic tracking-tighter leading-none shadow-sm tabular-nums">
+                        {totalOrders}
+                      </p>
+                  </div>
+
+                  <ResponsiveContainer width="100%" height="100%" className="relative z-10">
                     <PieChart>
                       <Pie
                         data={filteredDistribution.length > 0 ? filteredDistribution : [{ name: 'EMPTY', value: 1, color: '#ffffff05' }]}
@@ -265,19 +273,11 @@ export const Analytics: React.FC = () => {
                       />
                     </PieChart>
                   </ResponsiveContainer>
-
-                  {/* Center Label */}
-                  <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-center pointer-events-none">
-                      <p className="text-[8px] font-mono text-on-surface-variant uppercase tracking-[0.4em] font-black opacity-40 mb-1">Total Signals</p>
-                      <p className="text-4xl font-black text-white italic tracking-tighter leading-none shadow-sm">
-                        {totalOrders}
-                      </p>
-                  </div>
                 </div>
 
                 {/* Breakdown List */}
                 <div className="w-full mt-6 space-y-2.5 overflow-y-auto pr-2 custom-scrollbar">
-                  {order_distribution?.map((item: any) => {
+                  {filteredDistribution?.map((item: any) => {
                     const percentage = totalOrders > 0 ? Math.round((item.value / totalOrders) * 100) : 0;
                     return (
                         <div key={item.name} className="flex items-center justify-between group py-1.5 border-b border-white/[0.02] last:border-0 hover:bg-white/[0.02] px-2 rounded-lg transition-colors">
@@ -287,7 +287,7 @@ export const Analytics: React.FC = () => {
                           </div>
                           <div className="flex items-center gap-4">
                             <span className="text-[10px] font-mono text-white/40 font-bold italic">{percentage}%</span>
-                            <span className="text-[11px] font-mono text-white font-black italic min-w-[30px] text-right">{item.value}</span>
+                            <span className="text-[11px] font-mono text-white font-black italic min-w-[30px] text-right tabular-nums">{item.value}</span>
                           </div>
                         </div>
                     );
@@ -299,7 +299,7 @@ export const Analytics: React.FC = () => {
         </GlassCard>
 
         {/* Daily Throughput */}
-        <GlassCard className="lg:col-span-3 p-8 space-y-10">
+        <GlassCard className="lg:col-span-3 p-8 space-y-10 bg-black/40 border-white/5">
             <div className="flex items-center justify-between pb-5">
                <div className="flex items-center gap-4">
                  <div className="p-2 rounded-lg bg-tertiary/5">
@@ -355,36 +355,43 @@ const SummaryCard: React.FC<{
   description?: string;
   trend?: string;
   showTrend?: boolean;
-}> = ({ label, value, icon: Icon, color, description, trend, showTrend }) => (
-  <GlassCard className="p-7 relative overflow-hidden group hover:bg-white/[0.04] transition-all duration-700 hover:border-white/20">
-    <div className={cn("absolute -top-10 -right-10 w-32 h-32 blur-[60px] opacity-10 pointer-events-none group-hover:opacity-30 transition-opacity duration-1000", color.replace('text-', 'bg-'))} />
-    
-    <div className="flex items-start justify-between relative z-10">
-      <div className="space-y-6">
-        <div className="flex items-center gap-3">
-          <div className={cn("p-2.5 rounded-xl bg-black/40 border border-white/5 transition-transform duration-500 group-hover:scale-110", color)}>
-            <Icon className="w-5 h-5" />
-          </div>
-          <p className="text-[10px] font-mono text-on-surface-variant uppercase tracking-[0.3em] font-black">{label}</p>
-        </div>
-        
-        <div className="space-y-2">
-          <p className="text-3xl md:text-4xl font-black text-white italic tracking-tighter leading-none">{value}</p>
-          {description && <p className="text-[10px] font-mono text-on-surface-variant/50 leading-none font-bold italic tracking-tight">{description}</p>}
-        </div>
-        
-        {trend && showTrend && (
-          <div className="flex items-center gap-2 pt-3">
-            <CornerUpRight className="w-3 h-3 text-secondary" />
-            <p className="text-[10px] font-mono text-secondary uppercase font-black tracking-widest italic py-0.5 px-2 bg-secondary/5 rounded-lg border border-secondary/10">
-              {trend}
+}> = ({ label, value, icon: Icon, color, description, trend, showTrend }) => {
+  const parts = String(value).split(' ');
+  const num = parts[0];
+  const suffix = parts.slice(1).join(' ');
+
+  return (
+    <div className="p-6 rounded-2xl bg-black/40 border border-white/5 hover:border-white/20 transition-all duration-500 hover:bg-black/60 group relative overflow-hidden flex flex-col justify-between">
+      <div className="flex justify-between items-start mb-6">
+        <div className="flex items-center gap-2.5">
+            <div className={cn("w-1.5 h-1.5 rounded-full shadow-[0_0_8px_currentColor]", color.replace("text-", "bg-"))} />
+            <p className="text-[10px] font-mono text-on-surface-variant uppercase tracking-[0.2em] font-black flex items-center gap-2">
+              {label} 
             </p>
+        </div>
+        <Icon className={cn("w-4 h-4 opacity-40 group-hover:opacity-100 transition-opacity duration-500", color)} />
+      </div>
+      
+      <div>
+        <div className="flex items-baseline gap-2 mb-2">
+          <p className="text-3xl md:text-4xl font-black text-white tracking-tighter tabular-nums leading-[0.8]">{num}</p>
+          {suffix && <span className="text-[10px] font-mono text-white/30 uppercase font-black tracking-widest">{suffix}</span>}
+        </div>
+        {description && <p className="text-[9px] font-mono text-on-surface-variant/40 uppercase tracking-widest leading-none font-bold italic truncate block pt-1">{description}</p>}
+        {trend && showTrend && (
+          <div className="flex items-center gap-1.5 pt-2">
+            <span className={cn(
+              "text-[9px] font-black font-mono px-2 py-0.5 rounded border tracking-widest uppercase", 
+              trend.startsWith('+') || trend === "Optimal Flow" ? "text-secondary border-secondary/20 bg-secondary/5" : "text-white/40 border-white/10 bg-white/5"
+            )}>
+              {trend}
+            </span>
           </div>
         )}
       </div>
     </div>
-  </GlassCard>
-);
+  );
+};
 
 const NoData: React.FC<{ label: string }> = ({ label }) => (
   <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
@@ -400,7 +407,7 @@ const NoData: React.FC<{ label: string }> = ({ label }) => (
 const CustomTooltip = ({ active, payload, label }: any) => {
   if (active && payload && payload.length) {
     return (
-      <div className="bg-[#0f172a]/95 border border-white/10 p-5 rounded-2xl shadow-[0_25px_50px_rgba(0,0,0,0.5)] backdrop-blur-2xl ring-1 ring-white/10">
+      <div className="relative z-50 bg-[#0f172a]/95 border border-white/10 p-5 rounded-2xl shadow-[0_25px_50px_rgba(0,0,0,0.5)] backdrop-blur-2xl ring-1 ring-white/10">
         <p className="text-[10px] font-mono font-black text-primary uppercase tracking-[0.3em] mb-4 border-b border-white/10 pb-2">
           {label} Snapshot
         </p>

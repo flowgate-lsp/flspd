@@ -30,7 +30,7 @@ export function formatFLC(loki: number | string | undefined | null): string {
   const flc = n / LOKI_PER_FLC;
   return new Intl.NumberFormat(undefined, {
     minimumFractionDigits: 2,
-    maximumFractionDigits: 8
+    maximumFractionDigits: 4
   }).format(flc) + ' FLC';
 }
 

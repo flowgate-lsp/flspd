@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { GlassCard } from '../components/GlassCard';
-import { Shield, Zap, Search, Activity, ExternalLink, Globe, Lock, Cpu } from 'lucide-react';
+import { Shield, Zap, Search, Activity, ExternalLink, Globe, Lock, Cpu, Copy } from 'lucide-react';
 import { useDashboard } from '../hooks/useDashboard';
 import { formatSmart, cn } from '../lib/utils';
 
@@ -67,17 +67,17 @@ export const JITChannels: React.FC = () => {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {filteredChannels.map((ch, i) => (
-            <GlassCard key={i} className="p-6 border-white/5 hover:border-secondary/30 transition-all duration-700 group relative overflow-hidden bg-surface-variant/20 hover:bg-white/[0.03]">
-              {/* Status Glow */}
-              <div className={cn(
-                "absolute -top-16 -right-16 w-32 h-32 blur-[60px] opacity-10 group-hover:opacity-30 transition-opacity duration-1000 rounded-full pointer-events-none",
-                ch.status === 'ACTIVE' ? "bg-secondary" : "bg-error"
-              )} />
-              
+            <GlassCard 
+              key={i} 
+              className={cn(
+                "p-6 border-white/5 transition-all duration-500 group relative overflow-hidden bg-black/40 hover:bg-black/60 flex flex-col border-l-[4px]",
+                ch.status === 'ACTIVE' ? "border-l-secondary" : "border-l-error"
+              )}
+            >
               <div className="flex justify-between items-start mb-6">
                 <div className="relative">
-                  <div className="p-3 rounded-2xl bg-black/40 border border-white/5 group-hover:scale-105 transition-transform duration-500">
-                    <Shield className="w-5 h-5 text-primary" />
+                  <div className="p-3 rounded-2xl bg-black/40 border border-white/5 group-hover:scale-105 transition-transform duration-500 text-primary">
+                    <Shield className="w-5 h-5" />
                   </div>
                   <div className="absolute -bottom-1 -right-1 p-1 rounded-full bg-surface-container border border-white/10">
                     <Cpu className="w-2 h-2 text-on-surface-variant" />
@@ -85,48 +85,61 @@ export const JITChannels: React.FC = () => {
                 </div>
                 
                 <div className={cn(
-                  "flex items-center gap-2 px-3.5 py-1.5 rounded-xl border italic shadow-sm transition-all duration-500",
+                  "flex items-center gap-2 px-3.5 py-1.5 rounded-sm border shadow-sm transition-all duration-500",
                   ch.status === 'ACTIVE' ? "text-secondary border-secondary/20 bg-secondary/5" : "text-error border-error/20 bg-error/5"
                 )}>
-                  <span className={cn("w-1.5 h-1.5 rounded-full animate-glow-pulse shadow-[0_0_8px_currentColor]", ch.status === 'ACTIVE' ? "bg-secondary" : "bg-error")} />
+                  <span className={cn("w-1.5 h-1.5 rounded-full shadow-[0_0_8px_currentColor]", ch.status === 'ACTIVE' ? "bg-secondary animate-pulse" : "bg-error")} />
                   <span className="text-[9px] font-mono font-black uppercase tracking-[0.2em] leading-none">{ch.status}</span>
                 </div>
               </div>
 
-              <div className="space-y-1.5 mb-6 relative z-10">
-                <div className="space-y-1">
-                   <p className="text-[8px] font-mono text-on-surface-variant/50 uppercase tracking-[0.2em] font-black italic">Registry ID</p>
-                   <h3 className="text-xs font-black text-white uppercase tracking-wider flex items-center gap-2 font-mono truncate">
-                     {ch.channel_id || 'OPEN_PENDING'}
-                   </h3>
+              {/* Counterparty Hash Plate */}
+              <div className="mb-6 p-4 rounded-lg bg-black/60 border border-white/10 flex flex-col gap-3 relative cursor-text text-left">
+                <div className="flex items-center justify-between w-full">
+                   <div className="flex items-center gap-2 text-white/30">
+                       <Shield className="w-3.5 h-3.5" />
+                       <span className="text-[9px] font-mono uppercase tracking-[0.2em] font-black">Counterparty ID</span>
+                   </div>
+                   {ch.peer_id && (
+                     <button 
+                       onClick={(e) => {
+                         e.stopPropagation();
+                         navigator.clipboard.writeText(ch.peer_id);
+                         /* In production, integrate local `copied` state per row if desired. I'll rely on native copy feedback for now */
+                       }}
+                       className="text-white/30 hover:text-white transition-colors active:scale-90"
+                       title="Copy Peer ID"
+                     >
+                        <Copy className="w-3.5 h-3.5" />
+                     </button>
+                   )}
                 </div>
-                <div className="flex items-center gap-2 opacity-50 hover:opacity-100 transition-opacity cursor-help">
-                   <Lock className="w-2.5 h-2.5 text-on-surface-variant" />
-                   <p className="text-[8px] font-mono text-on-surface-variant uppercase tracking-widest leading-none font-bold">Encrypted Protocol</p>
+                <div className="font-mono text-[11px] leading-[1.6] select-text pb-1 text-white/80 break-all">
+                  {ch.peer_id ? ch.peer_id : <span className="text-white/20 italic">AWAITING PEER SYNC</span>}
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-8 mb-6 relative z-10">
+              <div className="grid grid-cols-2 gap-8 mb-6 relative z-10 w-full">
                 <div className="space-y-1.5">
                   <p className="text-[8px] font-mono text-on-surface-variant/50 uppercase tracking-[0.2em] font-black italic">Capacity</p>
-                  <p className="text-lg font-black text-white italic tracking-tighter leading-none group-hover:text-secondary transition-colors">
+                  <p className="text-lg font-black text-white tracking-tighter leading-none group-hover:text-secondary transition-colors tabular-nums">
                     {formatSmart(ch.capacity)}
                   </p>
                 </div>
-                <div className="space-y-1.5">
+                <div className="space-y-1.5 border-l border-white/5 pl-4">
                   <p className="text-[8px] font-mono text-on-surface-variant/50 uppercase tracking-[0.2em] font-black italic">Flow Logic</p>
-                  <div className="flex items-center gap-2 text-[9px] font-black text-white uppercase italic tracking-widest">
+                  <div className="flex items-center gap-2 text-[9px] font-black text-white uppercase italic tracking-widest leading-none mt-1">
                     <Activity className="w-3 h-3 text-secondary animate-pulse" />
                     Bilateral
                   </div>
                 </div>
               </div>
 
-              <div className="pt-6 flex items-center justify-between border-t border-white/5 relative z-10">
+              <div className="pt-5 flex items-center justify-between border-t border-white/5 relative z-10 mt-auto">
                 <div className="flex flex-col gap-1.5">
-                  <p className="text-[8px] font-mono text-on-surface-variant/40 uppercase tracking-[0.2em] font-black italic">Counterparty</p>
-                  <p className="text-[9px] font-mono text-white/40 group-hover:text-white/70 transition-colors truncate max-w-[130px] italic font-bold">
-                    {ch.peer_id?.substring(0, 16)}...
+                  <p className="text-[8px] font-mono text-on-surface-variant/40 uppercase tracking-[0.2em] font-black italic flex items-center gap-1.5"><Lock className="w-2 h-2"/> Registry Source</p>
+                  <p className="text-[9px] font-mono text-white/40 group-hover:text-white/70 transition-colors truncate max-w-[130px] font-bold">
+                    {ch.channel_id || 'OPEN_PENDING'}
                   </p>
                 </div>
                  <div className="flex gap-3">
@@ -134,7 +147,7 @@ export const JITChannels: React.FC = () => {
                       href={`https://lokichain.info/tx/${ch.txid}`}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="p-3 text-on-surface-variant hover:text-white bg-white/5 hover:bg-secondary/20 rounded-2xl border border-white/5 transition-all shadow-xl active:scale-95"
+                      className="p-2 text-on-surface-variant hover:text-white bg-white/5 hover:bg-secondary/20 rounded-lg border border-white/5 transition-all shadow-xl active:scale-95"
                       title="View Transaction"
                     >
                       <ExternalLink className="w-4 h-4" />
