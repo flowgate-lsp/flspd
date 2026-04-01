@@ -9,6 +9,7 @@ import (
 	"gopkg.in/yaml.v3"
 	"github.com/gorilla/websocket"
 	"github.com/flowgate-lsp/flspd/auth"
+	"github.com/flowgate-lsp/flspd/build"
 	"github.com/flowgate-lsp/flspd/common"
 	"github.com/flowgate-lsp/flspd/config"
 	"github.com/flowgate-lsp/flspd/history"
@@ -135,6 +136,17 @@ func (c *Client) writePump() {
 }
 
 func (s *DashboardService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// 0. Handle Health Check (must be before upgrade & auth)
+	if r.URL.Path == "/healthz" {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{
+			"status":  "ok",
+			"version": build.GetTag(),
+			"commit":  build.GetRevision(),
+		})
+		return
+	}
+
 	// 0. Handle WebSocket Upgrade
 	if websocket.IsWebSocketUpgrade(r) {
 		s.handleWS(w, r)
@@ -228,7 +240,7 @@ func (s *DashboardService) handleGetSummary(req *lsps.JsonRpcRequest) *lsps.Json
 	summary := SummaryResponse{
 		NodeName:       mainNode.NodeConfig.Name,
 		NodePubkey:     mainNode.NodeConfig.NodePubkey,
-		Version:        "v0.0.5", // Should come from build.GetTag()
+		Version:        build.GetTag(),
 		Revenue24h:     1250000,  // Mock for now
 		LiquidityTotal: 500000000, // 5 FLC
 		LiquidityFree:  500000000 - reserved,

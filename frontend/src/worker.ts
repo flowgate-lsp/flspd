@@ -7,15 +7,28 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
 
-    // Proxy logic for API and Dashboard
-    if (url.pathname.startsWith('/api') || url.pathname.startsWith('/dashboard')) {
+    // Determine if the request should be proxied to the backend
+    let shouldProxy = false;
+    
+    // Unconditionally proxy all /api requests
+    if (url.pathname.startsWith('/api')) {
+      shouldProxy = true;
+    } 
+    // Proxy /dashboard ONLY for API calls (POST) or WebSockets (Upgrade)
+    // This allows GET requests for /dashboard to serve the React UI from ASSETS
+    else if (url.pathname.startsWith('/dashboard')) {
+      const isUpgrade = request.headers.get('Upgrade')?.toLowerCase() === 'websocket';
+      if (request.method === 'POST' || isUpgrade) {
+        shouldProxy = true;
+      }
+    }
+
+    if (shouldProxy) {
       const upstreamUrl = new URL(env.UPSTREAM_API);
       const targetUrl = new URL(url.pathname + url.search, upstreamUrl.origin);
 
-      // Clone headers and specifically handle WebSocket upgrade if present
       const newHeaders = new Headers(request.headers);
       
-      // Construct the proxy request
       const proxyRequest = new Request(targetUrl.toString(), {
         method: request.method,
         headers: newHeaders,
@@ -24,15 +37,13 @@ export default {
       });
 
       try {
-        // Cloudflare's fetch() will automatically handle WebSocket upgrades 
-        // if the 'Upgrade: websocket' header is present in proxyRequest.
         return await fetch(proxyRequest);
       } catch (e) {
         return new Response(`Gateway Error: ${e instanceof Error ? e.message : 'Unknown error'}`, { status: 502 });
       }
     }
 
-    // Otherwise serve static assets from the binding
+    // Otherwise serve static assets (UI, CSS, JS, etc.)
     return env.ASSETS.fetch(request);
   },
 };
