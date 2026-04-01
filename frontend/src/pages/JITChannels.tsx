@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { GlassCard } from '../components/GlassCard';
-import { Shield, Zap, Search, Activity, ExternalLink, Globe, Lock, Cpu, ArrowUpRight } from 'lucide-react';
+import { Shield, Zap, Search, Activity, ExternalLink, Globe, Lock, Cpu } from 'lucide-react';
 import { useDashboard } from '../hooks/useDashboard';
 import { formatSmart, cn } from '../lib/utils';
 
@@ -23,8 +23,8 @@ export const JITChannels: React.FC = () => {
   );
 
   return (
-    <div className="p-6 md:p-10 max-w-7xl mx-auto space-y-12 animate-in fade-in slide-in-from-bottom-8 duration-1000">
-      <header className="flex flex-col md:flex-row md:items-end justify-between gap-8 pb-8 border-b border-white/5">
+    <div className="p-6 md:p-10 max-w-7xl mx-auto space-y-12 animate-in fade-in slide-in-from-bottom-2 duration-500">
+      <header className="flex flex-col md:flex-row md:items-end justify-between gap-8 pb-8">
         <div className="space-y-2">
           <div className="flex items-center gap-4 mb-1">
              <div className="p-2.5 rounded-xl bg-secondary/10 border border-secondary/20 shadow-[0_0_15px_rgba(0,253,135,0.1)]">
@@ -122,27 +122,24 @@ export const JITChannels: React.FC = () => {
                 </div>
               </div>
 
-              <div className="pt-8 border-t border-white/5 flex items-center justify-between relative z-10">
+              <div className="pt-8 flex items-center justify-between relative z-10">
                 <div className="flex flex-col gap-2">
                   <p className="text-[9px] font-mono text-on-surface-variant/40 uppercase tracking-[0.3em] leading-none font-black">Counterparty</p>
                   <p className="text-[10px] font-mono text-white/40 group-hover:text-white/70 transition-colors truncate max-w-[140px] italic font-bold">
                     {ch.peer_id?.substring(0, 16)}...
                   </p>
                 </div>
-                <div className="flex gap-3">
-                   <a 
-                     href={`https://lokichain.info/tx/${ch.txid}`}
-                     target="_blank"
-                     rel="noopener noreferrer"
-                     className="p-3 text-on-surface-variant hover:text-white bg-white/5 hover:bg-secondary/20 rounded-2xl border border-white/5 transition-all shadow-xl active:scale-90"
-                     title="View Transaction"
-                   >
-                     <ExternalLink className="w-4 h-4" />
-                   </a>
-                   <button className="p-3 text-on-surface-variant hover:text-white bg-white/5 hover:bg-primary/20 rounded-2xl border border-white/5 transition-all shadow-xl active:scale-90">
-                     <ArrowUpRight className="w-4 h-4" />
-                   </button>
-                </div>
+                 <div className="flex gap-3">
+                    <a 
+                      href={`https://lokichain.info/tx/${ch.txid}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="p-3 text-on-surface-variant hover:text-white bg-white/5 hover:bg-secondary/20 rounded-2xl border border-white/5 transition-all shadow-xl active:scale-90"
+                      title="View Transaction"
+                    >
+                      <ExternalLink className="w-4 h-4" />
+                    </a>
+                 </div>
               </div>
             </GlassCard>
           ))}

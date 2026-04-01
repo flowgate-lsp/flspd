@@ -60,9 +60,9 @@ export const Analytics: React.FC = () => {
   } = data;
 
   return (
-    <div className="p-6 md:p-10 max-w-7xl mx-auto space-y-12 animate-in fade-in slide-in-from-bottom-6 duration-1000">
+    <div className="p-6 md:p-10 max-w-7xl mx-auto space-y-12 animate-in fade-in slide-in-from-bottom-2 duration-500">
       {/* Header Section */}
-      <header className="flex flex-col md:flex-row md:items-end justify-between gap-8 pb-6 border-b border-white/5">
+      <header className="flex flex-col md:flex-row md:items-end justify-between gap-8 pb-6">
         <div className="space-y-2">
           <div className="flex items-center gap-4 mb-1">
             <div className="p-2.5 rounded-xl bg-primary/10 border border-primary/20 shadow-[0_0_15px_rgba(0,186,255,0.1)]">
@@ -95,30 +95,32 @@ export const Analytics: React.FC = () => {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <SummaryCard 
           label="Total Revenue" 
-          value={formatSmart(total_revenue)} 
+          value={formatSmart(total_revenue || 0)} 
           icon={TrendingUp} 
           color="text-secondary" 
           description="Inbound fees earned"
           trend="+12.4% vs 7d"
+          showTrend={revenue_history?.length > 1}
         />
         <SummaryCard 
           label="Success Rate" 
-          value={`${success_rate.toFixed(1)}%`} 
+          value={`${(success_rate || 0).toFixed(1)}%`} 
           icon={Award} 
           color="text-primary" 
           description="Channel funding success"
           trend="Optimal Flow"
+          showTrend={success_rate > 90}
         />
         <SummaryCard 
           label="Avg Order Size" 
-          value={formatSmart(avg_order_size)} 
+          value={formatSmart(avg_order_size || 0)} 
           icon={Zap} 
           color="text-tertiary" 
           description="Mean liquidity request"
         />
         <SummaryCard 
           label="Connected Peers" 
-          value={active_peers} 
+          value={active_peers || 0} 
           icon={Users} 
           color="text-white" 
           description="Active node connections"
@@ -128,7 +130,7 @@ export const Analytics: React.FC = () => {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-10 items-start">
         {/* Main Revenue Chart */}
         <GlassCard className="lg:col-span-2 p-8 flex flex-col h-[520px]">
-          <div className="flex items-center justify-between mb-10 border-b border-white/5 pb-5">
+          <div className="flex items-center justify-between mb-10 pb-5">
             <div className="flex items-center gap-4">
               <div className="p-2 rounded-lg bg-primary/5">
                 <BarChart3 className="w-4 h-4 text-primary" />
@@ -146,8 +148,11 @@ export const Analytics: React.FC = () => {
           </div>
           
           <div className="flex-1 w-full relative">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={revenue_history} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+            {(!revenue_history || revenue_history.length === 0) ? (
+              <NoData label="No revenue history recorded yet" />
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={revenue_history} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                 <defs>
                   <linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor="#00BAFF" stopOpacity={0.3}/>
@@ -199,14 +204,15 @@ export const Analytics: React.FC = () => {
                   fill="url(#colorVolume)" 
                   animationDuration={2000}
                 />
-              </AreaChart>
-            </ResponsiveContainer>
+                </AreaChart>
+              </ResponsiveContainer>
+            )}
           </div>
         </GlassCard>
 
         {/* Order Composition (Pie) */}
         <GlassCard className="lg:col-span-1 p-8 flex flex-col h-[520px]">
-          <div className="flex items-center gap-4 mb-10 border-b border-white/5 pb-5">
+          <div className="flex items-center gap-4 mb-10 pb-5">
             <div className="p-2 rounded-lg bg-secondary/5">
               <PieIcon className="w-4 h-4 text-secondary" />
             </div>
@@ -214,8 +220,11 @@ export const Analytics: React.FC = () => {
           </div>
           
           <div className="flex-1 w-full relative">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
+            {(!order_distribution || order_distribution.length === 0) ? (
+              <NoData label="No orders distributed in this sector" />
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
                 <Pie
                   data={order_distribution}
                   cx="50%"
@@ -241,36 +250,39 @@ export const Analytics: React.FC = () => {
                   iconSize={8}
                   formatter={(value) => <span className="text-[10px] uppercase font-mono text-on-surface-variant font-black tracking-[0.1em] ml-2">{value}</span>}
                 />
-              </PieChart>
-            </ResponsiveContainer>
+                </PieChart>
+              </ResponsiveContainer>
+            )}
             
             {/* Center Label */}
-            <div className="absolute top-[45%] left-1/2 -translate-x-1/2 -translate-y-1/2 text-center pointer-events-none">
-                <p className="text-[9px] font-mono text-on-surface-variant uppercase tracking-[0.3em] font-black opacity-50 mb-1">Total</p>
-                <p className="text-3xl font-black text-white italic tracking-tighter leading-none">
-                  {order_distribution?.reduce((acc: number, curr: any) => acc + curr.value, 0) || 0}
-                </p>
-            </div>
+            {order_distribution?.length > 0 && (
+              <div className="absolute top-[45%] left-1/2 -translate-x-1/2 -translate-y-1/2 text-center pointer-events-none">
+                  <p className="text-[9px] font-mono text-on-surface-variant uppercase tracking-[0.3em] font-black opacity-50 mb-1">Total</p>
+                  <p className="text-3xl font-black text-white italic tracking-tighter leading-none">
+                    {order_distribution?.reduce((acc: number, curr: any) => acc + curr.value, 0) || 0}
+                  </p>
+              </div>
+            )}
           </div>
         </GlassCard>
 
         {/* Daily Throughput */}
         <GlassCard className="lg:col-span-3 p-8 space-y-10">
-           <div className="flex items-center justify-between border-b border-white/5 pb-5">
-              <div className="flex items-center gap-4">
-                <div className="p-2 rounded-lg bg-tertiary/5">
-                  <TrendingUp className="w-4 h-4 text-tertiary" />
-                </div>
-                <h3 className="text-xs font-black text-white uppercase tracking-[0.2em]">Daily Throughput (7 Days)</h3>
-              </div>
-              <button className="text-[10px] font-black text-on-surface-variant hover:text-white transition-all uppercase tracking-widest bg-white/5 px-4 py-2 rounded-xl border border-white/5">
-                 Extended View
-              </button>
-           </div>
+            <div className="flex items-center justify-between pb-5">
+               <div className="flex items-center gap-4">
+                 <div className="p-2 rounded-lg bg-tertiary/5">
+                   <TrendingUp className="w-4 h-4 text-tertiary" />
+                 </div>
+                 <h3 className="text-xs font-black text-white uppercase tracking-[0.2em]">Daily Throughput (7 Days)</h3>
+               </div>
+            </div>
            
-           <div className="h-[240px] w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={revenue_history?.slice(-7) || []}>
+           <div className="h-[240px] w-full relative">
+              {(!revenue_history || revenue_history.length === 0) ? (
+                <NoData label="No throughput telemetry identified" />
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={revenue_history?.slice(-7) || []}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#ffffff05" vertical={false} />
                   <XAxis 
                     dataKey="day" 
@@ -291,8 +303,9 @@ export const Analytics: React.FC = () => {
                   />
                   <Tooltip content={<CustomTooltip />} cursor={{ fill: '#ffffff05' }} />
                   <Bar dataKey="revenue" fill="#B026FF" radius={[6, 6, 0, 0]} barSize={48} />
-                </BarChart>
-              </ResponsiveContainer>
+                  </BarChart>
+                </ResponsiveContainer>
+              )}
            </div>
         </GlassCard>
       </div>
@@ -309,7 +322,8 @@ const SummaryCard: React.FC<{
   color: string;
   description?: string;
   trend?: string;
-}> = ({ label, value, icon: Icon, color, description, trend }) => (
+  showTrend?: boolean;
+}> = ({ label, value, icon: Icon, color, description, trend, showTrend }) => (
   <GlassCard className="p-7 relative overflow-hidden group hover:bg-white/[0.04] transition-all duration-700 hover:border-white/20">
     <div className={cn("absolute -top-10 -right-10 w-32 h-32 blur-[60px] opacity-10 pointer-events-none group-hover:opacity-30 transition-opacity duration-1000", color.replace('text-', 'bg-'))} />
     
@@ -327,8 +341,8 @@ const SummaryCard: React.FC<{
           {description && <p className="text-[10px] font-mono text-on-surface-variant/50 leading-none font-bold italic tracking-tight">{description}</p>}
         </div>
         
-        {trend && (
-          <div className="flex items-center gap-2 pt-3 border-t border-white/5">
+        {trend && showTrend && (
+          <div className="flex items-center gap-2 pt-3">
             <CornerUpRight className="w-3 h-3 text-secondary" />
             <p className="text-[10px] font-mono text-secondary uppercase font-black tracking-widest italic py-0.5 px-2 bg-secondary/5 rounded-lg border border-secondary/10">
               {trend}
@@ -338,6 +352,17 @@ const SummaryCard: React.FC<{
       </div>
     </div>
   </GlassCard>
+);
+
+const NoData: React.FC<{ label: string }> = ({ label }) => (
+  <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+    <div className="flex flex-col items-center gap-4 group opacity-40 hover:opacity-60 transition-opacity duration-1000">
+      <BarChart3 className="w-8 h-8 text-on-surface-variant group-hover:scale-110 transition-transform" />
+      <p className="text-[10px] font-mono text-on-surface-variant uppercase tracking-[0.4em] font-black italic text-center px-10">
+        {label}
+      </p>
+    </div>
+  </div>
 );
 
 const CustomTooltip = ({ active, payload, label }: any) => {

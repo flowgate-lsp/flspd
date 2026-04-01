@@ -45,7 +45,7 @@ export const CommandCenter: React.FC<{ onViewOrder?: (id: string) => void }> = (
   };
 
   return (
-    <div className="p-6 md:p-10 max-w-7xl mx-auto space-y-12 animate-in fade-in slide-in-from-bottom-6 duration-1000">
+    <div className="p-6 md:p-10 max-w-7xl mx-auto space-y-12 animate-in fade-in slide-in-from-bottom-2 duration-500">
       {/* Header Section */}
       <header className="flex flex-col md:flex-row md:items-center justify-between gap-8 mb-4">
         <div className="space-y-2">
@@ -123,13 +123,10 @@ export const CommandCenter: React.FC<{ onViewOrder?: (id: string) => void }> = (
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-10 items-start">
         {/* Network & Infrastructure Card */}
         <GlassCard className="lg:col-span-2 p-8 space-y-8 overflow-hidden relative">
-          <div className="flex items-center justify-between border-b border-white/5 pb-4">
+          <div className="flex items-center justify-between pb-4">
             <h2 className="text-sm font-bold text-white uppercase tracking-[0.2em] flex items-center gap-3">
               <Network className="w-4 h-4 text-primary" /> Infrastructure Health
             </h2>
-            <button className="text-[10px] font-bold text-primary hover:text-white transition-all uppercase tracking-widest bg-primary/5 hover:bg-primary/10 px-3 py-1.5 rounded-lg">
-              Live Topology
-            </button>
           </div>
           
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
@@ -161,7 +158,7 @@ export const CommandCenter: React.FC<{ onViewOrder?: (id: string) => void }> = (
 
         {/* Audit Journal / Activity Feed */}
         <GlassCard className="p-8 space-y-8 h-full">
-          <div className="flex items-center justify-between border-b border-white/5 pb-4">
+          <div className="flex items-center justify-between pb-4">
             <h2 className="text-sm font-bold text-white uppercase tracking-[0.2em]">Audit Journal</h2>
             <div className="p-2 rounded-lg bg-white/5">
               <Clock className="w-3.5 h-3.5 text-on-surface-variant" />
@@ -202,9 +199,6 @@ export const CommandCenter: React.FC<{ onViewOrder?: (id: string) => void }> = (
             )}
           </div>
           
-          <button className="w-full py-4 mt-2 rounded-2xl border border-white/5 bg-white/5 text-[10px] font-black italic uppercase tracking-[0.2em] text-white/50 hover:text-white hover:bg-primary/20 hover:border-primary/20 transition-all duration-500">
-            Expand Audit Vault
-          </button>
         </GlassCard>
       </div>
     </div>

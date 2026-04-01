@@ -91,13 +91,13 @@ export const OrderDetail: React.FC<OrderDetailProps> = ({ orderId, onBack }) => 
                      'text-primary border-primary/20 bg-primary/5';
 
   return (
-    <div className="p-6 md:p-10 max-w-6xl mx-auto space-y-12 animate-in fade-in slide-in-from-bottom-8 duration-1000">
+    <div className="p-6 md:p-10 max-w-6xl mx-auto space-y-12 animate-in fade-in slide-in-from-bottom-2 duration-500">
       {/* Back + Header */}
       <div className="space-y-4">
         <button onClick={onBack} className="flex items-center gap-3 text-on-surface-variant hover:text-white text-[11px] font-black uppercase tracking-[0.2em] transition-all group italic">
           <ArrowLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" /> Retruncate Matrix
         </button>
-        <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-8 pb-8 border-b border-white/5">
+        <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-8 pb-8">
           <div className="space-y-4">
             <h1 className="text-4xl md:text-5xl font-black tracking-tighter text-white uppercase italic leading-none">
               Order Inspector
@@ -124,7 +124,7 @@ export const OrderDetail: React.FC<OrderDetailProps> = ({ orderId, onBack }) => 
         <GlassCard className="lg:col-span-2 p-10 space-y-12 shadow-2xl relative overflow-hidden group">
           <div className="absolute top-0 right-0 w-64 h-64 bg-primary/5 blur-[120px] rounded-full opacity-30 group-hover:opacity-60 transition-opacity" />
           
-          <div className="flex items-center gap-3 border-b border-white/5 pb-6">
+          <div className="flex items-center gap-3 pb-6">
             <Activity className="w-4 h-4 text-primary" />
             <h2 className="text-sm font-black text-white uppercase tracking-[0.2em]">Operational Parameters</h2>
           </div>
@@ -141,7 +141,7 @@ export const OrderDetail: React.FC<OrderDetailProps> = ({ orderId, onBack }) => 
           </div>
 
           {/* Persistent Cryptographic Identifiers */}
-          <div className="space-y-6 pt-10 border-t border-white/5 relative z-10">
+          <div className="space-y-6 pt-10 relative z-10">
             <h3 className="text-[10px] font-black text-on-surface-variant uppercase tracking-[0.4em] mb-4">Cryptographic Identity</h3>
             <CopyableField
               label="Peer Pubkey"
@@ -171,7 +171,7 @@ export const OrderDetail: React.FC<OrderDetailProps> = ({ orderId, onBack }) => 
 
         {/* Temporal Sequence / Timeline */}
         <GlassCard className="lg:col-span-1 p-10 space-y-10 h-full flex flex-col shadow-2xl">
-          <div className="flex items-center justify-between border-b border-white/5 pb-6">
+          <div className="flex items-center justify-between pb-6">
             <h2 className="text-sm font-black text-white uppercase tracking-[0.2em]">Sequence</h2>
             <Clock className="w-4 h-4 text-on-surface-variant/30" />
           </div>
@@ -228,7 +228,7 @@ export const OrderDetail: React.FC<OrderDetailProps> = ({ orderId, onBack }) => 
             })}
           </div>
           
-          <div className="pt-8 mt-auto border-t border-white/5">
+          <div className="pt-8 mt-auto">
              <p className="text-[9px] font-mono text-on-surface-variant/20 uppercase font-black text-center tracking-[0.2em]">Verified Secure Chain Record</p>
           </div>
         </GlassCard>

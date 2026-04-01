@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { GlassCard } from '../components/GlassCard';
-import { Search, ExternalLink, RefreshCw, Loader2, AlertCircle, ListFilter, ChevronRight, Download } from 'lucide-react';
+import { Search, ExternalLink, RefreshCw, Loader2, AlertCircle, ChevronRight } from 'lucide-react';
 import { cn, formatSmart, formatLoki } from '../lib/utils';
 import { useDashboard } from '../hooks/useDashboard';
 import { useEvents } from '../hooks/useEvents';
@@ -63,7 +63,7 @@ export const OrderMatrix: React.FC<OrderMatrixProps> = ({ onViewOrder, initialSe
   }
 
   return (
-    <div className="p-6 md:p-10 max-w-7xl mx-auto space-y-10 animate-in fade-in slide-in-from-bottom-6 duration-1000">
+    <div className="p-6 md:p-10 max-w-7xl mx-auto space-y-10 animate-in fade-in slide-in-from-bottom-2 duration-500">
       <header className="flex flex-col md:flex-row md:justify-between md:items-end gap-10">
         <div className="space-y-2">
           <h1 className="text-4xl md:text-5xl font-black tracking-tighter text-white uppercase italic leading-none">Order Matrix</h1>
@@ -75,9 +75,6 @@ export const OrderMatrix: React.FC<OrderMatrixProps> = ({ onViewOrder, initialSe
              className="px-5 py-3 rounded-2xl bg-white/5 border border-white/5 text-[10px] font-black uppercase text-on-surface-variant hover:text-white hover:bg-primary/10 transition-all flex items-center gap-3 italic tracking-widest"
            >
              <RefreshCw className={cn("w-4 h-4", loading && "animate-spin")} /> Cache Sync
-           </button>
-           <button className="px-6 py-3 rounded-2xl bg-primary text-on-primary font-black italic uppercase text-[10px] tracking-[0.2em] flex items-center gap-3 hover:shadow-[0_0_20px_rgba(0,186,255,0.3)] transition-all active:scale-95">
-             <Download className="w-4 h-4" /> Export Store
            </button>
         </div>
       </header>
@@ -100,9 +97,6 @@ export const OrderMatrix: React.FC<OrderMatrixProps> = ({ onViewOrder, initialSe
             />
           </div>
         </GlassCard>
-        <button className="px-8 py-4 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center gap-3 text-[10px] font-black italic text-white uppercase tracking-[0.2em] hover:bg-white/10 transition-all duration-300">
-          <ListFilter className="w-4 h-4 text-primary" /> Filter Matrix
-        </button>
       </div>
 
       {/* Orders Table - Desktop */}
@@ -110,7 +104,7 @@ export const OrderMatrix: React.FC<OrderMatrixProps> = ({ onViewOrder, initialSe
         <GlassCard className="p-0 overflow-hidden border-white/5 shadow-2xl bg-surface-variant/20">
           <table className="w-full text-left border-collapse">
             <thead>
-              <tr className="border-b border-white/5 bg-white/[0.02]">
+              <tr className="bg-white/[0.02]">
                 <th className="px-8 py-6 text-[10px] font-mono text-on-surface-variant uppercase tracking-[0.3em] font-black opacity-60">Protocol</th>
                 <th className="px-8 py-6 text-[10px] font-mono text-on-surface-variant uppercase tracking-[0.3em] font-black opacity-60">Order ID</th>
                 <th className="px-8 py-6 text-[10px] font-mono text-on-surface-variant uppercase tracking-[0.3em] font-black opacity-60">Node Integrity</th>
@@ -119,7 +113,7 @@ export const OrderMatrix: React.FC<OrderMatrixProps> = ({ onViewOrder, initialSe
                 <th className="px-8 py-6 text-[10px] font-mono text-on-surface-variant uppercase tracking-[0.3em] font-black opacity-60 text-right">Settlement</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-white/5">
+            <tbody className="">
               {filteredOrders.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="px-8 py-32 text-center text-on-surface-variant font-mono text-[10px] uppercase tracking-[0.4em] font-black opacity-30 italic">
@@ -144,7 +138,7 @@ export const OrderMatrix: React.FC<OrderMatrixProps> = ({ onViewOrder, initialSe
                       </span>
                     </td>
                     <td className="px-8 py-6">
-                       <span className="text-[11px] font-mono text-on-surface-variant/70 block whitespace-nowrap opacity-60 group-hover:opacity-100 transition-opacity" title={order.peer_id}>
+                       <span className="text-[11px] font-mono text-on-surface-variant/70 block whitespace-nowrap opacity-60 group-hover:opacity-100 transition-opacity truncate max-w-[120px]" title={order.peer_id}>
                          {order.peer_id}
                        </span>
                     </td>
@@ -168,21 +162,16 @@ export const OrderMatrix: React.FC<OrderMatrixProps> = ({ onViewOrder, initialSe
                     <td className="px-8 py-6 text-right">
                        <div className="flex items-center justify-end gap-3 group/tx">
                           {order.funding_txid ? (
-                            <>
-                              <span className="text-[10px] font-mono text-on-surface-variant/60 uppercase tracking-tighter group-hover:text-white/40 transition-colors">
-                                {order.funding_txid.substring(0, 6)} • {order.funding_txid.slice(-6)}
-                              </span>
-                              <a 
-                                href={`https://lokichain.info/tx/${order.funding_txid}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                title="View in Explorer" 
-                                onClick={(e) => e.stopPropagation()}
-                                className="p-2.5 text-on-surface-variant hover:text-white hover:bg-primary/20 hover:border-primary/20 rounded-xl transition-all border border-white/5 bg-white/5 flex items-center justify-center active:scale-90"
-                              >
-                                 <ExternalLink className="w-4 h-4" />
-                              </a>
-                            </>
+                            <a 
+                              href={`https://lokichain.info/tx/${order.funding_txid}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              title="View in Explorer" 
+                              onClick={(e) => e.stopPropagation()}
+                              className="text-[10px] font-mono text-primary/60 uppercase tracking-tighter hover:text-primary hover:underline underline-offset-4 transition-all italic"
+                            >
+                              {order.funding_txid.substring(0, 6)} • {order.funding_txid.slice(-6)}
+                            </a>
                           ) : (
                             <span className="text-[10px] font-mono text-on-surface-variant/20 uppercase italic tracking-widest">Pending Sync</span>
                           )}
