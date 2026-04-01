@@ -17,16 +17,18 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<NostrUser | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [user, setUser] = useState<NostrUser | null>(() => {
+    const saved = localStorage.getItem('flspd_auth');
+    try {
+      return saved ? JSON.parse(saved) : null;
+    } catch (e) {
+      console.error('Failed to parse saved auth', e);
+      return null;
+    }
+  });
+  const loading = false; // Auth is now loaded synchronously from localStorage
 
   useEffect(() => {
-    const saved = localStorage.getItem('flspd_auth');
-    if (saved) {
-      setUser(JSON.parse(saved));
-    }
-    setLoading(false);
-
     const handleUnauthorized = () => {
       logout();
     };

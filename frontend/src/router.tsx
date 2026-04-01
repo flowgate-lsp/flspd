@@ -25,10 +25,8 @@ const rootRoute = createRootRoute({
 })
 
 function RootComponent() {
-  const { user, loading } = useAuth()
+  const { user } = useAuth()
   
-  if (loading) return null
-
   if (!user) {
     return <Login />
   }
