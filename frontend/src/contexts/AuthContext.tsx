@@ -44,12 +44,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       
       const pubkey = getPublicKey(privkey as Uint8Array);
       
+      const proxyUrl = (import.meta as any).env?.VITE_PROXY_URL;
+      const apiOrigin = proxyUrl ? proxyUrl.replace(/\/$/, '') : window.location.origin;
       const testUrl = `${window.location.origin}/dashboard`;
+      const authUrl = `${apiOrigin}/dashboard`;
+
       const event = {
         kind: 27235,
         created_at: Math.floor(Date.now() / 1000),
         tags: [
-          ['u', testUrl],
+          ['u', authUrl],
           ['m', 'POST'],
         ],
         content: '',

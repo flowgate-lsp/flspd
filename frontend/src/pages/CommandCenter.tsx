@@ -45,9 +45,9 @@ export const CommandCenter: React.FC<{ onViewOrder?: (id: string) => void }> = (
   };
 
   return (
-    <div className="p-6 md:p-10 max-w-7xl mx-auto space-y-12 animate-in fade-in slide-in-from-bottom-2 duration-500">
+    <div className="p-6 md:p-8 max-w-7xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-500">
       {/* Header Section */}
-      <header className="flex flex-col md:flex-row md:items-center justify-between gap-8 mb-4">
+      <header className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-4">
         <div className="space-y-2">
           <h1 className="text-4xl md:text-5xl font-black italic tracking-tighter text-white uppercase leading-none">
             Command Center
@@ -122,7 +122,7 @@ export const CommandCenter: React.FC<{ onViewOrder?: (id: string) => void }> = (
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-10 items-start">
         {/* Network & Infrastructure Card */}
-        <GlassCard className="lg:col-span-2 p-8 space-y-8 overflow-hidden relative">
+        <GlassCard className="lg:col-span-2 p-6 space-y-6 overflow-hidden relative">
           <div className="flex items-center justify-between pb-4">
             <h2 className="text-sm font-bold text-white uppercase tracking-[0.2em] flex items-center gap-3">
               <Network className="w-4 h-4 text-primary" /> Infrastructure Health
@@ -157,7 +157,7 @@ export const CommandCenter: React.FC<{ onViewOrder?: (id: string) => void }> = (
         </GlassCard>
 
         {/* Audit Journal / Activity Feed */}
-        <GlassCard className="p-8 space-y-8 h-full">
+        <GlassCard className="p-6 space-y-6 h-full">
           <div className="flex items-center justify-between pb-4">
             <h2 className="text-sm font-bold text-white uppercase tracking-[0.2em]">Audit Journal</h2>
             <div className="p-2 rounded-lg bg-white/5">
@@ -215,7 +215,7 @@ const StatCard: React.FC<{
   color: string;
   description?: string;
 }> = ({ label, value, icon: Icon, trend, color, description }) => (
-  <GlassCard className="p-7 flex flex-col justify-between gap-6 group hover:border-white/20 transition-all duration-500 hover:bg-white/[0.02]">
+  <GlassCard className="p-6 flex flex-col justify-between gap-6 group hover:border-white/20 transition-all duration-500 hover:bg-white/[0.02]">
     <div className="flex justify-between items-start leading-none">
       <div className={cn("p-3 rounded-2xl bg-black/40 border border-white/5 group-hover:scale-110 group-hover:rotate-3 transition-transform duration-500", color)}>
         <Icon className="w-5 h-5" />

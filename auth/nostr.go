@@ -96,8 +96,19 @@ func VerifyNostrAuth(r *http.Request) (*NostrAuth, error) {
 		}
 		switch tag[0] {
 		case "u":
+			// Full match or match with scheme indifference (http vs https)
 			if tag[1] == fullUrl {
 				urlOk = true
+			} else {
+				// Also handle the case where the only difference is the protocol scheme (e.g. http vs https)
+				// This is common behind proxies that terminate TLS but don't forward it correctly.
+				s1 := strings.TrimPrefix(tag[1], "https://")
+				s1 = strings.TrimPrefix(s1, "http://")
+				s2 := strings.TrimPrefix(fullUrl, "https://")
+				s2 = strings.TrimPrefix(s2, "http://")
+				if s1 == s2 {
+					urlOk = true
+				}
 			}
 		case "m":
 			if strings.EqualFold(tag[1], r.Method) {
@@ -130,10 +141,15 @@ func getFullUrl(r *http.Request) string {
 		scheme = "https"
 	}
 	
-	// Respect Cloudflare/Proxy forwarded headers
+	// Respect common proxy/load balancer forwarded headers
 	if xForwardedProto := r.Header.Get("X-Forwarded-Proto"); xForwardedProto != "" {
 		scheme = xForwardedProto
+	} else if xForwardedSsl := r.Header.Get("X-Forwarded-Ssl"); xForwardedSsl == "on" {
+		scheme = "https"
+	} else if r.Header.Get("Front-End-Https") == "on" || r.Header.Get("X-Forwarded-Protocol") == "https" {
+		scheme = "https"
 	}
+
 	// Prefer our custom X-Original-Proto if set by the Cloudflare Worker
 	if xOrigProto := r.Header.Get("X-Original-Proto"); xOrigProto != "" {
 		scheme = xOrigProto

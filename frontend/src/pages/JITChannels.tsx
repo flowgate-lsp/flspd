@@ -23,8 +23,8 @@ export const JITChannels: React.FC = () => {
   );
 
   return (
-    <div className="p-6 md:p-10 max-w-7xl mx-auto space-y-12 animate-in fade-in slide-in-from-bottom-2 duration-500">
-      <header className="flex flex-col md:flex-row md:items-end justify-between gap-8 pb-8">
+    <div className="p-6 md:p-10 max-w-7xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-500">
+      <header className="flex flex-col md:flex-row md:items-end justify-between gap-4 pb-6">
         <div className="space-y-2">
           <div className="flex items-center gap-4 mb-1">
              <div className="p-2.5 rounded-xl bg-secondary/10 border border-secondary/20 shadow-[0_0_15px_rgba(0,253,135,0.1)]">
@@ -52,80 +52,80 @@ export const JITChannels: React.FC = () => {
       </header>
 
       {loading ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {[1, 2, 3, 4, 5, 6].map(i => (
             <div key={i} className="h-64 bg-white/[0.02] animate-pulse rounded-3xl border border-white/5 shadow-xl" />
           ))}
         </div>
       ) : filteredChannels.length === 0 ? (
-        <div className="py-32 text-center rounded-3xl border-2 border-dashed border-white/5 bg-white/[0.01] flex flex-col items-center justify-center gap-6">
-          <div className="p-6 rounded-full bg-white/5 text-on-surface-variant/20">
-            <Globe className="w-16 h-16 opacity-20 animate-spin-slow" />
+        <div className="py-20 text-center rounded-2xl border-2 border-dashed border-white/5 bg-white/[0.01] flex flex-col items-center justify-center gap-4">
+          <div className="p-4 rounded-full bg-white/5 text-on-surface-variant/20">
+            <Globe className="w-12 h-12 opacity-20 animate-spin-slow" />
           </div>
-          <p className="text-on-surface-variant font-mono text-[10px] uppercase tracking-[0.4em] font-black italic opacity-40">No active JIT telemetry detected in current sector</p>
+          <p className="text-on-surface-variant font-mono text-[9px] uppercase tracking-[0.3em] font-black italic opacity-40">No active JIT telemetry detected in current sector</p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {filteredChannels.map((ch, i) => (
-            <GlassCard key={i} className="p-8 border-white/5 hover:border-secondary/30 transition-all duration-700 group relative overflow-hidden bg-surface-variant/20 hover:bg-white/[0.03]">
-              {/* Animated Status Glow */}
+            <GlassCard key={i} className="p-6 border-white/5 hover:border-secondary/30 transition-all duration-700 group relative overflow-hidden bg-surface-variant/20 hover:bg-white/[0.03]">
+              {/* Status Glow */}
               <div className={cn(
                 "absolute -top-16 -right-16 w-32 h-32 blur-[60px] opacity-10 group-hover:opacity-30 transition-opacity duration-1000 rounded-full pointer-events-none",
                 ch.status === 'ACTIVE' ? "bg-secondary" : "bg-error"
               )} />
               
-              <div className="flex justify-between items-start mb-10">
+              <div className="flex justify-between items-start mb-6">
                 <div className="relative">
-                  <div className="p-3.5 rounded-2xl bg-black/40 border border-white/5 group-hover:scale-110 transition-transform duration-500">
+                  <div className="p-3 rounded-2xl bg-black/40 border border-white/5 group-hover:scale-105 transition-transform duration-500">
                     <Shield className="w-5 h-5 text-primary" />
                   </div>
                   <div className="absolute -bottom-1 -right-1 p-1 rounded-full bg-surface-container border border-white/10">
-                    <Cpu className="w-2.5 h-2.5 text-on-surface-variant" />
+                    <Cpu className="w-2 h-2 text-on-surface-variant" />
                   </div>
                 </div>
                 
                 <div className={cn(
-                  "flex items-center gap-2.5 px-4 py-1.5 rounded-xl border italic shadow-sm transition-all duration-500",
+                  "flex items-center gap-2 px-3.5 py-1.5 rounded-xl border italic shadow-sm transition-all duration-500",
                   ch.status === 'ACTIVE' ? "text-secondary border-secondary/20 bg-secondary/5" : "text-error border-error/20 bg-error/5"
                 )}>
                   <span className={cn("w-1.5 h-1.5 rounded-full animate-glow-pulse shadow-[0_0_8px_currentColor]", ch.status === 'ACTIVE' ? "bg-secondary" : "bg-error")} />
-                  <span className="text-[10px] font-mono font-black uppercase tracking-[0.2em] leading-none">{ch.status}</span>
+                  <span className="text-[9px] font-mono font-black uppercase tracking-[0.2em] leading-none">{ch.status}</span>
                 </div>
               </div>
 
-              <div className="space-y-4 mb-10 relative z-10">
+              <div className="space-y-1.5 mb-6 relative z-10">
                 <div className="space-y-1">
-                   <p className="text-[9px] font-mono text-on-surface-variant/50 uppercase tracking-[0.3em] font-black">Registry ID</p>
+                   <p className="text-[8px] font-mono text-on-surface-variant/50 uppercase tracking-[0.2em] font-black italic">Registry ID</p>
                    <h3 className="text-xs font-black text-white uppercase tracking-wider flex items-center gap-2 font-mono truncate">
                      {ch.channel_id || 'OPEN_PENDING'}
                    </h3>
                 </div>
                 <div className="flex items-center gap-2 opacity-50 hover:opacity-100 transition-opacity cursor-help">
-                   <Lock className="w-3 h-3 text-on-surface-variant" />
-                   <p className="text-[9px] font-mono text-on-surface-variant uppercase tracking-widest leading-none font-bold">Encrypted Protocol</p>
+                   <Lock className="w-2.5 h-2.5 text-on-surface-variant" />
+                   <p className="text-[8px] font-mono text-on-surface-variant uppercase tracking-widest leading-none font-bold">Encrypted Protocol</p>
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-8 mb-10 relative z-10">
-                <div className="space-y-2">
-                  <p className="text-[9px] font-mono text-on-surface-variant/50 uppercase tracking-[0.2em] leading-none font-black">Capacity</p>
-                  <p className="text-xl font-black text-white italic tracking-tighter leading-none group-hover:text-secondary transition-colors">
+              <div className="grid grid-cols-2 gap-8 mb-6 relative z-10">
+                <div className="space-y-1.5">
+                  <p className="text-[8px] font-mono text-on-surface-variant/50 uppercase tracking-[0.2em] font-black italic">Capacity</p>
+                  <p className="text-lg font-black text-white italic tracking-tighter leading-none group-hover:text-secondary transition-colors">
                     {formatSmart(ch.capacity)}
                   </p>
                 </div>
-                <div className="space-y-2">
-                  <p className="text-[9px] font-mono text-on-surface-variant/50 uppercase tracking-[0.2em] leading-none font-black">Flow Logic</p>
-                  <div className="flex items-center gap-2 text-[10px] font-black text-white uppercase italic tracking-widest">
+                <div className="space-y-1.5">
+                  <p className="text-[8px] font-mono text-on-surface-variant/50 uppercase tracking-[0.2em] font-black italic">Flow Logic</p>
+                  <div className="flex items-center gap-2 text-[9px] font-black text-white uppercase italic tracking-widest">
                     <Activity className="w-3 h-3 text-secondary animate-pulse" />
                     Bilateral
                   </div>
                 </div>
               </div>
 
-              <div className="pt-8 flex items-center justify-between relative z-10">
-                <div className="flex flex-col gap-2">
-                  <p className="text-[9px] font-mono text-on-surface-variant/40 uppercase tracking-[0.3em] leading-none font-black">Counterparty</p>
-                  <p className="text-[10px] font-mono text-white/40 group-hover:text-white/70 transition-colors truncate max-w-[140px] italic font-bold">
+              <div className="pt-6 flex items-center justify-between border-t border-white/5 relative z-10">
+                <div className="flex flex-col gap-1.5">
+                  <p className="text-[8px] font-mono text-on-surface-variant/40 uppercase tracking-[0.2em] font-black italic">Counterparty</p>
+                  <p className="text-[9px] font-mono text-white/40 group-hover:text-white/70 transition-colors truncate max-w-[130px] italic font-bold">
                     {ch.peer_id?.substring(0, 16)}...
                   </p>
                 </div>
@@ -134,7 +134,7 @@ export const JITChannels: React.FC = () => {
                       href={`https://lokichain.info/tx/${ch.txid}`}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="p-3 text-on-surface-variant hover:text-white bg-white/5 hover:bg-secondary/20 rounded-2xl border border-white/5 transition-all shadow-xl active:scale-90"
+                      className="p-3 text-on-surface-variant hover:text-white bg-white/5 hover:bg-secondary/20 rounded-2xl border border-white/5 transition-all shadow-xl active:scale-95"
                       title="View Transaction"
                     >
                       <ExternalLink className="w-4 h-4" />

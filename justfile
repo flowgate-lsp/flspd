@@ -54,6 +54,10 @@ setup-backend:
 setup-frontend:
     cd frontend && npm install
 
+# Start the frontend in development mode but connected to a production/remote backend
+frontend-dev-prod url:
+    cd frontend && VITE_PROXY_URL={{url}} npm run dev
+
 # Start the stack or a specific service
 up service="":
     {{COMPOSE}} up {{service}} -d

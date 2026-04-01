@@ -32,7 +32,8 @@ export const OrderDetail: React.FC<OrderDetailProps> = ({ orderId, onBack }) => 
   const [copied, setCopied] = useState<string | null>(null);
 
   const api = useMemo(() => {
-    return new DashboardAPI(window.location.origin, getAuthHeader);
+    const proxyUrl = (import.meta as any).env?.VITE_PROXY_URL;
+    return new DashboardAPI(window.location.origin, getAuthHeader, proxyUrl);
   }, [getAuthHeader]);
 
   useEffect(() => {

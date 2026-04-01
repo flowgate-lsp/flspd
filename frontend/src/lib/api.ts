@@ -1,15 +1,18 @@
 export class DashboardAPI {
   private baseUrl: string;
+  private authUrl: string;
   private getAuthHeader: (url: string, method: string) => Promise<string>;
 
-  constructor(baseUrl: string, getAuthHeader: (url: string, method: string) => Promise<string>) {
-    this.baseUrl = baseUrl;
+  constructor(baseUrl: string, getAuthHeader: (url: string, method: string) => Promise<string>, authUrl?: string) {
+    this.baseUrl = baseUrl.replace(/\/$/, '');
+    this.authUrl = (authUrl || baseUrl).replace(/\/$/, '');
     this.getAuthHeader = getAuthHeader;
   }
 
   async request(method: string, params: any = {}) {
     const url = `${this.baseUrl}/dashboard`;
-    const authHeader = await this.getAuthHeader(url, 'POST');
+    const authUrl = `${this.authUrl}/dashboard`;
+    const authHeader = await this.getAuthHeader(authUrl, 'POST');
 
     const response = await fetch(url, {
       method: 'POST',
