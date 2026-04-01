@@ -9,6 +9,7 @@ import { ResponsiveLayout } from './components/ResponsiveLayout'
 import { Login } from './pages/Login'
 import { Settings } from './pages/Settings'
 import { useAuth } from './hooks/useAuth'
+import { EventsProvider } from './contexts/EventsContext'
 
 import { motion, AnimatePresence } from 'framer-motion'
 
@@ -49,19 +50,21 @@ function App() {
   }
 
   return (
-    <ResponsiveLayout activePage={currentPage} onPageChange={setCurrentPage}>
-      <AnimatePresence mode="wait">
-        <motion.div
-           key={currentPage + (selectedOrderId || '')}
-           initial={{ opacity: 0, y: 10 }}
-           animate={{ opacity: 1, y: 0 }}
-           exit={{ opacity: 0, y: -10 }}
-           transition={{ duration: 0.3, ease: "easeOut" }}
-        >
-          {renderPage()}
-        </motion.div>
-      </AnimatePresence>
-    </ResponsiveLayout>
+    <EventsProvider>
+      <ResponsiveLayout activePage={currentPage} onPageChange={setCurrentPage}>
+        <AnimatePresence mode="wait">
+          <motion.div
+             key={currentPage + (selectedOrderId || '')}
+             initial={{ opacity: 0, y: 10 }}
+             animate={{ opacity: 1, y: 0 }}
+             exit={{ opacity: 0, y: -10 }}
+             transition={{ duration: 0.3, ease: "easeOut" }}
+          >
+            {renderPage()}
+          </motion.div>
+        </AnimatePresence>
+      </ResponsiveLayout>
+    </EventsProvider>
   )
 }
 
