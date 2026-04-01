@@ -169,6 +169,40 @@ func (s *PostgresOpeningStore) GetLsps1Order(orderId string) (*common.Lsps1Order
 	return &order, nil
 }
 
+func (s *PostgresOpeningStore) ListLsps1Orders(limit, offset int) ([]*common.Lsps1Order, error) {
+	rows, err := s.pool.Query(context.Background(),
+		`SELECT order_id, peer_id, lsp_balance_loki, client_balance_loki, 
+			funding_confirms_within_blocks, required_channel_confirmations, 
+			channel_expiry_blocks, token, announce_channel, created_at, 
+			order_state, payment_state, payment_invoice, funding_txid, funding_outpoint,
+			COALESCE(refund_onchain_address, ''), COALESCE(order_total_loki, 0), COALESCE(fee_total_loki, 0)
+		FROM lsps1.orders 
+		ORDER BY created_at DESC 
+		LIMIT $1 OFFSET $2`, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var orders []*common.Lsps1Order
+	for rows.Next() {
+		var o common.Lsps1Order
+		err := rows.Scan(
+			&o.OrderId, &o.PeerId, &o.LspBalanceLoki, &o.ClientBalanceLoki,
+			&o.FundingConfirmsWithinBlocks, &o.RequiredChannelConfirmations,
+			&o.ChannelExpiryBlocks, &o.Token, &o.AnnounceChannel, &o.CreatedAt,
+			&o.OrderState, &o.PaymentState, &o.PaymentInvoice, &o.FundingTxid, &o.FundingOutpoint,
+			&o.RefundOnchainAddress, &o.OrderTotalLoki, &o.FeeTotalLoki,
+		)
+		if err != nil {
+			return nil, err
+		}
+		orders = append(orders, &o)
+	}
+	return orders, nil
+}
+
+
 func (s *PostgresOpeningStore) RegisterLsps5Webhook(webhook *common.Lsps5Webhook) error {
 	_, err := s.pool.Exec(context.Background(),
 		`INSERT INTO lsps5.webhooks (client_node_id, app_name, url, transport, created_at) 

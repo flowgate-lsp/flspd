@@ -80,6 +80,77 @@ func (s *PostgresOpeningStore) GetPaidLsps1Order(clientNodeId string) (*common.L
 	return &order, nil
 }
 
+// GetPaidLsps1Orders finds all PAID orders for a client that haven't been fulfilled yet,
+// ordered by created_at ASC (FIFO).
+func (s *PostgresOpeningStore) GetPaidLsps1Orders(clientNodeId string) ([]*common.Lsps1Order, error) {
+	rows, err := s.pool.Query(context.Background(),
+		`SELECT order_id, peer_id, lsp_balance_loki, client_balance_loki, 
+			funding_confirms_within_blocks, required_channel_confirmations, 
+			channel_expiry_blocks, token, announce_channel, created_at, 
+			order_state, payment_state, payment_invoice, funding_txid, funding_outpoint,
+			COALESCE(refund_onchain_address, ''), COALESCE(order_total_loki, 0), COALESCE(fee_total_loki, 0)
+		 FROM lsps1.orders 
+		 WHERE peer_id=$1 AND order_state='PAID' AND (funding_txid IS NULL OR funding_txid = '')
+		 ORDER BY created_at ASC`, clientNodeId)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var orders []*common.Lsps1Order
+	for rows.Next() {
+		var order common.Lsps1Order
+		err := rows.Scan(
+			&order.OrderId, &order.PeerId, &order.LspBalanceLoki, &order.ClientBalanceLoki,
+			&order.FundingConfirmsWithinBlocks, &order.RequiredChannelConfirmations,
+			&order.ChannelExpiryBlocks, &order.Token, &order.AnnounceChannel, &order.CreatedAt,
+			&order.OrderState, &order.PaymentState, &order.PaymentInvoice, &order.FundingTxid, &order.FundingOutpoint,
+			&order.RefundOnchainAddress, &order.OrderTotalLoki, &order.FeeTotalLoki,
+		)
+		if err != nil {
+			return nil, err
+		}
+		orders = append(orders, &order)
+	}
+	return orders, rows.Err()
+}
+
+// GetAllPaidLsps1Orders finds all PAID orders across all peers that haven't been fulfilled yet.
+// Used for startup recovery to retry orders that were stuck when flspd was down.
+func (s *PostgresOpeningStore) GetAllPaidLsps1Orders() ([]*common.Lsps1Order, error) {
+	rows, err := s.pool.Query(context.Background(),
+		`SELECT order_id, peer_id, lsp_balance_loki, client_balance_loki, 
+			funding_confirms_within_blocks, required_channel_confirmations, 
+			channel_expiry_blocks, token, announce_channel, created_at, 
+			order_state, payment_state, payment_invoice, funding_txid, funding_outpoint,
+			COALESCE(refund_onchain_address, ''), COALESCE(order_total_loki, 0), COALESCE(fee_total_loki, 0)
+		 FROM lsps1.orders 
+		 WHERE order_state='PAID' AND (funding_txid IS NULL OR funding_txid = '')
+		 ORDER BY created_at ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var orders []*common.Lsps1Order
+	for rows.Next() {
+		var order common.Lsps1Order
+		err := rows.Scan(
+			&order.OrderId, &order.PeerId, &order.LspBalanceLoki, &order.ClientBalanceLoki,
+			&order.FundingConfirmsWithinBlocks, &order.RequiredChannelConfirmations,
+			&order.ChannelExpiryBlocks, &order.Token, &order.AnnounceChannel, &order.CreatedAt,
+			&order.OrderState, &order.PaymentState, &order.PaymentInvoice, &order.FundingTxid, &order.FundingOutpoint,
+			&order.RefundOnchainAddress, &order.OrderTotalLoki, &order.FeeTotalLoki,
+		)
+		if err != nil {
+			return nil, err
+		}
+		orders = append(orders, &order)
+	}
+	return orders, rows.Err()
+}
+
+
 // UpdateLsps1OrderFunding updates the funding_txid and funding_outpoint of an LSPS1 order
 func (s *PostgresOpeningStore) UpdateLsps1OrderFunding(orderId string, fundingTxid string, fundingOutpoint int) error {
 	result, err := s.pool.Exec(context.Background(),

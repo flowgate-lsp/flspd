@@ -188,10 +188,26 @@ func (m *MockOpeningStore) GetPaidLsps1Order(clientNodeId string) (*common.Lsps1
 	return args.Get(0).(*common.Lsps1Order), args.Error(1)
 }
 
+func (m *MockOpeningStore) GetPaidLsps1Orders(clientNodeId string) ([]*common.Lsps1Order, error) {
+	args := m.Called(clientNodeId)
+	return args.Get(0).([]*common.Lsps1Order), args.Error(1)
+}
+
+func (m *MockOpeningStore) GetAllPaidLsps1Orders() ([]*common.Lsps1Order, error) {
+	args := m.Called()
+	return args.Get(0).([]*common.Lsps1Order), args.Error(1)
+}
+
+func (m *MockOpeningStore) ListLsps1Orders(limit, offset int) ([]*common.Lsps1Order, error) {
+	args := m.Called(limit, offset)
+	return args.Get(0).([]*common.Lsps1Order), args.Error(1)
+}
+
 func (m *MockOpeningStore) UpdateLsps1OrderFunding(orderId string, fundingTxid string, fundingOutpoint int) error {
 	args := m.Called(orderId, fundingTxid, fundingOutpoint)
 	return args.Error(0)
 }
+
 
 func (m *MockOpeningStore) GetFeeParamsMenu(token string, privateKey *btcec.PrivateKey) ([]*common.OpeningFeeParams, error) {
 	args := m.Called(token, privateKey)
@@ -483,6 +499,7 @@ func TestGracefulShutdown(t *testing.T) {
 	errChan := make(chan error, 1)
 
 	mockClient.On("SubscribeInvoices").Return((<-chan *lightning.InvoiceUpdate)(invoiceChan), (<-chan error)(errChan), nil)
+	mockStore.On("GetAllPaidLsps1Orders").Return([]*common.Lsps1Order{}, nil)
 
 	historyStore := new(MockHistoryStore)
 	feeEstimator := new(MockFeeEstimator)
@@ -492,6 +509,7 @@ func TestGracefulShutdown(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	err := svc.Start(ctx)
+
 	assert.NoError(t, err)
 
 	// Let it run briefly
@@ -506,3 +524,64 @@ func TestGracefulShutdown(t *testing.T) {
 
 	mockClient.AssertExpectations(t)
 }
+
+// TestLsps1SettlementService_StartupRecovery tests that PAID but unfulfilled orders are processed on startup
+func TestLsps1SettlementService_StartupRecovery(t *testing.T) {
+	mockClient := new(MockLightningClient)
+	mockStore := new(MockOpeningStore)
+	historyStore := new(MockHistoryStore)
+	feeEstimator := new(MockFeeEstimator)
+	mockNotification := new(MockNotificationService)
+	conf := &config.NodeConfig{}
+
+	peerPubkey := "02677063d89856f4d04be859e9a4d3393165b6f3cd78641bc3c4ef9ca2fde37f"
+	peerIdBytes, _ := hex.DecodeString(peerPubkey)
+
+	staleOrder := &common.Lsps1Order{
+		OrderId:           "stale-order-001",
+		PeerId:            peerPubkey,
+		OrderState:        "PAID",
+		PaymentState:      "PAID",
+		ClientBalanceLoki: 1000000,
+		LspBalanceLoki:    5000000,
+	}
+
+	// 1. Return the stale order during recovery check
+	mockStore.On("GetAllPaidLsps1Orders").Return([]*common.Lsps1Order{staleOrder}, nil)
+
+	// 2. Mock the channel opening process
+	mockClient.On("IsConnected", peerIdBytes).Return(true, nil)
+	feeEst := &chain.FeeEstimation{LokiPerVByte: func() *float64 { f := 1.0; return &f }()}
+	feeEstimator.On("EstimateFeeRate", mock.Anything, chain.FeeStrategyEconomy).Return(feeEst, nil)
+
+	chanPoint := &wire.OutPoint{
+		Hash:  chainhash.Hash{0xde, 0xad, 0xbe, 0xef},
+		Index: 0,
+	}
+	mockClient.On("OpenChannel", mock.Anything).Return(chanPoint, nil)
+	mockStore.On("UpdateLsps1OrderFunding", "stale-order-001", chanPoint.Hash.String(), 0).Return(nil)
+	mockStore.On("UpdateLsps1OrderState", "stale-order-001", "COMPLETED", "PAID").Return(nil)
+	mockNotification.On("NotifyOrderStateChanged", peerPubkey, "stale-order-001", "COMPLETED", chanPoint.String(), "").Return(true, nil)
+
+	invoiceChan := make(chan *lightning.InvoiceUpdate, 1)
+	errChan := make(chan error, 1)
+
+	mockClient.On("SubscribeInvoices").Return((<-chan *lightning.InvoiceUpdate)(invoiceChan), (<-chan error)(errChan), nil)
+
+	svc := NewLsps1SettlementService(mockClient, mockStore, historyStore, conf, feeEstimator, chain.FeeStrategyEconomy, mockNotification)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	err := svc.Start(ctx)
+	assert.NoError(t, err)
+
+	// Wait for startup recovery goroutine
+	time.Sleep(200 * time.Millisecond)
+
+	svc.Stop()
+
+	mockStore.AssertCalled(t, "GetAllPaidLsps1Orders")
+	mockStore.AssertCalled(t, "UpdateLsps1OrderState", "stale-order-001", "COMPLETED", "PAID")
+	mockNotification.AssertExpectations(t)
+}
+

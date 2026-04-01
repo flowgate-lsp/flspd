@@ -67,7 +67,11 @@ func (s *Lsps1SettlementService) Start(ctx context.Context) error {
 			Str("action", string(common.LogActionSuccess)).
 			Msg("LSPS1 Settlement: Service started, monitoring invoices")
 
+		// Recover stuck orders in a separate goroutine to avoid blocking Start()
+		go s.recoverStuckOrders()
+
 		for {
+
 			select {
 			case <-s.ctx.Done():
 				log.Info().
@@ -282,3 +286,33 @@ func (s *Lsps1SettlementService) openChannelForOrder(order *common.Lsps1Order) {
 		go s.notificationService.NotifyOrderStateChanged(order.PeerId, order.OrderId, string(Lsps1OrderStateCompleted), channelPoint.String(), "")
 	}
 }
+
+// recoverStuckOrders finds and retries orders that were PAID but never fulfilled
+// (e.g. because flspd crashed before opening the channel).
+func (s *Lsps1SettlementService) recoverStuckOrders() {
+	log.Info().
+		Str("component", string(common.LogComponentSettlement)).
+		Msg("LSPS1 Settlement: Checking for stuck PAID orders to recover...")
+
+	orders, err := s.openingStore.GetAllPaidLsps1Orders()
+	if err != nil {
+		log.Error().Err(err).Msg("LSPS1 Settlement: Failed to retrieve stuck orders")
+		return
+	}
+
+	if len(orders) == 0 {
+		log.Debug().Msg("LSPS1 Settlement: No stuck orders found")
+		return
+	}
+
+	log.Info().
+		Str("component", string(common.LogComponentSettlement)).
+		Int("count", len(orders)).
+		Msgf("LSPS1 Settlement: Found %d stuck orders, recovering...", len(orders))
+
+	for _, order := range orders {
+		// Process each order sequentially to avoid overwhelming LND on startup
+		s.openChannelForOrder(order)
+	}
+}
+
