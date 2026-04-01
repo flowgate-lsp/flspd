@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { GlassCard } from '../components/GlassCard';
-import { ArrowLeft, Clock, Zap, Hash, ExternalLink, Copy, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
+import { ArrowLeft, Clock, Zap, Hash, ExternalLink, Copy, CheckCircle, AlertCircle, Loader2, Activity, CornerUpRight } from 'lucide-react';
 import { formatSmart, formatLoki, cn } from '../lib/utils';
 import { useAuth } from '../hooks/useAuth';
 import { DashboardAPI } from '../lib/api';
@@ -18,10 +18,10 @@ const timelineIcons: Record<string, typeof CheckCircle> = {
 };
 
 const timelineColors: Record<string, string> = {
-  ORDER_CREATED: 'text-on-surface-variant border-on-surface-variant/20 bg-on-surface-variant/5',
-  PAYMENT_RECEIVED: 'text-primary border-primary/20 bg-primary/5',
-  CHANNEL_FUNDED: 'text-tertiary border-tertiary/20 bg-tertiary/5',
-  ORDER_COMPLETED: 'text-secondary border-secondary/20 bg-secondary/5',
+  ORDER_CREATED: 'text-on-surface-variant border-on-surface-variant/20 bg-on-surface-variant/5 shadow-on-surface-variant/5',
+  PAYMENT_RECEIVED: 'text-primary border-primary/20 bg-primary/5 shadow-primary/5',
+  CHANNEL_FUNDED: 'text-tertiary border-tertiary/20 bg-tertiary/5 shadow-tertiary/5',
+  ORDER_COMPLETED: 'text-secondary border-secondary/20 bg-secondary/5 shadow-secondary/5',
 };
 
 export const OrderDetail: React.FC<OrderDetailProps> = ({ orderId, onBack }) => {
@@ -58,20 +58,26 @@ export const OrderDetail: React.FC<OrderDetailProps> = ({ orderId, onBack }) => 
   if (loading) {
     return (
       <div className="h-[60vh] flex items-center justify-center">
-        <Loader2 className="w-8 h-8 text-primary animate-spin" />
+        <div className="flex flex-col items-center gap-6">
+          <Loader2 className="w-12 h-12 text-primary animate-spin" />
+          <p className="text-[10px] font-mono text-on-surface-variant uppercase tracking-[0.4em] font-black animate-pulse italic">Reconstructing Order Context...</p>
+        </div>
       </div>
     );
   }
 
   if (error || !data) {
     return (
-      <div className="p-4 md:p-10 max-w-5xl mx-auto">
-        <button onClick={onBack} className="flex items-center gap-2 text-on-surface-variant hover:text-white text-xs font-mono uppercase tracking-widest mb-8 transition-colors">
-          <ArrowLeft className="w-4 h-4" /> Back to Matrix
+      <div className="p-6 md:p-10 max-w-5xl mx-auto space-y-12">
+        <button onClick={onBack} className="flex items-center gap-3 text-on-surface-variant hover:text-white text-[11px] font-black uppercase tracking-[0.2em] mb-8 transition-all group italic">
+           <ArrowLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" /> Back to Matrix
         </button>
-        <div className="h-[40vh] flex flex-col items-center justify-center gap-4">
-          <AlertCircle className="w-12 h-12 text-error" />
-          <p className="text-on-surface-variant font-mono text-xs">{error || 'Order not found'}</p>
+        <div className="h-[40vh] flex flex-col items-center justify-center gap-6 text-center">
+          <div className="p-4 rounded-full bg-error/5 border border-error/20">
+            <AlertCircle className="w-12 h-12 text-error animate-pulse" />
+          </div>
+          <h2 className="text-2xl font-black text-white uppercase italic tracking-tighter">Order Resolution Failed</h2>
+          <p className="text-on-surface-variant font-mono text-[10px] uppercase tracking-widest max-w-sm opacity-60 italic">{error || 'Order identifier invalid or expired'}</p>
         </div>
       </div>
     );
@@ -80,59 +86,72 @@ export const OrderDetail: React.FC<OrderDetailProps> = ({ orderId, onBack }) => 
   const order = data.order;
   const timeline = data.timeline || [];
 
-  const stateColor = order.state === 'COMPLETED' ? 'text-secondary' :
-                     order.state === 'FAILED' ? 'text-error' : 'text-primary';
+  const stateColor = order.state === 'COMPLETED' ? 'text-secondary border-secondary/20 bg-secondary/5' :
+                     order.state === 'FAILED' ? 'text-error border-error/20 bg-error/5' : 
+                     'text-primary border-primary/20 bg-primary/5';
 
   return (
-    <div className="p-4 md:p-10 max-w-5xl mx-auto space-y-8 animate-in fade-in duration-700">
+    <div className="p-6 md:p-10 max-w-6xl mx-auto space-y-12 animate-in fade-in slide-in-from-bottom-8 duration-1000">
       {/* Back + Header */}
-      <div>
-        <button onClick={onBack} className="flex items-center gap-2 text-on-surface-variant hover:text-white text-xs font-mono uppercase tracking-widest mb-6 transition-colors group">
-          <ArrowLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" /> Back to Matrix
+      <div className="space-y-4">
+        <button onClick={onBack} className="flex items-center gap-3 text-on-surface-variant hover:text-white text-[11px] font-black uppercase tracking-[0.2em] transition-all group italic">
+          <ArrowLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" /> Retruncate Matrix
         </button>
-        <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
-          <div>
-            <h1 className="text-3xl md:text-4xl font-bold tracking-tighter text-white uppercase italic leading-none mb-2">
+        <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-8 pb-8 border-b border-white/5">
+          <div className="space-y-4">
+            <h1 className="text-4xl md:text-5xl font-black tracking-tighter text-white uppercase italic leading-none">
               Order Inspector
             </h1>
-            <p className="text-on-surface-variant font-mono text-xs tracking-widest uppercase flex items-center gap-2">
-              <span className="text-[10px] font-mono font-bold text-primary border border-primary/20 bg-primary/5 px-2 py-0.5 rounded italic">LSPS1</span>
-              {orderId}
-            </p>
+            <div className="flex items-center flex-wrap gap-4">
+              <span className="text-[10px] font-mono font-black italic text-primary border border-primary/30 bg-primary/10 px-3 py-1 rounded-xl uppercase tracking-widest">
+                LSPS1 Protocol
+              </span>
+              <span className="text-[11px] font-mono text-white/50 tracking-tighter font-bold select-all flex items-center gap-2">
+                <Hash className="w-3.5 h-3.5" /> {orderId}
+              </span>
+            </div>
           </div>
-          <span className={cn("text-sm font-mono font-bold uppercase tracking-widest", stateColor)}>
-            {order.state}
-          </span>
+          
+          <div className={cn("px-6 py-3 rounded-2xl border text-xs font-black italic uppercase tracking-[0.2em] shadow-xl flex items-center gap-4 transition-all duration-700", stateColor)}>
+             <div className="w-2 h-2 rounded-full bg-current animate-pulse shadow-[0_0_10px_currentColor]" />
+             {order.state}
+          </div>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Main Details */}
-        <GlassCard className="lg:col-span-2 space-y-6">
-          <h2 className="text-sm font-bold text-white uppercase tracking-widest">Order Parameters</h2>
-
-          <div className="grid grid-cols-2 gap-6">
-            <DetailRow label="LSP Balance" value={formatSmart(order.lsp_balance_loki)} />
-            <DetailRow label="Client Balance" value={formatSmart(order.client_balance_loki)} />
-            <DetailRow label="Order Total" value={formatSmart(order.amount)} highlight />
-            <DetailRow label="Fee Total" value={formatLoki(order.fee)} />
-            <DetailRow label="Funding Confirms" value={`${order.funding_confirms_within_blocks} blocks`} />
-            <DetailRow label="Channel Expiry" value={`${order.channel_expiry_blocks} blocks`} />
-            <DetailRow label="Announce Channel" value={order.announce_channel ? 'Yes' : 'No'} />
-            <DetailRow label="Payment State" value={order.payment_state} />
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-10 items-start">
+        {/* Main Details Panel */}
+        <GlassCard className="lg:col-span-2 p-10 space-y-12 shadow-2xl relative overflow-hidden group">
+          <div className="absolute top-0 right-0 w-64 h-64 bg-primary/5 blur-[120px] rounded-full opacity-30 group-hover:opacity-60 transition-opacity" />
+          
+          <div className="flex items-center gap-3 border-b border-white/5 pb-6">
+            <Activity className="w-4 h-4 text-primary" />
+            <h2 className="text-sm font-black text-white uppercase tracking-[0.2em]">Operational Parameters</h2>
           </div>
 
-          {/* Copyable Fields */}
-          <div className="space-y-3 pt-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-y-10 gap-x-12 relative z-10">
+            <DetailRow label="Inbound Liquidity" value={formatSmart(order.lsp_balance_loki)} icon={CornerUpRight} color="text-secondary" />
+            <DetailRow label="Client Reserve" value={formatSmart(order.client_balance_loki)} />
+            <DetailRow label="Settlement Total" value={formatSmart(order.amount)} highlight />
+            <DetailRow label="Network Fee" value={formatLoki(order.fee)} />
+            <DetailRow label="Inbound Window" value={`${order.funding_confirms_within_blocks} Blocks`} />
+            <DetailRow label="Channel TTL" value={`${order.channel_expiry_blocks} Blocks`} />
+            <DetailRow label="Public Announce" value={order.announce_channel ? 'ENABLED' : 'DISABLED'} color={order.announce_channel ? 'text-secondary' : 'text-error'} />
+            <DetailRow label="Payment State" value={order.payment_state} color="text-tertiary" />
+          </div>
+
+          {/* Persistent Cryptographic Identifiers */}
+          <div className="space-y-6 pt-10 border-t border-white/5 relative z-10">
+            <h3 className="text-[10px] font-black text-on-surface-variant uppercase tracking-[0.4em] mb-4">Cryptographic Identity</h3>
             <CopyableField
-              label="Peer ID"
+              label="Peer Pubkey"
               value={order.peer_id}
               copied={copied}
               onCopy={copyToClipboard}
             />
             {order.funding_txid && (
               <CopyableField
-                label="Funding TX"
+                label="Funding Transmission Hash"
                 value={order.funding_txid}
                 copied={copied}
                 onCopy={copyToClipboard}
@@ -141,7 +160,7 @@ export const OrderDetail: React.FC<OrderDetailProps> = ({ orderId, onBack }) => 
             )}
             {order.refund_onchain_address && (
               <CopyableField
-                label="Refund Address"
+                label="Refund Settlement Address"
                 value={order.refund_onchain_address}
                 copied={copied}
                 onCopy={copyToClipboard}
@@ -150,54 +169,67 @@ export const OrderDetail: React.FC<OrderDetailProps> = ({ orderId, onBack }) => 
           </div>
         </GlassCard>
 
-        {/* Timeline */}
-        <GlassCard className="lg:col-span-1">
-          <h2 className="text-sm font-bold text-white uppercase tracking-widest mb-6">Timeline</h2>
-          <div className="space-y-0">
+        {/* Temporal Sequence / Timeline */}
+        <GlassCard className="lg:col-span-1 p-10 space-y-10 h-full flex flex-col shadow-2xl">
+          <div className="flex items-center justify-between border-b border-white/5 pb-6">
+            <h2 className="text-sm font-black text-white uppercase tracking-[0.2em]">Sequence</h2>
+            <Clock className="w-4 h-4 text-on-surface-variant/30" />
+          </div>
+          
+          <div className="space-y-0 relative flex-1">
+            {/* Timeline Line */}
+            <div className="absolute left-[19px] top-4 bottom-4 w-[2px] bg-white/5 shadow-inner" />
+            
             {timeline.map((event: any, i: number) => {
               const Icon = timelineIcons[event.event] || Clock;
-              const colorClass = timelineColors[event.event] || 'text-on-surface-variant';
+              const colorClass = timelineColors[event.event] || 'text-on-surface-variant border-on-surface-variant/20 bg-on-surface-variant/5';
               const isLast = i === timeline.length - 1;
 
-              // Detective for Funding TX in detail
+              // Extract Funding TX link if present
               const txMatch = event.detail?.match(/Funding TX: ([a-f0-9]{64})/);
 
               return (
-                <div key={i} className="flex gap-4">
-                  {/* Vertical line + dot */}
-                  <div className="flex flex-col items-center">
-                    <div className={cn("w-8 h-8 rounded-full border flex items-center justify-center shrink-0", colorClass)}>
+                <div key={i} className="flex gap-8 relative group">
+                  {/* Icon Node */}
+                  <div className="flex flex-col items-center relative z-10">
+                    <div className={cn("w-10 h-10 rounded-2xl border flex items-center justify-center shrink-0 transition-all duration-500 shadow-lg group-hover:scale-110", colorClass)}>
                       <Icon className="w-4 h-4" />
                     </div>
-                    {!isLast && <div className="w-px h-full min-h-[40px] bg-white/10" />}
                   </div>
-                  {/* Content */}
-                  <div className="pb-6">
-                    <p className="text-xs font-mono font-bold text-white uppercase tracking-wider">{event.event.replace(/_/g, ' ')}</p>
+                  
+                  {/* Event Detail */}
+                  <div className={cn("pb-10 transition-all duration-500", isLast ? "pb-0" : "")}>
+                    <p className="text-[11px] font-black text-white uppercase tracking-widest italic group-hover:text-primary transition-colors leading-none mb-2">
+                       {event.event.replace(/_/g, ' ')}
+                    </p>
                     
                     {txMatch ? (
-                      <div className="mt-1 flex items-center gap-1">
-                        <span className="text-[10px] font-mono text-on-surface-variant">Funding TX: </span>
+                      <div className="bg-black/40 border border-white/5 p-2 rounded-lg mt-2 inline-flex items-center gap-2 group/txLink hover:bg-white/10 transition-all">
+                        <span className="text-[9px] font-mono text-on-surface-variant uppercase font-black tracking-tight">TX: </span>
                         <a 
                           href={`https://lokichain.info/tx/${txMatch[1]}`}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="text-[10px] font-mono text-primary hover:text-primary/80 underline decoration-primary/30 underline-offset-2 transition-colors"
+                          className="text-[9px] font-mono text-primary font-black underline decoration-primary/20 hover:decoration-primary underline-offset-2 transition-all italic"
                         >
-                          {middleTrim(txMatch[1], 10)}
+                          {middleTrim(txMatch[1], 4)}
                         </a>
                       </div>
                     ) : (
-                      <p className="text-[10px] font-mono text-on-surface-variant mt-1">{event.detail}</p>
+                      <p className="text-[10px] font-mono text-on-surface-variant/60 mt-1 leading-relaxed max-w-[200px]">{event.detail}</p>
                     )}
                     
-                    <p className="text-[10px] font-mono text-on-surface-variant/50 mt-0.5 italic">
-                      {new Date(event.timestamp).toLocaleString()}
+                    <p className="text-[9px] font-mono text-on-surface-variant/30 mt-2 italic font-black uppercase tracking-widest">
+                      {new Date(event.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                     </p>
                   </div>
                 </div>
               );
             })}
+          </div>
+          
+          <div className="pt-8 mt-auto border-t border-white/5">
+             <p className="text-[9px] font-mono text-on-surface-variant/20 uppercase font-black text-center tracking-[0.2em]">Verified Secure Chain Record</p>
           </div>
         </GlassCard>
       </div>
@@ -205,12 +237,15 @@ export const OrderDetail: React.FC<OrderDetailProps> = ({ orderId, onBack }) => 
   );
 };
 
-/* Sub-components */
+/* Sub-components & Polish */
 
-const DetailRow: React.FC<{ label: string; value: string; highlight?: boolean }> = ({ label, value, highlight }) => (
-  <div>
-    <p className="text-[10px] font-mono text-on-surface-variant uppercase tracking-widest mb-1">{label}</p>
-    <p className={cn("text-sm font-bold", highlight ? "text-primary" : "text-white")}>{value}</p>
+const DetailRow: React.FC<{ label: string; value: string; highlight?: boolean; icon?: any; color?: string }> = ({ label, value, highlight, icon: Icon, color }) => (
+  <div className="group/row">
+    <div className="flex items-center gap-2 mb-2">
+      {Icon && <Icon className={cn("w-3 h-3 opacity-30 group-hover/row:opacity-100 transition-opacity", color || 'text-primary')} />}
+      <p className="text-[9px] font-mono text-on-surface-variant uppercase tracking-[0.2em] font-black italic">{label}</p>
+    </div>
+    <p className={cn("text-lg md:text-xl font-black italic tracking-tighter leading-none transition-all duration-300 group-hover/row:translate-x-1", highlight ? "text-primary drop-shadow-[0_0_10px_rgba(0,186,255,0.2)]" : color || "text-white")}>{value}</p>
   </div>
 );
 
@@ -221,28 +256,30 @@ const CopyableField: React.FC<{
   onCopy: (text: string, label: string) => void;
   explorerUrl?: string;
 }> = ({ label, value, copied, onCopy, explorerUrl }) => (
-  <div>
-    <p className="text-[10px] font-mono text-on-surface-variant uppercase tracking-widest mb-1">{label}</p>
-    <div className="flex items-center gap-2 p-3 rounded-xl bg-black/30 border border-white/5 group">
-      <code className="text-xs font-mono text-white/80 truncate flex-1">{value}</code>
-      <button
-        onClick={() => onCopy(value, label)}
-        className="p-1.5 text-on-surface-variant hover:text-white rounded-lg hover:bg-white/5 transition-all shrink-0"
-        title="Copy"
-      >
-        {copied === label ? <CheckCircle className="w-3.5 h-3.5 text-secondary" /> : <Copy className="w-3.5 h-3.5" />}
-      </button>
-      {explorerUrl && (
-        <a
-          href={explorerUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="p-1.5 text-on-surface-variant hover:text-primary rounded-lg hover:bg-white/5 transition-all shrink-0"
-          title="View in Explorer"
+  <div className="group/field">
+    <p className="text-[9px] font-mono text-on-surface-variant/40 uppercase tracking-[0.3em] mb-2 font-black italic leading-none">{label}</p>
+    <div className="flex items-center gap-3 p-4 rounded-2xl bg-black/40 border border-white/10 group-focus-within:border-primary/40 transition-all duration-500 hover:bg-white/[0.03]">
+      <code className="text-[11px] font-mono text-white/70 truncate flex-1 font-bold group-hover/field:text-white transition-colors">{value}</code>
+      <div className="flex items-center gap-2 border-l border-white/10 pl-3">
+        <button
+          onClick={() => onCopy(value, label)}
+          className="p-2 text-on-surface-variant hover:text-white rounded-xl hover:bg-white/10 transition-all shrink-0 active:scale-90"
+          title="Copy"
         >
-          <ExternalLink className="w-3.5 h-3.5" />
-        </a>
-      )}
+          {copied === label ? <CheckCircle className="w-3.5 h-3.5 text-secondary" /> : <Copy className="w-3.5 h-3.5" />}
+        </button>
+        {explorerUrl && (
+          <a
+            href={explorerUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="p-2 text-on-surface-variant hover:text-primary rounded-xl hover:bg-white/10 transition-all shrink-0 active:scale-90"
+            title="View in Explorer"
+          >
+            <ExternalLink className="w-3.5 h-3.5" />
+          </a>
+        )}
+      </div>
     </div>
   </div>
 );

@@ -1,6 +1,7 @@
 package dashboard
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -14,8 +15,18 @@ import (
 	"github.com/flowgate-lsp/flspd/common"
 	"github.com/flowgate-lsp/flspd/config"
 	"github.com/flowgate-lsp/flspd/history"
+	"github.com/flowgate-lsp/flspd/lightning"
 	"github.com/flowgate-lsp/flspd/lsps"
 	"github.com/rs/zerolog/log"
+)
+
+const (
+	// Dashboard limits and scoring
+	radarFullMark        = 150
+	defaultListLimit     = 100
+	analyticsListLimit   = 2000
+	summaryListLimit     = 1000
+	analyticsHistoryDays = 14
 )
 
 type DashboardService struct {
@@ -46,6 +57,10 @@ type SummaryResponse struct {
 	LiquidityBlocked uint64            `json:"liquidity_blocked"`
 	ActiveOrders     map[string]int    `json:"active_orders"`
 	NodeStatus       string            `json:"node_status"`
+	SyncHeight       uint32            `json:"sync_height"`
+	UptimeScore      float64           `json:"uptime_score"`
+	RevenueTrend     string            `json:"revenue_trend"`
+	VolumeTrend      string            `json:"volume_trend"`
 }
 
 func NewDashboardService(
@@ -216,18 +231,17 @@ func (s *DashboardService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (s *DashboardService) handleGetRadarData(req *lsps.JsonRpcRequest) *lsps.JsonRpcResponse {
 	// Calculate real metrics
-	reserved, _ := s.openingStore.GetReservedLiquidity()
-	totalCapacity := uint64(500000000) // 5 FLC total for this node
-
-	// 1. Liquidity Score (0-150)
-	liquidityScore := 150
+	totalCapacity, _, reserved := s.getLiquidityMetrics(context.Background())
+	
+	// 1. Liquidity Score (0-radarFullMark)
+	liquidityScore := radarFullMark
 	if totalCapacity > 0 {
 		usage := float64(reserved) / float64(totalCapacity)
-		liquidityScore = int(150 * (1.0 - usage))
+		liquidityScore = int(radarFullMark * (1.0 - usage))
 	}
 
-	// 2. Uptime Score (0-150)
-	uptimeScore := 150
+	// 2. Uptime Score (0-radarFullMark)
+	uptimeScore := radarFullMark
 	nodes := s.nodesService.GetNodes()
 	if len(nodes) > 0 {
 		peers, _ := nodes[0].Client.ListPeers()
@@ -238,97 +252,149 @@ func (s *DashboardService) handleGetRadarData(req *lsps.JsonRpcRequest) *lsps.Js
 			}
 		}
 		if len(peers) > 0 {
-			uptimeScore = int(150 * (float64(activeCount) / float64(len(peers))))
+			uptimeScore = int(radarFullMark * (float64(activeCount) / float64(len(peers))))
 		}
 	}
 
-	// 3. Success Score (0-150)
-	successScore := 130 // Base
-	orders, _ := s.openingStore.ListLsps1Orders(100, 0)
+	// 3. Success Score (0-radarFullMark)
+	// Base success score weighted by order outcomes
+	successScore := (radarFullMark * 85) / 100 // 85% base
+	orders, _ := s.openingStore.ListLsps1Orders(defaultListLimit, 0)
 	if len(orders) > 0 {
 		completed := 0
 		failed := 0
 		for _, o := range orders {
-			if o.OrderState == "COMPLETED" {
+			if o.OrderState == string(lsps.Lsps1OrderStateCompleted) {
 				completed++
-			} else if o.OrderState == "FAILED" {
+			} else if o.OrderState == string(lsps.Lsps1OrderStateFailed) {
 				failed++
 			}
 		}
 		if completed+failed > 0 {
-			successScore = int(150 * (float64(completed) / float64(completed+failed)))
+			successScore = int(radarFullMark * (float64(completed) / float64(completed+failed)))
 		}
 	}
 
 	data := []map[string]interface{}{
-		{"subject": "Liquidity", "A": liquidityScore, "fullMark": 150},
-		{"subject": "Uptime", "A": uptimeScore, "fullMark": 150},
-		{"subject": "Speed", "A": 120, "fullMark": 150},
-		{"subject": "Success", "A": successScore, "fullMark": 150},
-		{"subject": "Fees", "A": 110, "fullMark": 150},
-		{"subject": "Compliance", "A": 150, "fullMark": 150},
+		{"subject": "Liquidity", "A": liquidityScore, "fullMark": radarFullMark},
+		{"subject": "Uptime", "A": uptimeScore, "fullMark": radarFullMark},
+		{"subject": "Speed", "A": 120, "fullMark": radarFullMark}, // TODO: compute real speed
+		{"subject": "Success", "A": successScore, "fullMark": radarFullMark},
+		{"subject": "Fees", "A": 110, "fullMark": radarFullMark}, // TODO: compute fee score
+		{"subject": "Compliance", "A": radarFullMark, "fullMark": radarFullMark},
 	}
 	return lsps.NewJsonRpcResponse(req.Id, data)
 }
 
 func (s *DashboardService) handleGetAnalytics(req *lsps.JsonRpcRequest) *lsps.JsonRpcResponse {
-	orders, _ := s.openingStore.ListLsps1Orders(1000, 0)
+	// Fetch a generous amount of recent orders to compute stats
+	orders, _ := s.openingStore.ListLsps1Orders(analyticsListLimit, 0)
 
-	// 1. Order Volume by State
+	// 1. Order Volume by State & Core Stats
 	volume := map[string]int{
-		"CREATED":   0,
-		"PAID":      0,
-		"COMPLETED": 0,
-		"FAILED":    0,
+		string(lsps.Lsps1OrderStateCreated):   0,
+		string(lsps.Lsps1OrderStatePaid):      0,
+		string(lsps.Lsps1OrderStateCompleted): 0,
+		string(lsps.Lsps1OrderStateFailed):    0,
+		string(lsps.Lsps1OrderStateExpired):   0,
 	}
 	
-	// 2. 14-Day Revenue history
+	var totalRevenue int64 = 0
+	var completedCount int64 = 0
+	
+	// 2. History maps
 	revenueMap := make(map[string]int64)
+	countMap := make(map[string]int)
+	
 	now := time.Now()
-	for i := 0; i < 14; i++ {
+	for i := 0; i < analyticsHistoryDays; i++ {
 		day := now.AddDate(0, 0, -i).Format("2006-01-02")
 		revenueMap[day] = 0
+		countMap[day] = 0
 	}
 
 	for _, o := range orders {
 		volume[o.OrderState]++
 		
-		// If order was paid, add to revenue history
-		if o.OrderState == "COMPLETED" || o.OrderState == "PAID" {
-			day := o.CreatedAt.Format("2006-01-02")
+		day := o.CreatedAt.Format("2006-01-02")
+		
+		// Map revenue history (Completed or Paid)
+		if o.OrderState == string(lsps.Lsps1OrderStateCompleted) || o.OrderState == string(lsps.Lsps1OrderStatePaid) {
 			if _, ok := revenueMap[day]; ok {
 				revenueMap[day] += o.OrderTotalLoki
+			}
+			if o.OrderState == string(lsps.Lsps1OrderStateCompleted) {
+				totalRevenue += o.OrderTotalLoki
+				completedCount++
+			}
+		}
+
+		// Map total orders per day
+		if _, ok := countMap[day]; ok {
+			countMap[day]++
+		}
+	}
+
+	// Calculate final stats
+	successRate := 0.0
+	totalOrders := len(orders)
+	if totalOrders > 0 {
+		// Completed / (Completed + Failed) as a simple business success rate
+		relevant := volume[string(lsps.Lsps1OrderStateCompleted)] + volume[string(lsps.Lsps1OrderStateFailed)]
+		if relevant > 0 {
+			successRate = (float64(volume[string(lsps.Lsps1OrderStateCompleted)]) / float64(relevant)) * 100
+		}
+	}
+
+	avgOrderSize := int64(0)
+	if completedCount > 0 {
+		avgOrderSize = totalRevenue / completedCount
+	}
+
+	// Active peers count (real from nodesService)
+	activePeers := 0
+	nodes := s.nodesService.GetNodes()
+	if len(nodes) > 0 {
+		peers, _ := nodes[0].Client.ListPeers()
+		for _, p := range peers {
+			if p.Active {
+				activePeers++
 			}
 		}
 	}
 
-	// Format for frontend
-	orderVolume := []map[string]interface{}{
-		{"name": "CREATED", "value": volume["CREATED"], "color": "#807e80"},
-		{"name": "PAID", "value": volume["PAID"], "color": "#00baff"},
-		{"name": "COMPLETED", "value": volume["COMPLETED"], "color": "#00fd87"},
-		{"name": "FAILED", "value": volume["FAILED"], "color": "#ff3b30"},
-	}
-
-	revenueHistory := make([]map[string]interface{}, 0, 14)
+	// Format history for frontend
+	history := make([]map[string]interface{}, 0, 14)
 	for i := 13; i >= 0; i-- {
 		t := now.AddDate(0, 0, -i)
 		dayKey := t.Format("2006-01-02")
-		revenueHistory = append(revenueHistory, map[string]interface{}{
-			"day":     fmt.Sprintf("%dd", i),
+		history = append(history, map[string]interface{}{
+			"date":    dayKey,
+			"day":     t.Format("Mon"),
 			"revenue": revenueMap[dayKey],
+			"count":   countMap[dayKey],
+			"volume":  revenueMap[dayKey], // Volume often equals revenue for this dashboard
 		})
 	}
 
 	return lsps.NewJsonRpcResponse(req.Id, map[string]interface{}{
-		"order_volume":    orderVolume,
-		"revenue_history": revenueHistory,
+		"total_revenue":     totalRevenue,
+		"success_rate":      successRate,
+		"avg_order_size":    avgOrderSize,
+		"active_peers":      activePeers,
+		"revenue_history":   history,
+		"order_distribution": []map[string]interface{}{
+			{"name": "CREATED", "value": volume[string(lsps.Lsps1OrderStateCreated)], "color": "#94a3b8"},
+			{"name": "PAID", "value": volume[string(lsps.Lsps1OrderStatePaid)], "color": "#00baff"},
+			{"name": "COMPLETED", "value": volume[string(lsps.Lsps1OrderStateCompleted)], "color": "#00fd87"},
+			{"name": "FAILED", "value": volume[string(lsps.Lsps1OrderStateFailed)], "color": "#ff3b30"},
+			{"name": "EXPIRED", "value": volume[string(lsps.Lsps1OrderStateExpired)], "color": "#4a5568"},
+		},
 	})
 }
 
 func (s *DashboardService) handleGetSummary(req *lsps.JsonRpcRequest) *lsps.JsonRpcResponse {
 	// Fetch real data from stores/services
-	// For now, providing a mix of mock and real where easy
 	nodes := s.nodesService.GetNodes()
 	if len(nodes) == 0 {
 		return lsps.NewJsonRpcErrorResponse(req.Id, -32000, "No nodes configured", nil)
@@ -336,23 +402,94 @@ func (s *DashboardService) handleGetSummary(req *lsps.JsonRpcRequest) *lsps.Json
 	mainNode := nodes[0]
 
 	// Aggregate metrics
-	reserved, _ := s.openingStore.GetReservedLiquidity()
+	totalCapacity, free, reserved := s.getLiquidityMetrics(context.Background())
+	
+	// Real Metrics for Summary
+	var revenue24h int64 = 0
+	var revenuePrev24h int64 = 0
+	var volume24h int64 = 0
+	var volumePrev24h int64 = 0
+
+	orderStates := map[string]int{
+		string(lsps.Lsps1OrderStateCreated):   0,
+		string(lsps.Lsps1OrderStatePaid):      0,
+		string(lsps.Lsps1OrderStateCompleted): 0,
+		string(lsps.Lsps1OrderStateFailed):    0,
+		string(lsps.Lsps1OrderStateExpired):   0,
+	}
+
+	orders, _ := s.openingStore.ListLsps1Orders(summaryListLimit, 0)
+	now := time.Now()
+	last24h := now.Add(-24 * time.Hour)
+	prev24h := now.Add(-48 * time.Hour)
+	
+	for _, o := range orders {
+		if o.CreatedAt.After(last24h) {
+			if o.OrderState == string(lsps.Lsps1OrderStateCompleted) || o.OrderState == string(lsps.Lsps1OrderStatePaid) {
+				revenue24h += o.OrderTotalLoki
+				volume24h += o.LspBalanceLoki
+			}
+		} else if o.CreatedAt.After(prev24h) {
+			if o.OrderState == string(lsps.Lsps1OrderStateCompleted) || o.OrderState == string(lsps.Lsps1OrderStatePaid) {
+				revenuePrev24h += o.OrderTotalLoki
+				volumePrev24h += o.LspBalanceLoki
+			}
+		}
+		
+		// Count current "active" states (from recent 1000 orders)
+		if _, ok := orderStates[o.OrderState]; ok {
+			orderStates[o.OrderState]++
+		}
+	}
+
+	// Calculate Trends
+	calcTrend := func(curr, prev int64) string {
+		if prev == 0 {
+			if curr > 0 {
+				return "+100%"
+			}
+			return "0%"
+		}
+		diff := float64(curr - prev)
+		percent := (diff / float64(prev)) * 100
+		if percent >= 0 {
+			return fmt.Sprintf("+%.1f%%", percent)
+		}
+		return fmt.Sprintf("%.1f%%", percent)
+	}
+
+	revenueTrend := calcTrend(revenue24h, revenuePrev24h)
+	volumeTrend := calcTrend(volume24h, volumePrev24h)
+
+	// Fetch Block Height & Uptime
+	syncHeight, _ := mainNode.Client.GetBlockHeight()
+	peers, _ := mainNode.Client.ListPeers()
+	activeCount := 0
+	for _, p := range peers {
+		if p.Active {
+			activeCount++
+		}
+	}
+	uptimeScore := 100.0
+	if len(peers) > 0 {
+		uptimeScore = (float64(activeCount) / float64(len(peers))) * 100
+	}
 
 	// Create simplified summary
 	summary := SummaryResponse{
 		NodeName:       mainNode.NodeConfig.Name,
 		NodePubkey:     mainNode.NodeConfig.NodePubkey,
 		Version:        build.GetTag(),
-		Revenue24h:     1250000,  // Mock for now
-		LiquidityTotal: 500000000, // 5 FLC
-		LiquidityFree:  500000000 - reserved,
+		Revenue24h:     uint64(revenue24h),
+		LiquidityTotal: totalCapacity,
+		LiquidityFree:  free,
 		LiquidityBlocked: reserved,
-		ActiveOrders: map[string]int{
-			"CREATED":   5,
-			"PAID":      2,
-			"COMPLETED": 12,
-		},
-		NodeStatus: "online",
+		ActiveOrders:   orderStates,
+		NodeStatus:     "online",
+		SyncHeight:     syncHeight,
+		UptimeScore:    uptimeScore,
+		RevenueTrend:   revenueTrend,
+		VolumeTrend:    volumeTrend,
 	}
 
 	return lsps.NewJsonRpcResponse(req.Id, summary)
@@ -360,7 +497,7 @@ func (s *DashboardService) handleGetSummary(req *lsps.JsonRpcRequest) *lsps.Json
 
 func (s *DashboardService) handleListOrders(req *lsps.JsonRpcRequest) *lsps.JsonRpcResponse {
 	// For LSP dashboard, we usually want recent orders across all nodes we manage
-	orders, err := s.openingStore.ListLsps1Orders(100, 0)
+	orders, err := s.openingStore.ListLsps1Orders(defaultListLimit, 0)
 	if err != nil {
 		log.Error().Err(err).Msg("Dashboard: failed to list orders")
 		return lsps.NewJsonRpcErrorResponse(req.Id, -32603, "Internal error", nil)
@@ -375,7 +512,7 @@ func (s *DashboardService) handleListPeers(req *lsps.JsonRpcRequest) *lsps.JsonR
 
 	// 1. Get order counts per peer
 	orderCounts := make(map[string]int)
-	orders, _ := s.openingStore.ListLsps1Orders(1000, 0)
+	orders, _ := s.openingStore.ListLsps1Orders(summaryListLimit, 0)
 	for _, o := range orders {
 		orderCounts[o.PeerId]++
 	}
@@ -408,23 +545,71 @@ func (s *DashboardService) handleListPeers(req *lsps.JsonRpcRequest) *lsps.JsonR
 }
 
 func (s *DashboardService) handleListJitChannels(req *lsps.JsonRpcRequest) *lsps.JsonRpcResponse {
-	// For now, JIT channels are often represented by LSPS1 orders that are in 'COMPLETED' or 'CREATED' state
-	// with a funding TXID. But we might want a specific 'ListJitChannels' if there's a separate store.
-	// In flspd, LSPS1 is the primary JIT mechanism.
-	orders, err := s.openingStore.ListLsps1Orders(100, 0)
+	// JIT channels are represented by LSPS1 orders that have been successfully funded
+	orders, err := s.openingStore.ListLsps1Orders(defaultListLimit, 0)
 	if err != nil {
 		return lsps.NewJsonRpcErrorResponse(req.Id, -32603, "Internal error", nil)
 	}
 
-	// Filter for orders that have a funding TXID (actual channel openings)
-	var channels []interface{}
-	for _, o := range orders {
-		if o.FundingTxid != nil && *o.FundingTxid != "" {
-			channels = append(channels, o)
+	// 1. Fetch active channels from all nodes to check real-time status
+	activeChannels := make(map[string]*lightning.Channel)
+	nodes := s.nodesService.GetNodes()
+	for _, node := range nodes {
+		chans, err := node.Client.ListChannels()
+		if err != nil {
+			log.Warn().Err(err).Msgf("Dashboard: failed to list channels for node %x", node.NodeId)
+			continue
+		}
+		for _, c := range chans {
+			if c.ChannelPoint != nil {
+				// Key by TXID:Index
+				activeChannels[c.ChannelPoint.String()] = c
+			}
 		}
 	}
 
-	return lsps.NewJsonRpcResponse(req.Id, channels)
+	// 2. Correlate orders with active channels
+	var enrichedChannels []interface{}
+	for _, o := range orders {
+		// Only show orders that have a funding TXID (attempted or successful openings)
+		if o.FundingTxid == nil || *o.FundingTxid == "" {
+			continue
+		}
+
+		// Construct the outpoint string to match ListChannels format (e.g. "txid:idx")
+		outpointStr := fmt.Sprintf("%s:%d", *o.FundingTxid, 0) // Default to index 0
+		if o.FundingOutpoint != nil {
+			outpointStr = fmt.Sprintf("%s:%d", *o.FundingTxid, *o.FundingOutpoint)
+		}
+
+		activeCh, ok := activeChannels[outpointStr]
+		
+		status := "OFFLINE"
+		scid := ""
+		if ok {
+			status = "ACTIVE"
+			if activeCh.ConfirmedScid != nil {
+				scid = activeCh.ConfirmedScid.ToString()
+			} else if activeCh.AliasScid != nil {
+				scid = activeCh.AliasScid.ToString()
+			}
+		}
+
+		// Map to a frontend-friendly object
+		enriched := map[string]interface{}{
+			"order_id":   o.OrderId,
+			"channel_id": scid, // Show real SCID if active
+			"peer_id":    o.PeerId,
+			"capacity":   o.LspBalanceLoki,
+			"fee":        o.OrderTotalLoki,
+			"status":     status,
+			"created_at": o.CreatedAt,
+			"txid":       *o.FundingTxid,
+		}
+		enrichedChannels = append(enrichedChannels, enriched)
+	}
+
+	return lsps.NewJsonRpcResponse(req.Id, enrichedChannels)
 }
 
 func (s *DashboardService) handleGetConfig(req *lsps.JsonRpcRequest) *lsps.JsonRpcResponse {
@@ -494,19 +679,27 @@ func (s *DashboardService) handleGetOrderDetail(req *lsps.JsonRpcRequest) *lsps.
 	timeline := []map[string]interface{}{
 		{"event": "ORDER_CREATED", "timestamp": order.CreatedAt.Format(time.RFC3339), "detail": "Order registered by peer"},
 	}
-	if order.PaymentState == "PAID" || order.OrderState == "COMPLETED" {
+	if order.PaymentState == string(lsps.Lsps1PaymentStatePaid) || order.OrderState == string(lsps.Lsps1OrderStateCompleted) {
 		timeline = append(timeline, map[string]interface{}{
-			"event": "PAYMENT_RECEIVED", "timestamp": order.CreatedAt.Add(5 * time.Minute).Format(time.RFC3339), "detail": "Invoice payment confirmed",
+			"event":     "PAYMENT_RECEIVED",
+			"timestamp": order.CreatedAt.Format(time.RFC3339), // Recorded at same time for now
+			"detail":    "Invoice payment confirmed",
 		})
 	}
+
 	if order.FundingTxid != nil && *order.FundingTxid != "" {
 		timeline = append(timeline, map[string]interface{}{
-			"event": "CHANNEL_FUNDED", "timestamp": order.CreatedAt.Add(10 * time.Minute).Format(time.RFC3339), "detail": "Funding TX: " + *order.FundingTxid,
+			"event":     "CHANNEL_FUNDED",
+			"timestamp": order.CreatedAt.Format(time.RFC3339), // Recorded at same time for now
+			"detail":    "Funding TX: " + *order.FundingTxid,
 		})
 	}
-	if order.OrderState == "COMPLETED" {
+
+	if order.OrderState == string(lsps.Lsps1OrderStateCompleted) {
 		timeline = append(timeline, map[string]interface{}{
-			"event": "ORDER_COMPLETED", "timestamp": order.CreatedAt.Add(30 * time.Minute).Format(time.RFC3339), "detail": "Channel confirmed on-chain",
+			"event":     "ORDER_COMPLETED",
+			"timestamp": order.CreatedAt.Format(time.RFC3339), // Recorded at same time for now
+			"detail":    "Channel opened and confirmed",
 		})
 	}
 
@@ -543,6 +736,25 @@ func (s *DashboardService) handleWS(w http.ResponseWriter, r *http.Request) {
 	s.hub.register <- client
 
 	go client.writePump()
+}
+
+func (s *DashboardService) getLiquidityMetrics(ctx context.Context) (total, free, reserved uint64) {
+	reserved, _ = s.openingStore.GetReservedLiquidity()
+	
+	nodes := s.nodesService.GetNodes()
+	if len(nodes) > 0 {
+		balance, err := nodes[0].Client.WalletBalance(ctx)
+		if err == nil {
+			free = uint64(balance.ConfirmedBalance)
+			total = free + reserved
+			return
+		}
+	}
+	
+	// Fallback to placeholder if node not available or error
+	total = 500000000
+	free = 500000000 - reserved
+	return
 }
 
 func (s *DashboardService) BroadcastEvent(event string, data interface{}) {
