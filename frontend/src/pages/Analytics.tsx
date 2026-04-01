@@ -104,7 +104,7 @@ export const Analytics: React.FC = () => {
                     fontSize: '11px',
                     fontFamily: 'monospace',
                   }}
-                  formatter={(value: number) => [formatSats(value), 'Revenue']}
+                  formatter={(value: any) => [formatSats(Number(value) || 0), 'Revenue']}
                   labelStyle={{ color: '#807e80' }}
                 />
                 <Area
