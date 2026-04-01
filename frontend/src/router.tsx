@@ -2,7 +2,8 @@ import {
   createRouter, 
   createRootRoute, 
   createRoute, 
-  Outlet
+  Outlet,
+  useLocation
 } from '@tanstack/react-router'
 import { z } from 'zod'
 import { CommandCenter } from './pages/CommandCenter'
@@ -40,24 +41,13 @@ function RootComponent() {
 }
 
 function RootLayout() {
-  // Helper to map pathname to legacy page names
-  const getActivePage = (path: string) => {
-    if (path === '/') return 'overview'
-    if (path.startsWith('/orders')) return 'orders'
-    if (path === '/nodes') return 'nodes'
-    if (path === '/jit') return 'jit'
-    if (path === '/analytics') return 'analytics'
-    if (path === '/settings') return 'settings'
-    return 'overview'
-  }
+  const location = useLocation()
 
   return (
-    <ResponsiveLayout 
-      activePage={getActivePage(window.location.pathname)} 
-    >
+    <ResponsiveLayout>
       <AnimatePresence mode="wait">
         <motion.div
-           key={window.location.pathname}
+           key={location.pathname}
            initial={{ opacity: 0, y: 10 }}
            animate={{ opacity: 1, y: 0 }}
            exit={{ opacity: 0, y: -10 }}

@@ -1,141 +1,116 @@
-import React, { useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
-import { Zap, Clock, CheckCircle2, ArrowUpRight, Hash, Database } from 'lucide-react';
+import React, { useState } from 'react';
+import { GlassCard } from '../components/GlassCard';
+import { Shield, Zap, Search, Activity, MoreVertical, ExternalLink } from 'lucide-react';
 import { useDashboard } from '../hooks/useDashboard';
-import { formatLoki } from '../lib/utils';
-
-interface JitChannel {
-  order_id: string;
-  peer_id: string;
-  amount: number;
-  state: string;
-  funding_txid?: string;
-  created_at: string;
-}
+import { formatSmart } from '../lib/utils';
 
 export const JITChannels: React.FC = () => {
   const { api } = useDashboard();
-  const [channels, setChannels] = useState<JitChannel[]>([]);
+  const [channels, setChannels] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
 
-  useEffect(() => {
-    const fetchChannels = async () => {
-      try {
-        const data = await api.listJitChannels();
-        setChannels(data);
-      } catch (error) {
-        console.error('Failed to fetch JIT channels:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchChannels();
+  React.useEffect(() => {
+    api.listJitChannels()
+      .then(setChannels)
+      .finally(() => setLoading(false));
   }, [api]);
 
+  const filteredChannels = channels.filter(ch => 
+    ch.channel_id?.toLowerCase().includes(search.toLowerCase()) ||
+    ch.peer_id?.toLowerCase().includes(search.toLowerCase())
+  );
+
   return (
-    <div className="p-4 md:p-10 max-w-7xl mx-auto space-y-6 animate-in fade-in duration-700">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+    <div className="p-4 md:p-10 max-w-7xl mx-auto space-y-8 animate-in fade-in duration-1000">
+      <header className="flex flex-col md:flex-row md:items-center justify-between gap-6">
         <div>
-          <h1 className="text-2xl font-bold text-white flex items-center gap-2">
-            <Zap className="w-6 h-6 text-yellow-400" />
-            JIT Channels
-          </h1>
-          <p className="text-slate-400">Track Just-In-Time liquidity deployments</p>
+          <h1 className="text-3xl font-bold text-white mb-2 uppercase italic tracking-tighter">JIT Registry</h1>
+          <p className="text-on-surface-variant font-mono text-xs uppercase tracking-widest">Active Just-In-Time Incentivized Channels</p>
         </div>
         
-        <div className="flex items-center gap-2 bg-slate-900/50 border border-slate-800 rounded-xl px-4 py-2">
-          <Database className="w-4 h-4 text-indigo-400" />
-          <span className="text-sm font-medium text-slate-300">{channels.length} Total Openings</span>
+        <div className="flex gap-4">
+          <div className="glass-panel px-4 py-2 flex items-center gap-3">
+             <Search className="w-4 h-4 text-on-surface-variant" />
+             <input 
+               type="text" 
+               placeholder="Search registry..." 
+               className="bg-transparent border-none outline-none text-xs text-white w-48 placeholder:text-on-surface-variant/40"
+               value={search}
+               onChange={(e) => setSearch(e.target.value)}
+             />
+          </div>
         </div>
-      </div>
+      </header>
 
       {loading ? (
-        <div className="space-y-3">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {[1, 2, 3].map(i => (
-            <div key={i} className="h-16 bg-slate-900/40 animate-pulse rounded-xl border border-slate-800/50" />
+            <div key={i} className="h-64 bg-white/5 animate-pulse rounded-2xl border border-white/5" />
           ))}
         </div>
-      ) : channels.length === 0 ? (
-        <div className="bg-slate-900/40 border border-slate-800/50 rounded-2xl p-12 text-center">
-          <Zap className="w-12 h-12 text-slate-700 mx-auto mb-4" />
-          <h3 className="text-lg font-medium text-white">No JIT channels active</h3>
-          <p className="text-slate-400">JIT channels appear when users pay for liquidity on-demand</p>
+      ) : filteredChannels.length === 0 ? (
+        <div className="p-20 text-center glass-panel border-dashed border-white/10 rounded-2xl">
+          <Zap className="w-12 h-12 text-on-surface-variant/20 mx-auto mb-4" />
+          <p className="text-on-surface-variant font-mono text-xs uppercase tracking-widest italic">No active JIT channels detected</p>
         </div>
       ) : (
-        <div className="bg-slate-900/40 border border-slate-800/50 rounded-2xl overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="bg-slate-800/30">
-                  <th className="px-6 py-4 text-xs font-bold text-slate-400 uppercase tracking-widest">Order ID</th>
-                  <th className="px-6 py-4 text-xs font-bold text-slate-400 uppercase tracking-widest">Peer</th>
-                  <th className="px-6 py-4 text-xs font-bold text-slate-400 uppercase tracking-widest">Capacity</th>
-                  <th className="px-6 py-4 text-xs font-bold text-slate-400 uppercase tracking-widest">Status</th>
-                  <th className="px-6 py-4 text-xs font-bold text-slate-400 uppercase tracking-widest">Date</th>
-                  <th className="px-6 py-4 text-xs font-bold text-slate-400 uppercase tracking-widest">TXID</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-800/50">
-                {channels.map((ch, idx) => (
-                  <motion.tr
-                    key={ch.order_id}
-                    initial={{ opacity: 0, x: -10 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: idx * 0.03 }}
-                    className="hover:bg-slate-800/20 transition-colors group"
-                  >
-                    <td className="px-6 py-4">
-                      <div className="flex items-center gap-2">
-                        <Hash className="w-3.5 h-3.5 text-slate-500" />
-                        <span className="text-sm font-semibold text-white">{ch.order_id?.substring(0, 12)}...</span>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4">
-                      <span className="text-xs font-mono text-slate-400" title={ch.peer_id}>
-                        {ch.peer_id?.substring(0, 12)}...
-                      </span>
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="text-xs font-bold font-mono text-slate-300 uppercase tracking-tight">
-                        {formatLoki(ch.amount)}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest ${
-                        ch.state === 'COMPLETED' ? 'bg-emerald-500/10 text-emerald-400' :
-                        ch.state === 'PAID' ? 'bg-indigo-500/10 text-indigo-400' :
-                        'bg-slate-500/10 text-slate-400'
-                      }`}>
-                        {ch.state === 'COMPLETED' ? <CheckCircle2 className="w-3 h-3" /> :
-                         ch.state === 'PAID' ? <Zap className="w-3 h-3" /> :
-                         <Clock className="w-3 h-3" />}
-                        {ch.state}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 text-sm text-slate-400">
-                      {new Date(ch.created_at).toLocaleDateString()}
-                    </td>
-                    <td className="px-6 py-4">
-                      {ch.funding_txid ? (
-                        <a 
-                          href={`https://lokichain.info/tx/${ch.funding_txid}`} 
-                          target="_blank" 
-                          rel="noopener noreferrer"
-                          className="flex items-center gap-1.5 text-indigo-400 hover:text-indigo-300 transition-colors text-xs group"
-                        >
-                          <span className="font-mono">{ch.funding_txid.substring(0, 8)}</span>
-                          <ArrowUpRight className="w-3 h-3 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform" />
-                        </a>
-                      ) : (
-                        <span className="text-xs text-slate-600 font-medium italic">Pending...</span>
-                      )}
-                    </td>
-                  </motion.tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {filteredChannels.map((ch, i) => (
+            <GlassCard key={i} className="p-6 border-white/5 hover:border-primary/20 transition-all group relative overflow-hidden">
+              {/* Status Glow */}
+              <div className="absolute -top-12 -right-12 w-24 h-24 bg-primary/10 blur-3xl group-hover:bg-primary/20 transition-all rounded-full pointer-events-none" />
+              
+              <div className="flex justify-between items-start mb-6">
+                <div className="p-3 rounded-xl bg-primary/10 border border-primary/20">
+                  <Zap className="w-5 h-5 text-primary" />
+                </div>
+                <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-secondary/10 border border-secondary/20">
+                  <span className="w-1.5 h-1.5 rounded-full bg-secondary animate-glow-pulse" />
+                  <span className="text-[10px] font-mono font-bold text-secondary uppercase tracking-widest leading-none">Active</span>
+                </div>
+              </div>
+
+              <div className="space-y-1 mb-6">
+                <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                  Channel Snapshot
+                  <Shield className="w-3.5 h-3.5 text-on-surface-variant" />
+                </h3>
+                <p className="text-[10px] font-mono text-on-surface-variant truncate">{ch.channel_id || 'ID_PENDING_OPEN'}</p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4 mb-6">
+                <div>
+                  <p className="text-[10px] font-mono text-on-surface-variant uppercase tracking-widest mb-1 leading-none">Capacity</p>
+                  <p className="text-lg font-black text-white italic tracking-tighter">
+                    {formatSmart(ch.amount)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-mono text-on-surface-variant uppercase tracking-widest mb-1 leading-none">Asset Flow</p>
+                  <div className="flex items-center gap-1.5 text-xs font-bold text-white">
+                    <Activity className="w-3 h-3 text-secondary" />
+                    Bilateral
+                  </div>
+                </div>
+              </div>
+
+              <div className="pt-6 border-t border-white/5 flex items-center justify-between">
+                <div className="flex flex-col">
+                  <p className="text-[10px] font-mono text-on-surface-variant uppercase tracking-widest mb-1 leading-none">Peer Index</p>
+                  <p className="text-xs font-mono text-white/50 truncate max-w-[120px]">{ch.peer_id?.substring(0, 16)}...</p>
+                </div>
+                <div className="flex gap-2">
+                   <button className="p-2 text-on-surface-variant hover:text-white hover:bg-white/5 rounded-lg border border-transparent hover:border-white/5 transition-all">
+                     <ExternalLink className="w-4 h-4" />
+                   </button>
+                   <button className="p-2 text-on-surface-variant hover:text-white hover:bg-white/5 rounded-lg border border-transparent hover:border-white/5 transition-all">
+                     <MoreVertical className="w-4 h-4" />
+                   </button>
+                </div>
+              </div>
+            </GlassCard>
+          ))}
         </div>
       )}
     </div>

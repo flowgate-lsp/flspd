@@ -8,12 +8,10 @@ import { useEvents } from '../hooks/useEvents';
 
 interface ResponsiveLayoutProps {
   children: React.ReactNode;
-  activePage: string;
 }
 
 export const ResponsiveLayout: React.FC<ResponsiveLayoutProps> = ({ 
-  children, 
-  activePage
+  children
 }) => {
   const isDesktop = useMediaQuery('(min-width: 1024px)');
   const { connected } = useEvents();
@@ -28,7 +26,7 @@ export const ResponsiveLayout: React.FC<ResponsiveLayoutProps> = ({
 
       {isDesktop ? (
         <>
-          <Sidebar activePage={activePage} />
+          <Sidebar />
           <main className="pl-64 min-h-screen relative overflow-y-auto">
             {children}
           </main>
@@ -61,7 +59,7 @@ export const ResponsiveLayout: React.FC<ResponsiveLayoutProps> = ({
             {children}
           </main>
           
-          <BottomTabNav activePage={activePage} />
+          <BottomTabNav />
         </>
       )}
     </div>

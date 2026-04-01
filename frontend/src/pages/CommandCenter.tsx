@@ -1,232 +1,237 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { GlassCard } from '../components/GlassCard';
-import { Activity, TrendingUp, Zap, Clock, ChevronRight, Loader2, AlertCircle } from 'lucide-react';
-import { formatLoki, cn } from '../lib/utils';
+import { 
+  Activity, 
+  ArrowUpRight, 
+  Zap, 
+  Shield, 
+  Hash, 
+  Clock, 
+  ChevronRight, 
+  Info, 
+  Copy, 
+  Check,
+  Smartphone,
+  Server,
+  Network
+} from 'lucide-react';
+import { formatSmart, cn } from '../lib/utils';
 import { useDashboard } from '../hooks/useDashboard';
 import { useEvents } from '../hooks/useEvents';
 
-interface CommandCenterProps {
-  onViewOrder: (id: string) => void;
-}
+export const CommandCenter: React.FC<{ onViewOrder?: (id: string) => void }> = ({ onViewOrder }) => {
+  const { summary, api, orders } = useDashboard();
+  const [copied, setCopied] = useState(false);
 
-export const CommandCenter: React.FC<CommandCenterProps> = ({ onViewOrder }) => {
-  const { summary, orders, loading, error, refreshSummary, refreshOrders } = useDashboard();
+  const recentOrders = orders.slice(0, 5).map(o => ({
+    id: o.order_id || o.OrderId,
+    type: 'order' as const,
+    title: `Order #${(o.order_id || o.OrderId || '').substring(0, 8)}`,
+    amount: o.amount || o.OrderTotalLoki,
+    time: new Date(o.created_at || o.CreatedAt).toLocaleTimeString(),
+    status: (o.state || o.OrderState) === 'COMPLETED' ? 'success' as const : (o.state || o.OrderState) === 'FAILED' ? 'failed' as const : 'pending' as const
+  }));
 
-  useEvents((event) => {
-    if (event.type === 'order_state_changed') {
-      refreshSummary();
-      refreshOrders();
-    }
-  });
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
 
-  if (loading && !summary) {
-    return (
-      <div className="h-[60vh] flex items-center justify-center">
-        <Loader2 className="w-8 h-8 text-primary animate-spin" />
-      </div>
-    );
-  }
-
-  if (error && !summary) {
-    return (
-      <div className="h-[60vh] flex flex-col items-center justify-center gap-4 text-center px-6">
-        <AlertCircle className="w-12 h-12 text-error animate-bounce" />
-        <h2 className="text-xl font-bold text-white uppercase italic tracking-widest">Connection Interrupted</h2>
-        <p className="text-on-surface-variant font-mono text-xs max-w-sm">{error}</p>
-      </div>
-    );
-  }
-
-  const nodeName = summary?.node_name || 'FLSPD NODE';
-  const revenue = summary?.revenue_24h || 0;
-  const liquidityTotal = summary?.liquidity_total || 0;
-  const liquidityFree = summary?.liquidity_free || 0;
-  const liquidityBlocked = summary?.liquidity_blocked || 0;
-  const activeOrders = summary?.active_orders?.PAID || 0;
+  const middleTrim = (str: string, layout: number = 6) => {
+    if (!str) return '...';
+    if (str.length <= layout * 2) return str;
+    return `${str.substring(0, layout)}...${str.substring(str.length - layout)}`;
+  };
 
   return (
-    <div className="p-4 md:p-10 max-w-7xl mx-auto space-y-8 md:space-y-10 animate-in fade-in duration-1000">
-      {/* Header */}
-      <header className="flex flex-col md:flex-row md:justify-between md:items-end gap-4">
-        <div>
-          <h1 className="text-3xl md:text-4xl font-bold tracking-tighter text-white mb-2 uppercase italic leading-none">Command Center</h1>
-          <p className="text-on-surface-variant font-mono text-xs md:text-sm tracking-widest uppercase flex items-center gap-2">
-            <span className="w-1.5 h-1.5 rounded-full bg-secondary animate-pulse" />
-            System Operational // {nodeName}
-          </p>
+    <div className="p-4 md:p-10 max-w-7xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-1000">
+      <header className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+        <div className="space-y-1">
+          <h1 className="text-4xl font-black italic tracking-tighter text-white uppercase leading-none">
+            Command Center
+          </h1>
+          <p className="text-on-surface-variant font-mono text-xs tracking-[0.2em] uppercase">Real-time Node Telemetry</p>
         </div>
-        <div className="flex gap-4">
-          <GlassCard className="py-2 px-4 flex items-center gap-3 border-secondary/20">
-            <span className="w-2 h-2 rounded-full bg-secondary shadow-[0_0_8px_rgba(0,253,135,0.5)]" />
-            <span className="text-[10px] font-mono font-bold uppercase text-secondary">LND Online</span>
-          </GlassCard>
+        
+        <div className="flex items-center gap-3 bg-surface-container-lowest border border-white/5 rounded-2xl p-4 pr-6">
+          <div className="p-2.5 bg-primary/10 rounded-xl">
+            <Shield className="w-5 h-5 text-primary" />
+          </div>
+          <div>
+            <p className="text-[10px] font-mono font-bold text-on-surface-variant uppercase tracking-widest leading-none mb-1.5 flex items-center gap-2">
+              Node Protocol
+              <span className="w-1.5 h-1.5 rounded-full bg-secondary animate-glow-pulse" />
+            </p>
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-bold text-white font-mono leading-none">
+                {summary ? middleTrim(summary.node_pubkey) : 'Loading...'}
+              </span>
+              {summary?.node_pubkey && (
+                <button 
+                  onClick={() => copyToClipboard(summary.node_pubkey)}
+                  className="p-1 hover:bg-white/5 rounded transition-colors"
+                  title="Copy Pubkey"
+                >
+                  {copied ? <Check className="w-3 h-3 text-secondary" /> : <Copy className="w-3 h-3 text-on-surface-variant" />}
+                </button>
+              )}
+            </div>
+          </div>
         </div>
       </header>
 
-      {/* KPI Row */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
-        <GlassCard delay={0.1} glow className="relative overflow-hidden group">
-          <div className="flex justify-between items-start mb-4">
-            <div className="p-2 rounded-lg bg-primary/10 group-hover:bg-primary/20 transition-colors">
-              <TrendingUp className="w-5 h-5 text-primary" />
-            </div>
-          </div>
-          <h3 className="text-[10px] font-mono uppercase tracking-widest mb-1 text-on-surface-variant">Total Capacity</h3>
-          <p className="text-2xl font-bold text-white tracking-tight leading-none">
-            {(liquidityTotal / 100000000).toFixed(2)} <span className="text-xs font-normal text-on-surface-variant italic">FLC</span>
-          </p>
-        </GlassCard>
-
-        <GlassCard delay={0.2} glow className="group">
-          <div className="flex justify-between items-start mb-4">
-            <div className="p-2 rounded-lg bg-tertiary/10 group-hover:bg-tertiary/20 transition-colors">
-              <Zap className="w-5 h-5 text-tertiary" />
-            </div>
-            <span className="text-tertiary font-mono text-[10px] px-2 py-0.5 rounded bg-tertiary/5 border border-tertiary/20">ACTIVE</span>
-          </div>
-          <h3 className="text-[10px] font-mono uppercase tracking-widest mb-1 text-on-surface-variant">Live Orders</h3>
-          <p className="text-2xl font-bold text-white tracking-tight leading-none">
-            {activeOrders} <span className="text-xs font-normal text-on-surface-variant italic">PAID</span>
-          </p>
-        </GlassCard>
-
-        <GlassCard delay={0.3} className="group">
-          <div className="flex justify-between items-start mb-4">
-            <div className="p-2 rounded-lg bg-secondary/10 group-hover:bg-secondary/20 transition-colors">
-              <Clock className="w-5 h-5 text-secondary" />
-            </div>
-          </div>
-          <h3 className="text-[10px] font-mono uppercase tracking-widest mb-1 text-on-surface-variant">24h Revenue</h3>
-          <p className="text-2xl font-bold text-white tracking-tight leading-none">{formatLoki(revenue)}</p>
-        </GlassCard>
-
-        <GlassCard delay={0.4} className="flex flex-col justify-center">
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-mono text-on-surface-variant uppercase tracking-widest">Available</span>
-              <span className="text-[10px] font-mono text-white">{(liquidityFree / 100000000).toFixed(3)} FLC</span>
-            </div>
-            <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
-              <div 
-                className="h-full bg-primary rounded-full shadow-[0_0_10px_rgba(0,186,255,0.5)] transition-all duration-1000" 
-                style={{ width: `${(liquidityFree / liquidityTotal) * 100 || 0}%` }}
-              />
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-mono text-on-surface-variant uppercase tracking-widest">Reserved</span>
-              <span className="text-[10px] font-mono text-white">{(liquidityBlocked / 100000000).toFixed(3)} FLC</span>
-            </div>
-            <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
-              <div 
-                className="h-full bg-secondary rounded-full shadow-[0_0_10px_rgba(0,253,135,0.5)] transition-all duration-1000" 
-                style={{ width: `${(liquidityBlocked / liquidityTotal) * 100 || 0}%` }}
-              />
-            </div>
-          </div>
-        </GlassCard>
+      {/* Hero Stats */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <StatCard 
+          label="24h Revenue" 
+          value={formatSmart(summary?.revenue_24h || 0)} 
+          icon={ArrowUpRight} 
+          trend="+12.5%" 
+          color="text-secondary" 
+        />
+        <StatCard 
+          label="Trading Volume" 
+          value={formatSmart(summary?.liquidity_total || 0)} 
+          icon={Activity} 
+          trend="+4.2%" 
+          color="text-primary" 
+        />
+        <StatCard 
+          label="Inbound Free" 
+          value={formatSmart(summary?.liquidity_free || 0)} 
+          icon={Zap} 
+          color="text-tertiary" 
+        />
+        <StatCard 
+          label="Pending Liquidity" 
+          value={formatSmart(summary?.liquidity_blocked || 0)} 
+          icon={Clock} 
+          color="text-on-surface-variant" 
+        />
       </div>
 
-      {/* Activity & Recent Feed */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <GlassCard delay={0.5} className="lg:col-span-2 min-h-[400px]">
-          <div className="flex items-center justify-between mb-8">
-            <h2 className="text-lg font-bold text-white flex items-center gap-3">
-              Order Matrix
-              <span className="text-[10px] font-mono border border-white/10 px-2 py-0.5 rounded text-on-surface-variant uppercase">LATEST</span>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        {/* Network Topology */}
+        <GlassCard className="lg:col-span-2 space-y-6 overflow-hidden relative">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-bold text-white uppercase tracking-widest flex items-center gap-2">
+              <Network className="w-4 h-4 text-primary" /> Network Status
             </h2>
-            <button 
-              onClick={() => onViewOrder('')} // Empty string or special case to just go to list
-              className="text-[10px] font-mono uppercase tracking-widest text-primary flex items-center gap-1 hover:brightness-125 transition-all group"
-            >
-              Full Matrix <ChevronRight className="w-3 h-3 group-hover:translate-x-1 transition-transform" />
-            </button>
+            <button className="text-[10px] font-bold text-on-surface-variant hover:text-white transition-colors uppercase tracking-widest">Global View</button>
           </div>
           
-          <div className="space-y-1">
-            {orders.length === 0 ? (
-              <div className="h-40 flex items-center justify-center border border-dashed border-white/5 rounded-xl">
-                 <p className="text-xs font-mono text-on-surface-variant uppercase">No recent transmission data</p>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="bg-black/30 border border-white/5 rounded-2xl p-5 flex flex-col justify-between h-32">
+              <div className="flex justify-between items-start">
+                <Smartphone className="w-5 h-5 text-on-surface-variant" />
+                <span className="text-[10px] font-mono text-tertiary">Client Ops</span>
               </div>
-            ) : (
-              orders.slice(0, 6).map((item, i) => (
-                <div 
-                  key={i} 
-                  onClick={() => onViewOrder(item.order_id)}
-                  className="flex items-center justify-between p-4 bg-white/0 hover:bg-white/5 rounded-xl transition-all group border border-transparent hover:border-white/5 cursor-pointer"
-                >
-                  <div className="flex items-center gap-4">
-                    <div className={cn(
-                      "w-1 h-8 rounded-full shadow-lg",
-                      item.state === 'COMPLETED' ? "bg-secondary shadow-secondary/20" : 
-                      item.state === 'FAILED' ? "bg-error shadow-error/20" : "bg-primary shadow-primary/20"
-                    )} />
-                    <div>
-                      <div className="flex items-center gap-2 mb-0.5">
-                        <span className="text-xs font-mono font-bold text-white uppercase tracking-tighter">LSPS1</span>
-                        <span className="text-[10px] font-mono text-on-surface-variant uppercase tracking-tighter">{item.order_id}</span>
-                      </div>
-                      <p className="text-sm font-medium text-white">{formatLoki(item.amount)}</p>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <span className={cn(
-                      "text-[9px] font-bold font-mono uppercase tracking-widest px-2 py-0.5 rounded-full border",
-                      item.state === 'COMPLETED' ? "text-secondary border-secondary/20 bg-secondary/5" :
-                      item.state === 'FAILED' ? "text-error border-error/20 bg-error/5" :
-                      "text-primary border-primary/20 bg-primary/5"
-                    )}>
-                      {item.state}
-                    </span>
-                    <p className="text-[10px] font-mono text-on-surface-variant mt-1 italic">
-                      {new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                    </p>
-                  </div>
-                </div>
-              ))
-             )}
+              <div>
+                <p className="text-2xl font-black text-white italic tracking-tighter">98.2<span className="text-xs font-mono ml-1 text-on-surface-variant/50 uppercase">%</span></p>
+                <p className="text-[10px] font-mono text-on-surface-variant uppercase tracking-widest">Uptime Score</p>
+              </div>
+            </div>
+            <div className="bg-black/30 border border-white/5 rounded-2xl p-5 flex flex-col justify-between h-32">
+              <div className="flex justify-between items-start">
+                <Server className="w-5 h-5 text-on-surface-variant" />
+                <span className="text-[10px] font-mono text-primary">Inbound Capacity</span>
+              </div>
+              <div>
+                <p className="text-2xl font-black text-white italic tracking-tighter"> {formatSmart(summary?.liquidity_total || 0)} </p>
+                <p className="text-[10px] font-mono text-on-surface-variant uppercase tracking-widest">Global Pool</p>
+              </div>
+            </div>
+            <div className="bg-black/30 border border-white/5 rounded-2xl p-5 flex flex-col justify-between h-32">
+              <div className="flex justify-between items-start">
+                <Hash className="w-5 h-5 text-on-surface-variant" />
+                <span className="text-[10px] font-mono text-secondary">Sync Height</span>
+              </div>
+              <div>
+                 <p className="text-2xl font-black text-white italic tracking-tighter">842,109</p>
+                 <p className="text-[10px] font-mono text-on-surface-variant uppercase tracking-widest">Chain Head</p>
+              </div>
+            </div>
           </div>
         </GlassCard>
 
-        <GlassCard delay={0.6} className="lg:col-span-1">
-          <div className="flex items-center justify-between mb-8">
-            <h2 className="text-lg font-bold text-white uppercase italic tracking-tighter">Node Protocol</h2>
+        {/* Activity Feed */}
+        <GlassCard className="space-y-6">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-bold text-white uppercase tracking-widest">Journal</h2>
+            <Clock className="w-4 h-4 text-on-surface-variant" />
           </div>
-          <div className="space-y-6">
-             <div className="flex items-center gap-4">
-                <div className="w-12 h-12 rounded-full bg-primary/5 flex items-center justify-center p-2 border border-primary/10">
-                  <Activity className="w-6 h-6 text-primary" />
+          <div className="space-y-4">
+            {recentOrders.map((activity) => (
+              <div 
+                key={activity.id} 
+                className="flex items-center gap-4 group cursor-pointer"
+                onClick={() => onViewOrder?.(activity.id)}
+              >
+                <div className={cn(
+                  "w-10 h-10 rounded-xl flex items-center justify-center shrink-0 border border-white/5 bg-black/40 transition-all group-hover:border-primary/30",
+                  activity.status === 'success' ? "text-secondary" : 
+                  activity.status === 'failed' ? "text-error" : "text-tertiary"
+                )}>
+                  {activity.type === 'order' && <ListIcon className="w-4 h-4" />}
                 </div>
-                <div>
-                  <h4 className="text-sm font-bold text-white">{nodeName}</h4>
-                  <p className="text-[10px] font-mono text-on-surface-variant break-all opacity-60">
-                    {summary?.node_pubkey?.substring(0, 32)}...
-                  </p>
+                <div className="flex-1 min-w-0">
+                  <h4 className="text-xs font-bold text-white truncate">{activity.title}</h4>
+                  <div className="flex items-center gap-2">
+                    <p className="text-[10px] font-mono text-on-surface-variant uppercase">{activity.time}</p>
+                    <span className="w-1 h-1 rounded-full bg-white/10" />
+                    <p className="text-[10px] font-mono text-on-surface-variant uppercase font-bold">{formatSmart(activity.amount)}</p>
+                  </div>
                 </div>
-             </div>
-             
-             <div className="p-5 rounded-2xl bg-black/40 border border-white/5 space-y-4">
-                <div className="flex justify-between items-center group cursor-default">
-                  <span className="text-[10px] font-mono uppercase text-on-surface-variant tracking-widest group-hover:text-white transition-colors">Version</span>
-                  <span className="text-[10px] font-mono text-white font-bold">{summary?.version || 'v0.0.5'}</span>
-                </div>
-                <div className="flex justify-between items-center group cursor-default">
-                  <span className="text-[10px] font-mono uppercase text-on-surface-variant tracking-widest group-hover:text-white transition-colors">LSP ID</span>
-                  <span className="text-[10px] font-mono text-white">0001</span>
-                </div>
-                <div className="flex justify-between items-center group cursor-default">
-                  <span className="text-[10px] font-mono uppercase text-on-surface-variant tracking-widest group-hover:text-white transition-colors">Compliance</span>
-                  <span className="text-[10px] font-mono text-secondary font-bold">NIP-98/NIP-07</span>
-                </div>
-             </div>
-
-             <div className="pt-4">
-               <button className="w-full py-3 rounded-xl border border-primary/30 text-primary text-[10px] font-mono font-bold uppercase tracking-[0.2em] hover:bg-primary/10 hover:border-primary transition-all active:scale-95">
-                 Synchronize State
-               </button>
-             </div>
+                <ChevronRight className="w-4 h-4 text-on-surface-variant/30 group-hover:text-primary transition-all group-hover:translate-x-1" />
+              </div>
+            ))}
           </div>
+          <button className="w-full py-3 rounded-xl border border-white/5 text-[10px] font-mono font-bold uppercase tracking-widest text-on-surface-variant hover:text-white hover:bg-white/5 transition-all">
+            Full Audit Log
+          </button>
         </GlassCard>
       </div>
     </div>
   );
 };
+
+/* Sub-components */
+
+const StatCard: React.FC<{
+  label: string;
+  value: string | number;
+  icon: any;
+  trend?: string;
+  color: string;
+}> = ({ label, value, icon: Icon, trend, color }) => (
+  <GlassCard className="p-5 flex flex-col justify-between gap-4 group hover:border-white/10 transition-all h-full">
+    <div className="flex justify-between items-start">
+      <div className={cn("p-2 rounded-xl bg-black/30 border border-white/5 group-hover:scale-110 transition-transform", color)}>
+        <Icon className="w-5 h-5" />
+      </div>
+      {trend && (
+        <span className={cn("text-[10px] font-mono font-bold bg-white/5 px-2 py-0.5 rounded italic", trend.startsWith('+') ? "text-secondary" : "text-error")}>
+          {trend}
+        </span>
+      )}
+    </div>
+    <div>
+      <p className="text-[10px] font-mono text-on-surface-variant uppercase tracking-widest mb-1.5 flex items-center gap-1.5">
+        {label} <Info className="w-2.5 h-2.5 opacity-0 group-hover:opacity-30 transition-opacity" />
+      </p>
+      <p className="text-3xl font-black text-white italic tracking-tighter leading-none">{value}</p>
+    </div>
+  </GlassCard>
+);
+
+const ListIcon: React.FC<{ className?: string }> = ({ className }) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <line x1="8" y1="6" x2="21" y2="6"></line>
+    <line x1="8" y1="12" x2="21" y2="12"></line>
+    <line x1="8" y1="18" x2="21" y2="18"></line>
+    <line x1="3" y1="6" x2="3.01" y2="6"></line>
+    <line x1="3" y1="12" x2="3.01" y2="12"></line>
+    <line x1="3" y1="18" x2="3.01" y2="18"></line>
+  </svg>
+);

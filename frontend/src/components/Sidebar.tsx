@@ -13,11 +13,7 @@ const navItems = [
   { id: 'settings', label: 'Settings', icon: Settings },
 ];
 
-interface SidebarProps {
-  activePage: string;
-}
-
-export const Sidebar: React.FC<SidebarProps> = ({ activePage }) => {
+export const Sidebar: React.FC = () => {
   const { connected } = useEvents();
   return (
     <aside className="w-64 h-screen fixed left-0 top-0 bg-surface-container-lowest border-r border-white/5 flex flex-col p-6 z-50">
@@ -35,19 +31,18 @@ export const Sidebar: React.FC<SidebarProps> = ({ activePage }) => {
             <Link
               key={item.id}
               to={to}
-              className={cn(
-                "w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all duration-300 group hover:bg-white/5",
-                activePage === item.id ? "bg-primary/10 text-white" : "text-on-surface-variant hover:text-white"
-              )}
             >
               {({ isActive }) => (
-                <>
+                <div className={cn(
+                  "w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all duration-300 group hover:bg-white/5 cursor-pointer",
+                  isActive ? "bg-primary/10 text-white" : "text-on-surface-variant hover:text-white"
+                )}>
                   <item.icon className={cn(
                     "w-5 h-5 transition-colors",
                     isActive ? "text-primary" : "text-inherit group-hover:text-primary"
                   )} />
                   <span className="text-sm font-medium">{item.label}</span>
-                </>
+                </div>
               )}
             </Link>
           )

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { GlassCard } from '../components/GlassCard';
 import { ArrowLeft, Clock, Zap, Hash, ExternalLink, Copy, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
-import { formatLoki, cn } from '../lib/utils';
+import { formatSmart, formatLoki, cn } from '../lib/utils';
 import { useAuth } from '../hooks/useAuth';
 import { DashboardAPI } from '../lib/api';
 
@@ -49,6 +49,12 @@ export const OrderDetail: React.FC<OrderDetailProps> = ({ orderId, onBack }) => 
     setTimeout(() => setCopied(null), 2000);
   };
 
+  const middleTrim = (str: string, layout: number = 8) => {
+    if (!str) return '...';
+    if (str.length <= layout * 2) return str;
+    return `${str.substring(0, layout)}...${str.substring(str.length - layout)}`;
+  };
+
   if (loading) {
     return (
       <div className="h-[60vh] flex items-center justify-center">
@@ -90,7 +96,7 @@ export const OrderDetail: React.FC<OrderDetailProps> = ({ orderId, onBack }) => 
               Order Inspector
             </h1>
             <p className="text-on-surface-variant font-mono text-xs tracking-widest uppercase flex items-center gap-2">
-              <span className="text-[10px] border border-primary/20 bg-primary/5 text-primary px-2 py-0.5 rounded italic font-bold">LSPS1</span>
+              <span className="text-[10px] font-mono font-bold text-primary border border-primary/20 bg-primary/5 px-2 py-0.5 rounded italic">LSPS1</span>
               {orderId}
             </p>
           </div>
@@ -106,9 +112,9 @@ export const OrderDetail: React.FC<OrderDetailProps> = ({ orderId, onBack }) => 
           <h2 className="text-sm font-bold text-white uppercase tracking-widest">Order Parameters</h2>
 
           <div className="grid grid-cols-2 gap-6">
-            <DetailRow label="LSP Balance" value={formatLoki(order.lsp_balance_loki)} />
-            <DetailRow label="Client Balance" value={formatLoki(order.client_balance_loki)} />
-            <DetailRow label="Order Total" value={formatLoki(order.amount)} highlight />
+            <DetailRow label="LSP Balance" value={formatSmart(order.lsp_balance_loki)} />
+            <DetailRow label="Client Balance" value={formatSmart(order.client_balance_loki)} />
+            <DetailRow label="Order Total" value={formatSmart(order.amount)} highlight />
             <DetailRow label="Fee Total" value={formatLoki(order.fee)} />
             <DetailRow label="Funding Confirms" value={`${order.funding_confirms_within_blocks} blocks`} />
             <DetailRow label="Channel Expiry" value={`${order.channel_expiry_blocks} blocks`} />
@@ -117,7 +123,7 @@ export const OrderDetail: React.FC<OrderDetailProps> = ({ orderId, onBack }) => 
           </div>
 
           {/* Copyable Fields */}
-          <div className="space-y-3 pt-4 border-t border-white/5">
+          <div className="space-y-3 pt-6">
             <CopyableField
               label="Peer ID"
               value={order.peer_id}
@@ -153,6 +159,9 @@ export const OrderDetail: React.FC<OrderDetailProps> = ({ orderId, onBack }) => 
               const colorClass = timelineColors[event.event] || 'text-on-surface-variant';
               const isLast = i === timeline.length - 1;
 
+              // Detective for Funding TX in detail
+              const txMatch = event.detail?.match(/Funding TX: ([a-f0-9]{64})/);
+
               return (
                 <div key={i} className="flex gap-4">
                   {/* Vertical line + dot */}
@@ -165,7 +174,23 @@ export const OrderDetail: React.FC<OrderDetailProps> = ({ orderId, onBack }) => 
                   {/* Content */}
                   <div className="pb-6">
                     <p className="text-xs font-mono font-bold text-white uppercase tracking-wider">{event.event.replace(/_/g, ' ')}</p>
-                    <p className="text-[10px] font-mono text-on-surface-variant mt-1">{event.detail}</p>
+                    
+                    {txMatch ? (
+                      <div className="mt-1 flex items-center gap-1">
+                        <span className="text-[10px] font-mono text-on-surface-variant">Funding TX: </span>
+                        <a 
+                          href={`https://lokichain.info/tx/${txMatch[1]}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-[10px] font-mono text-primary hover:text-primary/80 underline decoration-primary/30 underline-offset-2 transition-colors"
+                        >
+                          {middleTrim(txMatch[1], 10)}
+                        </a>
+                      </div>
+                    ) : (
+                      <p className="text-[10px] font-mono text-on-surface-variant mt-1">{event.detail}</p>
+                    )}
+                    
                     <p className="text-[10px] font-mono text-on-surface-variant/50 mt-0.5 italic">
                       {new Date(event.timestamp).toLocaleString()}
                     </p>

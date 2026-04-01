@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Users, Globe, ArrowUpRight, ArrowDownLeft, Zap, Search, ShieldCheck, Activity } from 'lucide-react';
+import { Users, Globe, ArrowUpRight, ArrowDownLeft, Search, ShieldCheck, Activity } from 'lucide-react';
 import { useDashboard } from '../hooks/useDashboard';
-import { formatLoki } from '../lib/utils';
+import { formatSmart } from '../lib/utils';
 
 interface Peer {
   pub_key: string;
@@ -116,14 +116,14 @@ export const PeerNodes: React.FC<PeerNodesProps> = ({ onViewPeerOrders }) => {
                   <label className="text-[10px] uppercase tracking-wider font-bold text-slate-500 mb-1 block scale-90 origin-left">Sent</label>
                   <div className="flex items-center gap-1 text-slate-300">
                     <ArrowUpRight className="w-3 h-3 text-emerald-400" />
-                    <span className="text-[11px] font-bold font-mono uppercase tracking-tight">{formatLoki(peer.in_sat)}</span>
+                    <span className="text-[11px] font-bold font-mono uppercase tracking-tight">{formatSmart(peer.out_sat)}</span>
                   </div>
                 </div>
                 <div>
                   <label className="text-[10px] uppercase tracking-wider font-bold text-slate-500 mb-1 block scale-90 origin-left">Received</label>
                   <div className="flex items-center gap-1 text-slate-300">
                     <ArrowDownLeft className="w-3 h-3 text-indigo-400" />
-                    <span className="text-[11px] font-bold font-mono uppercase tracking-tight">{formatLoki(peer.out_sat)}</span>
+                    <span className="text-[11px] font-bold font-mono uppercase tracking-tight">{formatSmart(peer.in_sat)}</span>
                   </div>
                 </div>
               </div>
@@ -145,9 +145,6 @@ export const PeerNodes: React.FC<PeerNodesProps> = ({ onViewPeerOrders }) => {
                       </span>
                     </button>
                   )}
-                  <button className="text-[10px] font-bold text-indigo-400 hover:text-indigo-300 transition-colors uppercase tracking-widest flex items-center gap-1 border border-indigo-500/20 hover:border-indigo-500/40 px-2 py-1 rounded-lg bg-indigo-500/5">
-                    Connect <Zap className="w-3 h-3" />
-                  </button>
                 </div>
               </div>
             </motion.div>

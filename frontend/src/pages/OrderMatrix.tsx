@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { GlassCard } from '../components/GlassCard';
 import { Search, Filter, Download, MoreHorizontal, ExternalLink, RefreshCw, Loader2, AlertCircle } from 'lucide-react';
-import { cn, formatLoki } from '../lib/utils';
+import { cn, formatSmart, formatLoki } from '../lib/utils';
 import { useDashboard } from '../hooks/useDashboard';
 import { useEvents } from '../hooks/useEvents';
 import { useNavigate } from '@tanstack/react-router';
@@ -107,7 +107,7 @@ export const OrderMatrix: React.FC<OrderMatrixProps> = ({ onViewOrder, initialSe
                 <th className="px-6 py-5 text-[10px] font-mono text-on-surface-variant uppercase tracking-[0.2em] font-bold">Node ID</th>
                 <th className="px-6 py-5 text-[10px] font-mono text-on-surface-variant uppercase tracking-[0.2em] font-bold">Liquidity</th>
                 <th className="px-6 py-5 text-[10px] font-mono text-on-surface-variant uppercase tracking-[0.2em] font-bold">State</th>
-                <th className="px-6 py-5 text-[10px] font-mono text-on-surface-variant uppercase tracking-[0.2em] font-bold text-right">Reference</th>
+                <th className="px-6 py-5 text-[10px] font-mono text-on-surface-variant uppercase tracking-[0.2em] font-bold text-right">TX</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5">
@@ -141,8 +141,8 @@ export const OrderMatrix: React.FC<OrderMatrixProps> = ({ onViewOrder, initialSe
                     </td>
                     <td className="px-6 py-4">
                       <div className="flex flex-col">
-                        <span className="text-sm font-bold text-white tracking-tight">{formatLoki(order.amount)}</span>
-                        <span className="text-[10px] font-mono text-on-surface-variant/60">Fee: {formatLoki(order.fee)}</span>
+                        <span className="text-sm font-bold text-white tracking-tight">{formatSmart(order.amount)}</span>
+                        <span className="text-[10px] font-mono text-on-surface-variant/60 uppercase tracking-wider">Fee: {formatLoki(order.fee)}</span>
                       </div>
                     </td>
                     <td className="px-6 py-4">
@@ -218,7 +218,7 @@ export const OrderMatrix: React.FC<OrderMatrixProps> = ({ onViewOrder, initialSe
               <div className="grid grid-cols-2 gap-4 mb-4">
                 <div>
                   <p className="text-[10px] font-mono text-on-surface-variant uppercase tracking-widest mb-1">Liquidity</p>
-                  <p className="text-sm font-bold text-white">{formatLoki(order.amount)}</p>
+                  <p className="text-sm font-bold text-white">{formatSmart(order.amount)}</p>
                 </div>
                 <div>
                   <p className="text-[10px] font-mono text-on-surface-variant uppercase tracking-widest mb-1">Node</p>
