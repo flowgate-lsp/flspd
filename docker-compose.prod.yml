@@ -1,0 +1,109 @@
+services:
+
+  flnd:
+    image: ghcr.io/myfloki/flokicoin:latest
+    hostname: flnd
+    container_name: flnd
+    restart: unless-stopped
+    stop_grace_period: 1m
+    tty: true
+    ports:
+      - "5521:5521"
+      - "10005:10005"
+      - "5050:5050"
+    volumes:
+      - ./data/flnd:/root/.flnd
+      - ./data/twallet:/root/.twallet
+      - ./tools:/tools
+    command: /tools/start_twallet.sh
+    networks:
+      - flsp_network
+
+  lokihub:
+    image: ghcr.io/myfloki/flokicoin:latest
+    hostname: lokihub
+    container_name: lokihub
+    restart: unless-stopped
+    stop_grace_period: 1m
+    volumes:
+      - ./data/lokihub:/root/.local/share/lokihub
+    command: lokihub
+    networks:
+      - flsp_network
+      - web
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=web"
+      - "traefik.http.routers.lokihub.rule=Host(`hub.flowgate.to`)"
+      - "traefik.http.routers.lokihub.entrypoints=web"
+      - "traefik.http.services.lokihub.loadbalancer.server.port=1610"
+
+  flspd:
+    image: ghcr.io/flowgate-lsp/flspd:latest
+    container_name: flspd
+    restart: unless-stopped
+    environment:
+      - LISTEN_ADDRESS=0.0.0.0:9090
+      - DATABASE_URL=postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
+      - AUTO_MIGRATE_DATABASE=${AUTO_MIGRATE_DATABASE:-true}
+      - MEMPOOL_PRIORITY=${MEMPOOL_PRIORITY:-economy}
+      - MEMPOOL_API_BASE_URL=${MEMPOOL_API_BASE_URL}
+      - NODES_CONFIG_PATH=/flspd/nodes.yaml
+      - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL}
+      - DISCORD_NOTIFICATIONS_ENABLED=${DISCORD_NOTIFICATIONS_ENABLED}
+      - LSP_NOSTR_PRIVATE_KEY=${LSP_NOSTR_PRIVATE_KEY}
+      - LOG_DIR=/var/log/flspd
+      - LOG_MAX_SIZE_MB=${LOG_MAX_SIZE_MB:-100}
+      - LOG_MAX_BACKUPS=${LOG_MAX_BACKUPS:-5}
+      - LOG_MAX_AGE_DAYS=${LOG_MAX_AGE_DAYS:-30}
+      - LOG_COMPRESS=${LOG_COMPRESS:-true}
+    volumes:
+      - ${NODES_CONFIG_PATH}:/flspd/nodes.yaml
+      - ${LOG_DIR}:/var/log/flspd
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "9090"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - flsp_network
+      - web
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=web"
+      - "traefik.http.routers.flspd.rule=Host(`flsp.flowgate.to`) && (PathPrefix(`/api`) || PathPrefix(`/api/`))"
+      - "traefik.http.routers.flspd.entrypoints=web"
+      - "traefik.http.services.flspd.loadbalancer.server.port=51611"
+      - "traefik.http.middlewares.flspd-strip.stripprefix.prefixes=/api"
+      - "traefik.http.routers.flspd.middlewares=flspd-strip"
+
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_HOST_AUTH_METHOD: trust
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - flsp_network
+
+networks:
+  flsp_network:
+    driver: bridge
+  web:
+    external: true
