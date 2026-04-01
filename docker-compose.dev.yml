@@ -10,6 +10,7 @@ services:
     restart: unless-stopped
     ports:
       - "9090:9090"
+      - "8080:8080"
     environment:
       - LISTEN_ADDRESS=0.0.0.0:9090
       - DATABASE_URL=postgres://${POSTGRES_USER:-flspd}:${POSTGRES_PASSWORD:-flspdpassword}@postgres:5432/${POSTGRES_DB:-flspd}?sslmode=disable
@@ -21,6 +22,8 @@ services:
       - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL}
       - DISCORD_NOTIFICATIONS_ENABLED=${DISCORD_NOTIFICATIONS_ENABLED:-false}
       - LSP_NOSTR_PRIVATE_KEY=${LSP_NOSTR_PRIVATE_KEY}
+      - DASHBOARD_ADMIN_PUBKEY=${DASHBOARD_ADMIN_PUBKEY}
+      - DASHBOARD_LISTEN_ADDRESS=${DASHBOARD_LISTEN_ADDRESS:-:8080}
       - LOG_DIR=/var/log/flspd
       - LOG_MAX_SIZE_MB=${LOG_MAX_SIZE_MB:-100}
       - LOG_MAX_BACKUPS=${LOG_MAX_BACKUPS:-5}
