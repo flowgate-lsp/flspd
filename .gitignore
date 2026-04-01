@@ -8,5 +8,8 @@ lspd_revenue_cli
 .env
 nodes.json
 *.log
-data
-
+data/
+node_modules/
+frontend/node_modules/
+.agents/
+skills-lock.json
