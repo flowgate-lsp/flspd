@@ -1,0 +1,298 @@
+import React, { useState, useEffect } from 'react';
+import { GlassCard } from '../components/GlassCard';
+import { Settings as SettingsIcon, Save, RefreshCw, Zap, Shield, Globe, Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { useSettings } from '../hooks/useSettings';
+import { cn } from '../lib/utils';
+import { motion, AnimatePresence } from 'framer-motion';
+
+type Tab = 'general' | 'jit' | 'lsps1';
+
+export const Settings: React.FC = () => {
+  const { config, loading, saving, error, refreshConfig, updateConfig } = useSettings();
+  const [activeTab, setActiveTab] = useState<Tab>('general');
+  const [formData, setFormData] = useState<any>(null);
+  const [showSuccess, setShowSuccess] = useState(false);
+
+  useEffect(() => {
+    if (config) {
+      setFormData({ ...config });
+    }
+  }, [config]);
+
+  const handleInputChange = (path: string, value: any) => {
+    setFormData((prev: any) => {
+      const next = { ...prev };
+      const keys = path.split('.');
+      let current = next;
+      for (let i = 0; i < keys.length - 1; i++) {
+        current = current[keys[i]];
+      }
+      current[keys[keys.length - 1]] = value;
+      return next;
+    });
+  };
+
+  const handleSave = async () => {
+    const success = await updateConfig(formData);
+    if (success) {
+      setShowSuccess(true);
+      setTimeout(() => setShowSuccess(false), 3000);
+    }
+  };
+
+  if (loading && !formData) {
+    return (
+      <div className="h-[60vh] flex items-center justify-center">
+        <Loader2 className="w-8 h-8 text-primary animate-spin" />
+      </div>
+    );
+  }
+
+  const tabs: { id: Tab; label: string; icon: any }[] = [
+    { id: 'general', label: 'General', icon: Globe },
+    { id: 'jit', label: 'JIT Channels', icon: Zap },
+    { id: 'lsps1', label: 'LSPS1 Protocol', icon: Shield },
+  ];
+
+  return (
+    <div className="p-4 md:p-10 max-w-5xl mx-auto space-y-8 animate-in fade-in duration-1000 pb-20">
+      {/* Header */}
+      <header className="flex flex-col md:flex-row md:justify-between md:items-end gap-4">
+        <div>
+          <h1 className="text-3xl md:text-4xl font-bold tracking-tighter text-white mb-2 uppercase italic leading-none flex items-center gap-4">
+             <SettingsIcon className="w-8 h-8 md:w-10 md:h-10 text-primary" />
+             Node Settings
+          </h1>
+          <p className="text-on-surface-variant font-mono text-[10px] md:text-xs tracking-widest uppercase">
+            Manage LSP node parameters and protocol behavior
+          </p>
+        </div>
+        <div className="flex gap-3">
+          <button 
+            onClick={refreshConfig}
+            className="p-3 rounded-xl bg-white/5 border border-white/10 text-white hover:bg-white/10 transition-all active:scale-95"
+            title="Refresh Config"
+          >
+            <RefreshCw className={cn("w-5 h-5", loading && "animate-spin")} />
+          </button>
+          <button 
+            onClick={handleSave}
+            disabled={saving}
+            className="flex items-center gap-2 px-6 py-3 rounded-xl bg-primary text-black font-bold uppercase tracking-widest text-xs hover:brightness-110 transition-all active:scale-95 disabled:opacity-50 disabled:pointer-events-none shadow-[0_0_20px_rgba(0,186,255,0.3)]"
+          >
+            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+            {saving ? 'Saving...' : 'Save Changes'}
+          </button>
+        </div>
+      </header>
+
+      {error && (
+        <div className="p-4 rounded-xl bg-error/10 border border-error/20 flex items-center gap-3 text-error animate-in slide-in-from-top-2">
+            <AlertCircle className="w-5 h-5" />
+            <p className="text-xs font-mono font-medium">{error}</p>
+        </div>
+      )}
+
+      {showSuccess && (
+        <div className="p-4 rounded-xl bg-secondary/10 border border-secondary/20 flex items-center gap-3 text-secondary animate-in slide-in-from-top-2">
+            <CheckCircle2 className="w-5 h-5" />
+            <p className="text-xs font-mono font-medium lowercase italic tracking-tight">Configuration persisted successfully</p>
+        </div>
+      )}
+
+      {/* Tabs */}
+      <div className="flex p-1 bg-white/5 rounded-2xl border border-white/5 w-fit">
+        {tabs.map((tab) => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            className={cn(
+              "flex items-center gap-2 px-6 py-2.5 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all",
+              activeTab === tab.id ? "bg-white/10 text-white border border-white/10" : "text-on-surface-variant hover:text-white"
+            )}
+          >
+            <tab.icon className={cn("w-4 h-4", activeTab === tab.id ? "text-primary" : "text-inherit")} />
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Content */}
+      <div className="relative">
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={activeTab}
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -20 }}
+            transition={{ duration: 0.3 }}
+            className="space-y-6"
+          >
+            {activeTab === 'general' && (
+              <GlassCard className="space-y-8">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                  <Input 
+                    label="Display Name" 
+                    value={formData?.name} 
+                    onChange={(v) => handleInputChange('name', v)}
+                    placeholder="e.g. My Flowgate LSP"
+                  />
+                  <Input 
+                    label="Public Host" 
+                    value={formData?.host} 
+                    onChange={(v) => handleInputChange('host', v)}
+                    placeholder="e.g. lsp.example.com:9735"
+                  />
+                  <Input 
+                    label="Target Confirmations" 
+                    type="number"
+                    value={formData?.targetConf} 
+                    onChange={(v) => handleInputChange('targetConf', parseInt(v))}
+                  />
+                   <Input 
+                    label="Min Confirmations" 
+                    type="number"
+                    value={formData?.minConfs} 
+                    onChange={(v) => handleInputChange('minConfs', parseInt(v))}
+                  />
+                </div>
+              </GlassCard>
+            )}
+
+            {activeTab === 'jit' && (
+              <GlassCard className="space-y-8">
+                <div className="flex items-center justify-between p-4 bg-white/5 rounded-2xl border border-white/10 mb-8">
+                    <div>
+                        <h4 className="text-sm font-bold text-white uppercase italic tracking-tighter">Enable JIT Channels</h4>
+                        <p className="text-[10px] font-mono text-on-surface-variant">Allow zero-conf JIT channel creation for incoming payments</p>
+                    </div>
+                    <Switch 
+                        checked={formData?.jitEnabled} 
+                        onChange={(v) => handleInputChange('jitEnabled', v)} 
+                    />
+                </div>
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+                  <Input 
+                    label="Min Payment Size (mLOKI)" 
+                    type="number"
+                    value={formData?.minPaymentSizeMloki} 
+                    onChange={(v) => handleInputChange('minPaymentSizeMloki', parseInt(v))}
+                  />
+                  <Input 
+                    label="Max Payment Size (mLOKI)" 
+                    type="number"
+                    value={formData?.jitMaxPaymentSizeMloki} 
+                    onChange={(v) => handleInputChange('jitMaxPaymentSizeMloki', parseInt(v))}
+                  />
+                  <Input 
+                    label="Base Fee (mLOKI)" 
+                    type="number"
+                    value={formData?.baseFeeMloki} 
+                    onChange={(v) => handleInputChange('baseFeeMloki', parseInt(v))}
+                  />
+                  <Input 
+                    label="Fee Rate" 
+                    type="number"
+                    step="0.0001"
+                    value={formData?.feeRate} 
+                    onChange={(v) => handleInputChange('feeRate', parseFloat(v))}
+                  />
+                  <Input 
+                    label="Channel Fee (Permyriad)" 
+                    type="number"
+                    value={formData?.channelFeePermyriad} 
+                    onChange={(v) => handleInputChange('channelFeePermyriad', parseInt(v))}
+                  />
+                  <Input 
+                    label="Min Channel Capacity (LOKI)" 
+                    type="number"
+                    value={formData?.minChannelCapacityLoki} 
+                    onChange={(v) => handleInputChange('minChannelCapacityLoki', parseInt(v))}
+                  />
+                </div>
+              </GlassCard>
+            )}
+
+            {activeTab === 'lsps1' && (
+              <GlassCard className="space-y-8">
+                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+                  <Input 
+                    label="Min Channel Confirms" 
+                    type="number"
+                    value={formData?.lsps1MinRequiredChannelConfirmations} 
+                    onChange={(v) => handleInputChange('lsps1MinRequiredChannelConfirmations', parseInt(v))}
+                  />
+                  <Input 
+                    label="Max Channel Expiry (Blocks)" 
+                    type="number"
+                    value={formData?.lsps1MaxChannelExpiryBlocks} 
+                    onChange={(v) => handleInputChange('lsps1MaxChannelExpiryBlocks', parseInt(v))}
+                  />
+                  <Input 
+                    label="Order Expiry (Seconds)" 
+                    type="number"
+                    value={formData?.lsps1OrderExpirySeconds} 
+                    onChange={(v) => handleInputChange('lsps1OrderExpirySeconds', parseInt(v))}
+                  />
+                  <Input 
+                    label="Min Initial Client Balance (LOKI)" 
+                    type="number"
+                    value={formData?.lsps1MinInitialClientBalanceLoki} 
+                    onChange={(v) => handleInputChange('lsps1MinInitialClientBalanceLoki', parseInt(v))}
+                  />
+                   <Input 
+                    label="Max Initial Client Balance (LOKI)" 
+                    type="number"
+                    value={formData?.lsps1MaxInitialClientBalanceLoki} 
+                    onChange={(v) => handleInputChange('lsps1MaxInitialClientBalanceLoki', parseInt(v))}
+                  />
+                   <Input 
+                    label="Min Initial LSP Balance (LOKI)" 
+                    type="number"
+                    value={formData?.lsps1MinInitialLspBalanceLoki} 
+                    onChange={(v) => handleInputChange('lsps1MinInitialLspBalanceLoki', parseInt(v))}
+                  />
+                </div>
+              </GlassCard>
+            )}
+          </motion.div>
+        </AnimatePresence>
+      </div>
+    </div>
+  );
+};
+
+// Internal Components
+const Input: React.FC<{ label: string; value: any; onChange: (v: any) => void; type?: string; placeholder?: string; step?: string }> = ({ 
+  label, value, onChange, type = 'text', placeholder, step 
+}) => (
+  <div className="space-y-2 group">
+    <label className="text-[10px] font-mono uppercase tracking-[0.2em] text-on-surface-variant group-focus-within:text-primary transition-colors">
+      {label}
+    </label>
+    <input 
+      type={type}
+      step={step}
+      value={value ?? ''}
+      onChange={(e) => onChange(e.target.value)}
+      placeholder={placeholder}
+      className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm text-white font-mono placeholder:text-white/20 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all"
+    />
+  </div>
+);
+
+const Switch: React.FC<{ checked: boolean; onChange: (v: boolean) => void }> = ({ checked, onChange }) => (
+  <button 
+    onClick={() => onChange(!checked)}
+    className={cn(
+        "w-12 h-6 rounded-full transition-all duration-300 relative",
+        checked ? "bg-primary" : "bg-white/10"
+    )}
+  >
+    <div className={cn(
+        "absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-all duration-300",
+        checked ? "translate-x-6" : "translate-x-0"
+    )} />
+  </button>
+);
