@@ -34,7 +34,13 @@ func (m *MockLightningClient) GetBlockHeight() (uint32, error) {
 	return args.Get(0).(uint32), args.Error(1)
 }
 
+func (m *MockLightningClient) ListPeers() ([]*lightning.Peer, error) {
+	args := m.Called()
+	return args.Get(0).([]*lightning.Peer), args.Error(1)
+}
+
 func (m *MockLightningClient) IsConnected(destination []byte) (bool, error) {
+
 	args := m.Called(destination)
 	return args.Bool(0), args.Error(1)
 }

@@ -12,7 +12,17 @@ type GetInfoResult struct {
 	Pubkey string
 }
 
+type Peer struct {
+	Pubkey        string `json:"pub_key"`
+	Address       string `json:"address"`
+	Inbound       bool   `json:"inbound"`
+	BytesSent     uint64 `json:"bytes_sent"`
+	BytesReceived uint64 `json:"bytes_received"`
+	Active        bool   `json:"active"`
+}
+
 type GetChannelResult struct {
+
 	AliasScid        *ShortChannelID
 	ConfirmedScid    *ShortChannelID
 	HtlcMinimumMloki uint64
@@ -62,8 +72,10 @@ type Client interface {
 	WaitOnline(peerID []byte, deadline time.Time) error
 	WaitChannelActive(peerID []byte, deadline time.Time) error
 	ListChannels() ([]*Channel, error)
+	ListPeers() ([]*Peer, error)
 	SubscribeInvoices() (<-chan *InvoiceUpdate, <-chan error, error)
 	WalletBalance(ctx context.Context) (*WalletBalanceResult, error)
+
 	GetBlockHeight() (uint32, error)
 	QueryRoutes(destination []byte, amountMloki uint64, outgoingChanId uint64) ([]*Route, error)
 }

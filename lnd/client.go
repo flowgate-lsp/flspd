@@ -626,7 +626,28 @@ func (c *LndClient) ListChannels() ([]*lightning.Channel, error) {
 	return result, nil
 }
 
+func (c *LndClient) ListPeers() ([]*lightning.Peer, error) {
+	resp, err := c.client.ListPeers(context.Background(), &lnrpc.ListPeersRequest{})
+	if err != nil {
+		return nil, err
+	}
+
+	result := make([]*lightning.Peer, len(resp.Peers))
+	for i, p := range resp.Peers {
+		result[i] = &lightning.Peer{
+			Pubkey:        p.PubKey,
+			Address:       p.Address,
+			Inbound:       p.Inbound,
+			BytesSent:     p.BytesSent,
+			BytesReceived: p.BytesRecv,
+			Active:        true, // If they are in ListPeers, they are connected
+		}
+	}
+	return result, nil
+}
+
 func (c *LndClient) GetBlockHeight() (uint32, error) {
+
 	info, err := c.client.GetInfo(context.Background(), &lnrpc.GetInfoRequest{})
 	if err != nil {
 		return 0, err
