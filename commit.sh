@@ -36,5 +36,11 @@ git commit -m "build: automate cloudflare deployment and cleanup docker stack" \
            -m "- Added deploy-frontend recipe to justfile
 - Removed local frontend service from production docker-compose
 - Added batch commit script for environment maintenance"
+# Batch 6: Frontend Build Stabilization
+git add frontend/src/pages/Analytics.tsx
+git commit -m "fix: resolve frontend typescript build blockers" \
+           -m "- Standardized Recharts tooltip formatter types in Analytics.tsx
+- Ensured safe value casting to prevent TS2322 errors during CI"
 
 echo "Batch commits completed successfully!"
+
