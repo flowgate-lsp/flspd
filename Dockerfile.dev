@@ -37,7 +37,8 @@ FROM alpine:latest
 # ca-certificates: for HTTPS connections
 # tzdata: for time zone support
 # bash: for convenience (optional, can be removed for minimalism)
-RUN apk add --no-cache ca-certificates tzdata bash
+# netcat-openbsd: for healthchecks
+RUN apk add --no-cache ca-certificates tzdata bash netcat-openbsd
 
 WORKDIR /app
 
