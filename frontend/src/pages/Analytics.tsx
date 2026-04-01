@@ -7,6 +7,7 @@ import { useAuth } from '../hooks/useAuth';
 import { DashboardAPI } from '../lib/api';
 import { formatSats } from '../lib/utils';
 
+
 // Mock historical data — will be replaced with real API data
 const revenueData = Array.from({ length: 14 }, (_, i) => ({
   day: `${14 - i}d`,
