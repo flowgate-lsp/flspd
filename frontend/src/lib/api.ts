@@ -27,6 +27,8 @@ export class DashboardAPI {
 
     if (!response.ok) {
       if (response.status === 401 || response.status === 403) {
+        // Dispatch global event for useAuth to handle logout
+        window.dispatchEvent(new CustomEvent('flspd_unauthorized'));
         throw new Error('Unauthorized');
       }
       throw new Error(`HTTP error! status: ${response.status}`);

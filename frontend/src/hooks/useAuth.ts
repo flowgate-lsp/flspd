@@ -16,6 +16,13 @@ export const useAuth = () => {
       setUser(JSON.parse(saved));
     }
     setLoading(false);
+
+    const handleUnauthorized = () => {
+      logout();
+    };
+
+    window.addEventListener('flspd_unauthorized', handleUnauthorized);
+    return () => window.removeEventListener('flspd_unauthorized', handleUnauthorized);
   }, []);
 
   const login = async (nsec: string) => {
@@ -24,8 +31,41 @@ export const useAuth = () => {
       if (type !== 'nsec') throw new Error('Not an nsec');
       
       const pubkey = getPublicKey(privkey as Uint8Array);
-      const newUser = { pubkey, nsec };
       
+      // Perform a verification request before saving the session
+      const testUrl = `${window.location.origin}/dashboard`;
+      const event = {
+        kind: 27235,
+        created_at: Math.floor(Date.now() / 1000),
+        tags: [
+          ['u', testUrl],
+          ['m', 'POST'],
+        ],
+        content: '',
+      };
+      const signedEvent = finalizeEvent(event, privkey as Uint8Array);
+      const encodedEvent = btoa(JSON.stringify(signedEvent));
+
+      const resp = await fetch(testUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Nostr ${encodedEvent}`,
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          method: 'get_summary',
+          params: {},
+          id: 'login-check',
+        }),
+      });
+
+      if (!resp.ok) {
+        if (resp.status === 403) throw new Error('Unauthorized: Key is not listed as an admin.');
+        throw new Error(`Server returned ${resp.status}`);
+      }
+
+      const newUser = { pubkey, nsec };
       localStorage.setItem('flspd_auth', JSON.stringify(newUser));
       setUser(newUser);
     } catch (err) {

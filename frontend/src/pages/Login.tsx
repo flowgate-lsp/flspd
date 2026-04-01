@@ -20,8 +20,8 @@ export const Login: React.FC = () => {
     setError('');
     try {
       await login(nsec);
-    } catch (err) {
-      setError('Invalid nsec key. Please check and try again.');
+    } catch (err: any) {
+      setError(err.message || 'Authentication failed. Please check your key.');
     } finally {
       setLoading(false);
     }

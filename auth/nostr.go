@@ -26,11 +26,28 @@ type NostrAuth struct {
 func VerifyNostrAuth(r *http.Request) (*NostrAuth, error) {
 	authHeader := r.Header.Get("Authorization")
 	if authHeader == "" {
-		// Fallback to query parameter for WebSockets or other cases where headers are difficult
-		authHeader = r.URL.Query().Get("auth")
+		// Fallback to query parameter
+		vals := r.URL.Query()
+		// If proxied, sometimes r.URL.Query() doesn't parse correctly on upgrades
+		if len(vals) == 0 && strings.Contains(r.RequestURI, "?") {
+			parts := strings.Split(r.RequestURI, "?")
+			if len(parts) > 1 {
+				for _, pair := range strings.Split(parts[1], "&") {
+					kv := strings.Split(pair, "=")
+					if len(kv) == 2 && kv[0] == "auth" {
+						authHeader = kv[1]
+						break
+					}
+				}
+			}
+		} else {
+			authHeader = vals.Get("auth")
+		}
+
 		if authHeader == "" {
 			return nil, fmt.Errorf("missing Authorization header or auth query parameter")
 		}
+		
 		// If it's a query param, it might not have the "Nostr " prefix, let's normalize
 		if !strings.HasPrefix(strings.ToLower(authHeader), "nostr ") {
 			authHeader = "Nostr " + authHeader
@@ -145,7 +162,8 @@ func getFullUrl(r *http.Request) string {
 		scheme = "https"
 	}
 
-	return fmt.Sprintf("%s://%s%s", scheme, host, path)
+	result := fmt.Sprintf("%s://%s%s", scheme, host, path)
+	return strings.TrimSuffix(result, "/")
 }
 
 // ComputePayloadHash computes the SHA256 hex hash of a request body
