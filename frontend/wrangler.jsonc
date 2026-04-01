@@ -8,6 +8,6 @@
     "binding": "ASSETS"
   },
   "vars": {
-    "UPSTREAM_API": "https://flsp.flowgate.to/api"
+    "UPSTREAM_API": "https://flspapi.flowgate.to"
   }
 }
