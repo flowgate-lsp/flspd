@@ -8,22 +8,10 @@ import { DashboardAPI } from '../lib/api';
 import { formatLoki } from '../lib/utils';
 
 
-// Mock historical data — will be replaced with real API data
-const revenueData = Array.from({ length: 14 }, (_, i) => ({
-  day: `${14 - i}d`,
-  revenue: Math.floor(Math.random() * 500000) + 100000,
-})).reverse();
-
-const orderVolume = [
-  { name: 'CREATED', value: 5, color: '#807e80' },
-  { name: 'PAID', value: 12, color: '#00baff' },
-  { name: 'COMPLETED', value: 34, color: '#00fd87' },
-  { name: 'FAILED', value: 3, color: '#ff3b30' },
-];
-
 export const Analytics: React.FC = () => {
   const { getAuthHeader } = useAuth();
   const [radarData, setRadarData] = useState<any[] | null>(null);
+  const [analytics, setAnalytics] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
   const api = useMemo(() => {
@@ -31,19 +19,29 @@ export const Analytics: React.FC = () => {
   }, [getAuthHeader]);
 
   useEffect(() => {
-    api.getRadarData()
-      .then(setRadarData)
-      .catch(() => {})
-      .finally(() => setLoading(false));
+    Promise.all([
+      api.getRadarData(),
+      api.getAnalytics()
+    ]).then(([radar, analytics]) => {
+      setRadarData(radar);
+      setAnalytics(analytics);
+    }).catch((err) => {
+      console.error('Failed to fetch analytics:', err);
+    }).finally(() => {
+      setLoading(false);
+    });
   }, [api]);
 
-  if (loading) {
+  if (loading || !analytics) {
     return (
       <div className="h-[60vh] flex items-center justify-center">
         <Loader2 className="w-8 h-8 text-primary animate-spin" />
       </div>
     );
   }
+
+  const revenueData = analytics.revenue_history || [];
+  const orderVolume = analytics.order_volume || [];
 
   return (
     <div className="p-4 md:p-10 max-w-7xl mx-auto space-y-8 animate-in fade-in duration-700">
@@ -147,7 +145,7 @@ export const Analytics: React.FC = () => {
                 }}
               />
               <Bar dataKey="value" radius={[0, 8, 8, 0]} animationDuration={1200}>
-                {orderVolume.map((entry, index) => (
+                {orderVolume.map((entry: any, index: number) => (
                   <Cell key={`cell-${index}`} fill={entry.color} fillOpacity={0.7} />
                 ))}
               </Bar>

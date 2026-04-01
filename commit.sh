@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Stage all files related to the authentication, stability, and data mapping fixes
+# Stage all files related to the authentication, stability, data mapping, and analytics fixes
 git add auth/nostr.go \
         cmd/flspd/run.go \
         common/opening_store.go \
@@ -25,14 +25,13 @@ git add auth/nostr.go \
         docker-compose.prod.yml
 
 # Commit with a detailed message
-git commit -m "fix(dashboard): unify data mapping, fix UI crashes and date parsing
+git commit -m "feat(dashboard): real-time analytics, UI layout polish, and unified mapping
 
+- Implement real-time Radar scoring (Liquidity, Uptime, Success) in backend
+- Add 'get_analytics' RPC for real order distribution and 14-day revenue history
+- Fix UI layout: Add proper padding and max-width to PeerNodes and JITChannels pages
 - Standardize all Go structs (Peer, Summary, Order) with lowercase JSON tags
-- Fix PeerNodes crash by referencing correct lowercase pub_key and address properties
-- Resolve 'Invalid Date' issues by supporting ISO string parsing in all components
-- Fix '0 loki' amount display by aligning frontend fields with backend tags
-- Implement AuthProvider for reliable login redirects and shared session state
-- Refactor WebSocket to a singleton context to prevent redundant connections
-- Update JITChannels and OrderMatrix for full consistency across the dashboard"
+- Fix PeerNodes crash and 'Invalid Date' parsing across all components
+- Refactor WebSocket to a singleton context and implement AuthProvider flow"
 
-echo "Stability and data mapping fixes successfully committed!"
+echo "Analytics, UI polish, and data mapping fixes successfully committed!"

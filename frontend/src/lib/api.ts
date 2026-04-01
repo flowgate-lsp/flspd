@@ -73,4 +73,8 @@ export class DashboardAPI {
   getRadarData() {
     return this.request('get_radar_data');
   }
+
+  getAnalytics() {
+    return this.request('get_analytics');
+  }
 }
