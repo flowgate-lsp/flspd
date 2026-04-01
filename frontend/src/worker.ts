@@ -28,6 +28,9 @@ export default {
       const targetUrl = new URL(url.pathname + url.search, upstreamUrl.origin);
 
       const newHeaders = new Headers(request.headers);
+      // **CRITICAL FIX**: Traefik relies on the Host header to route the request to the correct container.
+      // We must replace the 'flsp.flowgate.to' (Frontend Host) with 'flspapi.flowgate.to' (Backend Host).
+      newHeaders.set('Host', upstreamUrl.hostname);
       
       const proxyRequest = new Request(targetUrl.toString(), {
         method: request.method,
@@ -35,7 +38,6 @@ export default {
         body: request.body,
         redirect: 'manual',
       });
-
       try {
         return await fetch(proxyRequest);
       } catch (e) {

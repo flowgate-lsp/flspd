@@ -60,7 +60,7 @@ services:
       - LOG_COMPRESS=${LOG_COMPRESS:-true}
     volumes:
       - ${NODES_CONFIG_PATH}:/flspd/nodes.yaml
-      - ${LOG_DIR}:/var/log/flspd
+      - flspd_logs:/var/log/flspd
     depends_on:
       postgres:
         condition: service_healthy
@@ -115,3 +115,6 @@ networks:
     driver: bridge
   web:
     external: true
+
+volumes:
+  flspd_logs:
