@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { GlassCard } from '../components/GlassCard';
 import { 
   Activity, 
@@ -17,10 +17,10 @@ import {
 } from 'lucide-react';
 import { formatSmart, cn } from '../lib/utils';
 import { useDashboard } from '../hooks/useDashboard';
-import { useEvents } from '../hooks/useEvents';
+
 
 export const CommandCenter: React.FC<{ onViewOrder?: (id: string) => void }> = ({ onViewOrder }) => {
-  const { summary, api, orders } = useDashboard();
+  const { summary, orders } = useDashboard();
   const [copied, setCopied] = useState(false);
 
   const recentOrders = orders.slice(0, 5).map(o => ({
