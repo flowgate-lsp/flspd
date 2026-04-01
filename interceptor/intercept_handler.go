@@ -30,7 +30,7 @@ type Interceptor struct {
 	feeEstimator        chain.FeeEstimator
 	feeStrategy         chain.FeeStrategy
 	payHashGroup        singleflight.Group
-	notificationService *notifications.NotificationService
+	notificationService notifications.Notifier
 	nodePrivKey         interface{} // *btcec.PrivateKey for LSPS5 signing
 }
 
@@ -42,7 +42,7 @@ func NewInterceptHandler(
 	openingService common.OpeningService,
 	feeEstimator chain.FeeEstimator,
 	feeStrategy chain.FeeStrategy,
-	notificationService *notifications.NotificationService,
+	notificationService notifications.Notifier,
 	nodePrivKey interface{},
 ) *Interceptor {
 	nodeid, _ := hex.DecodeString(config.NodePubkey)

@@ -10,6 +10,16 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+// Notifier is an interface for sending LSPS5 webhook notifications and other alerts.
+type Notifier interface {
+	Notify(pubkey string, paymenthash string, nodePrivKey interface{}) (bool, error)
+	NotifyWebhookRegistered(pubkey string, webhook *common.Lsps5Webhook) bool
+	NotifyOrderStateChanged(pubkey string, orderId string, state string, channelPoint string, errorMsg string) (bool, error)
+	NotifyExpirySoon(pubkey string, timeout int, nodePrivKey interface{}, paymentHash string) (bool, error)
+	NotifyLiquidityManagementRequest(pubkey string, nodePrivKey interface{}) (bool, error)
+	NotifyOnionMessageIncoming(pubkey string, nodePrivKey interface{}) (bool, error)
+}
+
 var minNotificationInterval time.Duration = time.Second * 30
 var cleanInterval time.Duration = time.Minute * 2
 
@@ -232,6 +242,7 @@ func (s *NotificationService) NotifyExpirySoon(
 	pubkey string,
 	timeout int,
 	nodePrivKey interface{},
+	paymentHash string,
 ) (bool, error) {
 	webhooks, err := s.openingStore.GetLsps5Webhooks(pubkey)
 	if err != nil {

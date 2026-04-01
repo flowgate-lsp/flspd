@@ -20,7 +20,7 @@ const (
 // ExpiryWatcher monitors pending HTLCs and notifies clients when expiry is approaching
 type ExpiryWatcher struct {
 	client              lightning.Client
-	notificationService NotificationService
+	notificationService Notifier
 	nodeConfig          *config.NodeConfig
 	quit                chan struct{}
 	wg                  sync.WaitGroup
@@ -29,7 +29,7 @@ type ExpiryWatcher struct {
 // NewExpiryWatcher creates a new expiry watcher service
 func NewExpiryWatcher(
 	client lightning.Client,
-	notificationService NotificationService,
+	notificationService Notifier,
 	nodeConfig *config.NodeConfig,
 ) *ExpiryWatcher {
 	return &ExpiryWatcher{
@@ -99,7 +99,7 @@ func (w *ExpiryWatcher) checkExpiries() {
 					pubkey := hex.EncodeToString(ch.PeerId)
 
 					// Avoid spamming? The NotificationService dedupes based on payment hash+interval.
-					w.notificationService.NotifyExpirySoon(pubkey, blocksToExpiry, nil)
+					w.notificationService.NotifyExpirySoon(pubkey, blocksToExpiry, nil, hex.EncodeToString(htlc.HashLock))
 				}
 			}
 		}
