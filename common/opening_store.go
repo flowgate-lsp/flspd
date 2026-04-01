@@ -35,24 +35,24 @@ type Lsps2BuyRegistration struct {
 }
 
 type Lsps1Order struct {
-	OrderId                      string
-	PeerId                       string
-	LspBalanceLoki               int64
-	ClientBalanceLoki            int64
-	FundingConfirmsWithinBlocks  int
-	RequiredChannelConfirmations int
-	ChannelExpiryBlocks          int
-	Token                        string
-	AnnounceChannel              bool
-	CreatedAt                    time.Time
-	OrderState                   string
-	PaymentState                 string
-	PaymentInvoice               string
-	FundingTxid                  *string
-	FundingOutpoint              *int
-	RefundOnchainAddress         string
-	OrderTotalLoki               int64
-	FeeTotalLoki                 int64
+	OrderId                      string    `json:"order_id"`
+	PeerId                       string    `json:"peer_id"`
+	LspBalanceLoki               int64     `json:"lsp_balance_loki"`
+	ClientBalanceLoki            int64     `json:"client_balance_loki"`
+	FundingConfirmsWithinBlocks  int       `json:"funding_confirms_within_blocks"`
+	RequiredChannelConfirmations int       `json:"required_channel_confirmations"`
+	ChannelExpiryBlocks          int       `json:"channel_expiry_blocks"`
+	Token                        string    `json:"token"`
+	AnnounceChannel              bool      `json:"announce_channel"`
+	CreatedAt                    time.Time `json:"created_at"`
+	OrderState                   string    `json:"state"`
+	PaymentState                 string    `json:"payment_state"`
+	PaymentInvoice               string    `json:"payment_invoice"`
+	FundingTxid                  *string   `json:"funding_txid"`
+	FundingOutpoint              *int      `json:"funding_outpoint"`
+	RefundOnchainAddress         string    `json:"refund_onchain_address"`
+	OrderTotalLoki               int64     `json:"amount"` // Mapped to 'amount' for frontend simplicity
+	FeeTotalLoki                 int64     `json:"fee"`    // Mapped to 'fee' for frontend simplicity
 }
 
 type Lsps5Webhook struct {

@@ -5,7 +5,7 @@ import { BarChart3, TrendingUp, Loader2 } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar, Cell } from 'recharts';
 import { useAuth } from '../hooks/useAuth';
 import { DashboardAPI } from '../lib/api';
-import { formatSats } from '../lib/utils';
+import { formatLoki } from '../lib/utils';
 
 
 // Mock historical data — will be replaced with real API data
@@ -105,7 +105,7 @@ export const Analytics: React.FC = () => {
                     fontSize: '11px',
                     fontFamily: 'monospace',
                   }}
-                  formatter={(value: any) => [formatSats(Number(value) || 0), 'Revenue']}
+                  formatter={(value: any) => [formatLoki(Number(value) || 0), 'Revenue']}
                   labelStyle={{ color: '#807e80' }}
                 />
                 <Area

@@ -589,13 +589,13 @@ func ValidateJitConfig(cfg *config.NodeConfig) error {
 
 	// Check against Physical Network Floor
 	if minPaymentSat+padding < cfg.MinChannelCapacityLoki {
-		return fmt.Errorf("JIT incompatibility: minPaymentSizeMloki (%d sats) + padding (%d) < network floor (%d)", minPaymentSat, padding, cfg.MinChannelCapacityLoki)
+		return fmt.Errorf("JIT incompatibility: minPaymentSizeMloki (%d loki) + padding (%d) < network floor (%d)", minPaymentSat, padding, cfg.MinChannelCapacityLoki)
 	}
 
 	// Check against Business Floor
 	if cfg.JitMinChannelBalanceLoki != nil {
 		if minPaymentSat+padding < *cfg.JitMinChannelBalanceLoki {
-			return fmt.Errorf("JIT business violation: minPaymentSizeMloki (%d sats) + padding (%d) < jitMinChannelBalanceLoki (%d)", minPaymentSat, padding, *cfg.JitMinChannelBalanceLoki)
+			return fmt.Errorf("JIT business violation: minPaymentSizeMloki (%d loki) + padding (%d) < jitMinChannelBalanceLoki (%d)", minPaymentSat, padding, *cfg.JitMinChannelBalanceLoki)
 		}
 
 		// Check that Business Floor is at least Physical Network Floor

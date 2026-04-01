@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { GlassCard } from '../components/GlassCard';
 import { ArrowLeft, Clock, Zap, Hash, ExternalLink, Copy, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
-import { formatSats, cn } from '../lib/utils';
+import { formatLoki, cn } from '../lib/utils';
 import { useAuth } from '../hooks/useAuth';
 import { DashboardAPI } from '../lib/api';
 
@@ -106,10 +106,10 @@ export const OrderDetail: React.FC<OrderDetailProps> = ({ orderId, onBack }) => 
           <h2 className="text-sm font-bold text-white uppercase tracking-widest">Order Parameters</h2>
 
           <div className="grid grid-cols-2 gap-6">
-            <DetailRow label="LSP Balance" value={formatSats(order.LspBalanceLoki)} />
-            <DetailRow label="Client Balance" value={formatSats(order.ClientBalanceLoki)} />
-            <DetailRow label="Order Total" value={formatSats(order.OrderTotalLoki)} highlight />
-            <DetailRow label="Fee Total" value={formatSats(order.FeeTotalLoki)} />
+            <DetailRow label="LSP Balance" value={formatLoki(order.LspBalanceLoki)} />
+            <DetailRow label="Client Balance" value={formatLoki(order.ClientBalanceLoki)} />
+            <DetailRow label="Order Total" value={formatLoki(order.OrderTotalLoki)} highlight />
+            <DetailRow label="Fee Total" value={formatLoki(order.FeeTotalLoki)} />
             <DetailRow label="Funding Confirms" value={`${order.FundingConfirmsWithinBlocks} blocks`} />
             <DetailRow label="Channel Expiry" value={`${order.ChannelExpiryBlocks} blocks`} />
             <DetailRow label="Announce Channel" value={order.AnnounceChannel ? 'Yes' : 'No'} />

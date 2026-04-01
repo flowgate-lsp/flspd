@@ -1,7 +1,7 @@
 import React from 'react';
 import { GlassCard } from '../components/GlassCard';
 import { Activity, TrendingUp, Zap, Clock, ChevronRight, Loader2, AlertCircle } from 'lucide-react';
-import { formatSats, cn } from '../lib/utils';
+import { formatLoki, cn } from '../lib/utils';
 import { useDashboard } from '../hooks/useDashboard';
 import { useEvents } from '../hooks/useEvents';
 
@@ -73,7 +73,7 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({ onViewOrder }) => 
           </div>
           <h3 className="text-[10px] font-mono uppercase tracking-widest mb-1 text-on-surface-variant">Total Capacity</h3>
           <p className="text-2xl font-bold text-white tracking-tight leading-none">
-            {(liquidityTotal / 100000000).toFixed(2)} <span className="text-xs font-normal text-on-surface-variant italic">LOKI</span>
+            {(liquidityTotal / 100000000).toFixed(2)} <span className="text-xs font-normal text-on-surface-variant italic">FLC</span>
           </p>
         </GlassCard>
 
@@ -97,14 +97,14 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({ onViewOrder }) => 
             </div>
           </div>
           <h3 className="text-[10px] font-mono uppercase tracking-widest mb-1 text-on-surface-variant">24h Revenue</h3>
-          <p className="text-2xl font-bold text-white tracking-tight leading-none">{formatSats(revenue)}</p>
+          <p className="text-2xl font-bold text-white tracking-tight leading-none">{formatLoki(revenue)}</p>
         </GlassCard>
 
         <GlassCard delay={0.4} className="flex flex-col justify-center">
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <span className="text-[10px] font-mono text-on-surface-variant uppercase tracking-widest">Available</span>
-              <span className="text-[10px] font-mono text-white">{(liquidityFree / 100000000).toFixed(3)} LOKI</span>
+              <span className="text-[10px] font-mono text-white">{(liquidityFree / 100000000).toFixed(3)} FLC</span>
             </div>
             <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
               <div 
@@ -114,7 +114,7 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({ onViewOrder }) => 
             </div>
             <div className="flex items-center justify-between">
               <span className="text-[10px] font-mono text-on-surface-variant uppercase tracking-widest">Reserved</span>
-              <span className="text-[10px] font-mono text-white">{(liquidityBlocked / 100000000).toFixed(3)} LOKI</span>
+              <span className="text-[10px] font-mono text-white">{(liquidityBlocked / 100000000).toFixed(3)} FLC</span>
             </div>
             <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
               <div 
@@ -165,7 +165,7 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({ onViewOrder }) => 
                         <span className="text-xs font-mono font-bold text-white uppercase tracking-tighter">LSPS1</span>
                         <span className="text-[10px] font-mono text-on-surface-variant uppercase tracking-tighter">{item.order_id}</span>
                       </div>
-                      <p className="text-sm font-medium text-white">{formatSats(item.amount)}</p>
+                      <p className="text-sm font-medium text-white">{formatLoki(item.amount)}</p>
                     </div>
                   </div>
                   <div className="text-right">
