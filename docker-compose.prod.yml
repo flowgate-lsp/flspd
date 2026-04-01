@@ -60,7 +60,7 @@ services:
       - LOG_COMPRESS=${LOG_COMPRESS:-true}
     volumes:
       - ${NODES_CONFIG_PATH}:/flspd/nodes.yaml
-      - flspd_logs:/var/log/flspd
+      - ${LOG_DIR}:/var/log/flspd
     depends_on:
       postgres:
         condition: service_healthy
@@ -78,6 +78,7 @@ services:
       - "traefik.docker.network=web"
       - "traefik.http.routers.flspd.rule=Host(`flspapi.flowgate.to`) && (PathPrefix(`/api`) || PathPrefix(`/api/`))"
       - "traefik.http.routers.flspd.entrypoints=web"
+      - "traefik.http.routers.flspd.service=flspd"
       - "traefik.http.services.flspd.loadbalancer.server.port=51611"
       - "traefik.http.middlewares.flspd-strip.stripprefix.prefixes=/api"
       - "traefik.http.routers.flspd.middlewares=flspd-strip"
@@ -85,6 +86,7 @@ services:
       # Dashboard Labels
       - "traefik.http.routers.flspd-dash.rule=Host(`flspapi.flowgate.to`) && (PathPrefix(`/dashboard`) || PathPrefix(`/dashboard/`))"
       - "traefik.http.routers.flspd-dash.entrypoints=web"
+      - "traefik.http.routers.flspd-dash.service=flspd-dash"
       - "traefik.http.services.flspd-dash.loadbalancer.server.port=8080"
       - "traefik.http.middlewares.dash-strip.stripprefix.prefixes=/dashboard"
       - "traefik.http.routers.flspd-dash.middlewares=dash-strip"
@@ -116,5 +118,3 @@ networks:
   web:
     external: true
 
-volumes:
-  flspd_logs:

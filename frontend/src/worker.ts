@@ -28,6 +28,11 @@ export default {
       const targetUrl = new URL(url.pathname + url.search, upstreamUrl.origin);
 
       const newHeaders = new Headers(request.headers);
+      
+      // Preserve the original frontend Host and Proto for Nostr Auth validation on the backend
+      newHeaders.set('X-Original-Host', url.hostname);
+      newHeaders.set('X-Original-Proto', url.protocol.replace(':', ''));
+
       // **CRITICAL FIX**: Traefik relies on the Host header to route the request to the correct container.
       // We must replace the 'flsp.flowgate.to' (Frontend Host) with 'flspapi.flowgate.to' (Backend Host).
       newHeaders.set('Host', upstreamUrl.hostname);

@@ -112,12 +112,40 @@ func getFullUrl(r *http.Request) string {
 	if r.TLS != nil {
 		scheme = "https"
 	}
+	
+	// Respect Cloudflare/Proxy forwarded headers
 	if xForwardedProto := r.Header.Get("X-Forwarded-Proto"); xForwardedProto != "" {
 		scheme = xForwardedProto
 	}
+	// Prefer our custom X-Original-Proto if set by the Cloudflare Worker
+	if xOrigProto := r.Header.Get("X-Original-Proto"); xOrigProto != "" {
+		scheme = xOrigProto
+	}
 
 	host := r.Host
-	return fmt.Sprintf("%s://%s%s", scheme, host, r.URL.Path)
+	if xForwardedHost := r.Header.Get("X-Forwarded-Host"); xForwardedHost != "" {
+		host = xForwardedHost
+	}
+	// Prefer our custom X-Original-Host if set by the Cloudflare Worker
+	if xOrigHost := r.Header.Get("X-Original-Host"); xOrigHost != "" {
+		host = xOrigHost
+	}
+
+	path := r.URL.Path
+	// Traefik appends X-Forwarded-Prefix when using stripprefix (e.g. /dashboard)
+	if xForwardedPrefix := r.Header.Get("X-Forwarded-Prefix"); xForwardedPrefix != "" {
+		path = xForwardedPrefix + path
+	}
+
+	// Normalize WS/WSS to HTTP/HTTPS for signature comparison
+	// Some clients sign WSS events with HTTPS because they construct the URL generically
+	if scheme == "ws" {
+		scheme = "http"
+	} else if scheme == "wss" {
+		scheme = "https"
+	}
+
+	return fmt.Sprintf("%s://%s%s", scheme, host, path)
 }
 
 // ComputePayloadHash computes the SHA256 hex hash of a request body
