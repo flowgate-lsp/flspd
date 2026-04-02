@@ -509,8 +509,10 @@ func (s *DashboardService) handleListOrders(req *lsps.JsonRpcRequest) *lsps.Json
 	// Enrich with peer metadata
 	nodes := s.nodesService.GetNodes()
 	peerMap := make(map[string]*lightning.Peer)
+	var activeClient lightning.Client
 	if len(nodes) > 0 {
-		peers, _ := nodes[0].Client.ListPeers()
+		activeClient = nodes[0].Client
+		peers, _ := activeClient.ListPeers()
 		for _, p := range peers {
 			peerMap[p.Pubkey] = p
 		}
@@ -520,6 +522,20 @@ func (s *DashboardService) handleListOrders(req *lsps.JsonRpcRequest) *lsps.Json
 		if p, ok := peerMap[orders[i].PeerId]; ok {
 			orders[i].PeerAlias = p.Alias
 			orders[i].PeerColor = p.Color
+		} else if activeClient != nil {
+			// Fallback: look up node directly from the graph for offline peers
+			info, err := activeClient.GetNodeInfo(orders[i].PeerId)
+			if err == nil && info != nil {
+				orders[i].PeerAlias = info.Alias
+				orders[i].PeerColor = info.Color
+				
+				// Cache to prevent duplicate graph lookups for the same offline peer
+				peerMap[orders[i].PeerId] = &lightning.Peer{
+					Pubkey: info.Pubkey,
+					Alias:  info.Alias,
+					Color:  info.Color,
+				}
+			}
 		}
 	}
 

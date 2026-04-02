@@ -213,7 +213,7 @@ export const OrderMatrix: React.FC<OrderMatrixProps> = ({ onViewOrder, initialSe
       </div>
 
       {/* Orders List - Mobile */}
-      <div className="lg:hidden space-y-6">
+      <div className="lg:hidden space-y-4">
         {filteredOrders.length === 0 ? (
           <div className="p-16 text-center border-2 border-dashed border-white/5 rounded-3xl bg-white/[0.02]">
             <p className="text-[10px] font-mono text-on-surface-variant uppercase tracking-[0.4em] italic font-black opacity-30">No matching records found</p>
@@ -223,53 +223,68 @@ export const OrderMatrix: React.FC<OrderMatrixProps> = ({ onViewOrder, initialSe
             <GlassCard 
               key={i} 
               onClick={() => onViewOrder(order.order_id)}
-              className="p-7 border-white/5 cursor-pointer active:scale-[0.97] transition-all duration-300 bg-surface-variant/30"
+              className="p-0 border-white/5 cursor-pointer active:scale-[0.97] transition-all duration-300 bg-surface-variant/30 flex flex-col group overflow-hidden"
             >
-              <div className="flex justify-between items-start mb-6">
-                <div className="flex items-center gap-3">
-                  <span className="text-[9px] font-mono font-black italic text-primary border border-primary/20 bg-primary/5 px-2 py-0.5 rounded-lg uppercase">LSPS1</span>
-                  <span className="text-[11px] font-mono text-white font-bold tracking-tight">{order.order_id}</span>
-                </div>
-                <span className={cn(
-                  "text-[9px] font-black font-mono uppercase tracking-[0.2em] px-2.5 py-1.5 rounded-xl border italic",
-                  order.state === 'COMPLETED' ? "text-secondary border-secondary/20 bg-secondary/5" :
-                  order.state === 'FAILED' ? "text-error border-error/20 bg-error/5" :
-                  "text-primary border-primary/20 bg-primary/5"
-                )}>
-                  {order.state}
-                </span>
-              </div>
-              
-              <div className="grid grid-cols-2 gap-8 mb-6">
-                <div className="space-y-2">
-                  <p className="text-[9px] font-mono text-on-surface-variant/50 uppercase tracking-[0.2em] leading-none font-black">Capacity Inbound</p>
-                  <p className="text-xl font-black text-white italic tracking-tighter leading-none">{formatSmart(order.lsp_balance_loki)}</p>
-                  <p className="text-[10px] font-mono text-on-surface-variant opacity-60 font-black italic tracking-widest">Fee: {formatLoki(order.amount)}</p>
-                </div>
-                <div className="space-y-2 overflow-hidden">
-                  <p className="text-[9px] font-mono text-on-surface-variant/50 uppercase tracking-[0.2em] leading-none font-black">Counterparty</p>
-                  <p className="text-[11px] font-black text-white italic tracking-tighter leading-none mb-1">{order.peer_alias || 'Unknown Node'}</p>
-                  <p className="text-[9px] font-mono text-on-surface-variant/40 truncate italic tracking-widest">{middleTrim(order.peer_id, 8)}</p>
-                </div>
-              </div>
-              
-              <div className="pt-5 border-t border-white/5 flex justify-between items-center">
-                 <p className="text-[9px] font-mono text-on-surface-variant/40 uppercase font-black italic tracking-widest">
-                   {new Date(order.created_at).toLocaleString()}
-                 </p>
+              {/* Header: Status Strip */}
+              <div className="px-5 py-3.5 flex items-center justify-between bg-white/[0.02] border-b border-white/5">
                  <div className="flex items-center gap-3">
+                    <span className={cn("w-1.5 h-1.5 rounded-full",
+                      order.state === 'COMPLETED' ? "bg-secondary shadow-[0_0_8px_rgba(0,253,135,0.6)]" : 
+                      order.state === 'FAILED' ? "bg-error shadow-[0_0_8px_rgba(255,50,50,0.6)]" : 
+                      order.state === 'PAID' ? "bg-primary shadow-[0_0_8px_rgba(0,186,255,0.6)]" : 
+                      "bg-tertiary shadow-[0_0_8px_rgba(182,77,255,0.6)]"
+                    )} />
+                    <span className="text-[10px] font-mono font-black italic tracking-[0.2em] uppercase text-on-surface-variant group-hover:text-white transition-colors">{order.state}</span>
+                 </div>
+                 <span className="text-[9px] font-mono font-black italic text-primary border border-primary/20 bg-primary/5 px-2 py-0.5 rounded uppercase">LSPS1</span>
+              </div>
+            
+              {/* Body: Order Details */}
+              <div className="p-5 flex flex-col gap-6">
+                {/* Identification */}
+                <div className="flex flex-col gap-1">
+                  <p className="text-[8px] font-mono text-on-surface-variant/40 uppercase tracking-[0.3em] font-black">Transmission ID</p>
+                  <p className="text-xs font-mono font-bold tracking-tight text-white/90">{middleTrim(order.order_id, 10)}</p>
+                </div>
+                
+                {/* Financial & Counterparty Grid */}
+                <div className="grid grid-cols-2 gap-4 bg-black/20 p-4 rounded-xl border border-white/5">
+                  <div className="flex flex-col gap-1">
+                    <span className="text-[8px] font-mono text-on-surface-variant/40 uppercase tracking-[0.3em] font-black">Capacity</span>
+                    <span className="text-xl font-black text-white italic tracking-tighter tabular-nums leading-none">
+                      {formatSmart(order.lsp_balance_loki).split(' ')[0]}
+                      <span className="text-[9px] text-white/40 not-italic ml-1 uppercase font-mono tracking-widest">
+                        {formatSmart(order.lsp_balance_loki).split(' ')[1]}
+                      </span>
+                    </span>
+                    <span className="text-[8px] font-mono text-on-surface-variant/60 font-bold uppercase tracking-widest mt-1">Fee: {formatLoki(order.amount)}</span>
+                  </div>
+                  <div className="flex flex-col gap-1 overflow-hidden">
+                    <span className="text-[8px] font-mono text-on-surface-variant/40 uppercase tracking-[0.3em] font-black">Counterparty</span>
+                    <span className="text-[11px] font-black text-white italic tracking-tighter truncate leading-none mt-1">{order.peer_alias || 'Unknown Node'}</span>
+                    <span className="text-[8px] font-mono text-on-surface-variant/60 font-bold italic tracking-widest truncate mt-1">{middleTrim(order.peer_id, 6)}</span>
+                  </div>
+                </div>
+              </div>
+            
+              {/* Footer: Telemetry */}
+              <div className="px-5 py-3 border-t border-white/5 bg-white/[0.01] flex justify-between items-center mt-auto">
+                 <p className="text-[9px] font-mono text-on-surface-variant/40 uppercase font-black italic tracking-widest">
+                   {new Date(order.created_at).toLocaleString(undefined, { hour: 'numeric', minute: 'numeric', month: 'short', day: 'numeric' })}
+                 </p>
+                 <div className="flex items-center gap-4">
                    {order.funding_txid && (
                      <a 
                        href={`https://lokichain.info/tx/${order.funding_txid}`}
                        target="_blank"
                        rel="noopener noreferrer"
                        onClick={(e) => e.stopPropagation()}
-                       className="p-3 text-on-surface-variant bg-white/5 rounded-2xl border border-white/5 hover:text-white transition-all active:scale-90"
+                       className="text-[10px] font-mono text-primary/60 hover:text-primary transition-colors flex items-center gap-1.5 uppercase italic tracking-widest rounded px-2 py-1 bg-primary/5 border border-primary/10"
                      >
-                       <ExternalLink className="w-4 h-4" />
+                        <ExternalLink className="w-3 h-3" /> TXID
                      </a>
                    )}
-                   <ChevronRight className="w-4 h-4 text-on-surface-variant/20" />
+                   <ChevronRight className="w-4 h-4 text-white/20 group-hover:text-white/80 transition-colors" />
                  </div>
               </div>
             </GlassCard>

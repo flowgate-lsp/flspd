@@ -55,36 +55,36 @@ export const Settings: React.FC = () => {
   ];
 
   return (
-    <div className="p-4 md:p-10 max-w-5xl mx-auto space-y-8 animate-in fade-in duration-1000 pb-20">
+    <div className="p-3 md:p-10 max-w-5xl mx-auto space-y-6 md:space-y-8 animate-in fade-in duration-1000 pb-32">
       {/* Header */}
-      <header className="flex flex-col md:flex-row md:justify-between md:items-end gap-4">
-        <div>
-          <h1 className="text-3xl md:text-4xl font-bold tracking-tighter text-white mb-2 uppercase italic leading-none flex items-center gap-4">
-             <SettingsIcon className="w-8 h-8 md:w-10 md:h-10 text-primary" />
+      <div className="flex flex-col md:flex-row md:justify-between md:items-end gap-6">
+        <div className="space-y-2">
+          <h1 className="text-2xl md:text-4xl font-black tracking-tighter text-white uppercase italic leading-none flex items-center gap-3">
+             <SettingsIcon className="w-7 h-7 md:w-10 md:h-10 text-primary" />
              Node Settings
           </h1>
-          <p className="text-on-surface-variant font-mono text-[10px] md:text-xs tracking-widest uppercase">
+          <p className="text-on-surface-variant font-mono text-[9px] md:text-xs tracking-widest uppercase mt-1">
             Manage LSP node parameters and protocol behavior
           </p>
         </div>
-        <div className="flex gap-3">
+        <div className="flex gap-3 w-full md:w-auto mt-2 md:mt-0">
           <button 
             onClick={refreshConfig}
-            className="p-3 rounded-xl bg-white/5 border border-white/10 text-white hover:bg-white/10 transition-all active:scale-95"
+            className="p-3 md:p-3.5 rounded-xl bg-white/5 border border-white/10 text-white hover:bg-white/10 transition-all active:scale-95 flex items-center justify-center aspect-square shrink-0"
             title="Refresh Config"
           >
-            <RefreshCw className={cn("w-5 h-5", loading && "animate-spin")} />
+            <RefreshCw className={cn("w-4 h-4 md:w-5 md:h-5", loading && "animate-spin")} />
           </button>
           <button 
             onClick={handleSave}
             disabled={saving}
-            className="flex items-center gap-2 px-6 py-3 rounded-xl bg-primary text-black font-bold uppercase tracking-widest text-xs hover:brightness-110 transition-all active:scale-95 disabled:opacity-50 disabled:pointer-events-none shadow-[0_0_20px_rgba(0,186,255,0.3)]"
+            className="flex-1 md:flex-none flex items-center justify-center gap-2 px-6 py-3 md:py-3.5 rounded-xl bg-primary text-black font-black uppercase tracking-widest text-[10px] md:text-xs hover:brightness-110 transition-all active:scale-95 disabled:opacity-50 disabled:pointer-events-none shadow-[0_4px_24px_rgba(0,186,255,0.25)]"
           >
             {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
             {saving ? 'Saving...' : 'Save Changes'}
           </button>
         </div>
-      </header>
+      </div>
 
       {error && (
         <div className="p-4 rounded-xl bg-error/10 border border-error/20 flex items-center gap-3 text-error animate-in slide-in-from-top-2">
@@ -101,17 +101,17 @@ export const Settings: React.FC = () => {
       )}
 
       {/* Tabs */}
-      <div className="flex p-1 bg-white/5 rounded-2xl border border-white/5 w-fit">
+      <div className="flex overflow-x-auto p-1 bg-white/5 rounded-xl md:rounded-2xl border border-white/5 w-full md:w-fit custom-scrollbar">
         {tabs.map((tab) => (
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
             className={cn(
-              "flex items-center gap-2 px-6 py-2.5 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all",
+              "flex-shrink-0 whitespace-nowrap flex items-center gap-2 px-5 py-2.5 rounded-lg md:rounded-xl text-[9px] md:text-[10px] font-bold uppercase tracking-widest transition-all",
               activeTab === tab.id ? "bg-white/10 text-white border border-white/10" : "text-on-surface-variant hover:text-white"
             )}
           >
-            <tab.icon className={cn("w-4 h-4", activeTab === tab.id ? "text-primary" : "text-inherit")} />
+            <tab.icon className={cn("w-3.5 h-3.5 md:w-4 md:h-4", activeTab === tab.id ? "text-primary" : "text-inherit")} />
             {tab.label}
           </button>
         ))}

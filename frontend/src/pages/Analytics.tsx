@@ -131,8 +131,8 @@ export const Analytics: React.FC = () => {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-10 items-start">
         {/* Main Revenue Chart */}
-        <GlassCard className="lg:col-span-2 p-8 flex flex-col h-[520px] bg-black/40 border-white/5">
-          <div className="flex items-center justify-between mb-10 pb-5">
+        <GlassCard className="lg:col-span-2 p-5 md:p-8 flex flex-col h-[350px] md:h-[520px] bg-black/40 border-white/5">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-8 sm:mb-10 pb-5 gap-4">
             <div className="flex items-center gap-4">
               <div className="p-2 rounded-lg bg-primary/5">
                 <BarChart3 className="w-4 h-4 text-primary" />
@@ -149,11 +149,12 @@ export const Analytics: React.FC = () => {
             </div>
           </div>
           
-          <div className="mt-auto w-full h-[400px] relative px-2">
+          <div className="mt-auto w-full h-[220px] md:h-[400px] relative px-0 md:px-2">
             {(!revenue_history || revenue_history.length === 0) ? (
               <NoData label="No revenue history recorded yet" />
             ) : (
-                <AreaChart data={revenue_history} width={800} height={400} margin={{ top: 10, right: 10, left: -20, bottom: 0 }} style={{ width: '100%' }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={revenue_history} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                 <defs>
                   <linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor="#00BAFF" stopOpacity={0.3}/>
@@ -216,13 +217,14 @@ export const Analytics: React.FC = () => {
                   animationDuration={2000}
                 />
                 </AreaChart>
+              </ResponsiveContainer>
             )}
           </div>
         </GlassCard>
 
         {/* Order Composition (Pie) */}
-        <GlassCard className="lg:col-span-1 p-8 flex flex-col h-[520px] bg-black/40 border-white/5">
-          <div className="flex items-center gap-4 mb-10 pb-5">
+        <GlassCard className="lg:col-span-1 p-5 md:p-8 flex flex-col h-auto md:h-[520px] bg-black/40 border-white/5">
+          <div className="flex items-center gap-4 mb-8 md:mb-10 pb-5">
             <div className="p-2 rounded-lg bg-secondary/5">
               <PieIcon className="w-4 h-4 text-secondary" />
             </div>
