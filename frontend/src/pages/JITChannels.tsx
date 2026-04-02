@@ -23,7 +23,7 @@ export const JITChannels: React.FC = () => {
   );
 
   return (
-    <div className="p-6 md:p-10 max-w-7xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-500">
+    <div className="p-3 md:p-10 max-w-7xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-500">
       <header className="flex flex-col md:flex-row md:items-end justify-between gap-4 pb-6">
         <div className="space-y-2">
           <div className="flex items-center gap-4 mb-1">

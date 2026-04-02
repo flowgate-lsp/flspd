@@ -44,7 +44,7 @@ export const CommandCenter: React.FC<{ onViewOrder?: (id: string) => void }> = (
   };
 
   return (
-    <div className="p-6 md:p-8 max-w-7xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-500">
+    <div className="p-3 md:p-8 max-w-7xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-500">
       {/* 1. Hero Identity Strip */}
       <GlassCard className="p-6 md:p-8 border border-white/5 bg-black/40 overflow-hidden relative group">
         <div className="absolute -top-32 -left-32 w-96 h-96 bg-primary/10 blur-[120px] rounded-full pointer-events-none opacity-40 group-hover:opacity-70 transition-opacity duration-1000" />

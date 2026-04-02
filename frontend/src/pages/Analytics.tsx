@@ -62,7 +62,7 @@ export const Analytics: React.FC = () => {
   const filteredDistribution = order_distribution?.filter((d: any) => d.value > 0) || [];
 
   return (
-    <div className="p-6 md:p-10 max-w-7xl mx-auto space-y-12 animate-in fade-in slide-in-from-bottom-2 duration-500">
+    <div className="p-3 md:p-10 max-w-7xl mx-auto space-y-12 animate-in fade-in slide-in-from-bottom-2 duration-500">
       {/* Header Section */}
       <header className="flex flex-col md:flex-row md:items-end justify-between gap-8 pb-6">
         <div className="space-y-2">

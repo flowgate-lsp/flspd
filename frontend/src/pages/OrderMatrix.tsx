@@ -72,7 +72,7 @@ export const OrderMatrix: React.FC<OrderMatrixProps> = ({ onViewOrder, initialSe
   }
 
   return (
-    <div className="p-6 md:p-10 max-w-7xl mx-auto space-y-10 animate-in fade-in slide-in-from-bottom-2 duration-500">
+    <div className="p-3 md:p-10 max-w-7xl mx-auto space-y-10 animate-in fade-in slide-in-from-bottom-2 duration-500">
       <header className="flex flex-col md:flex-row md:justify-between md:items-end gap-10">
         <div className="space-y-2">
           <h1 className="text-4xl md:text-5xl font-black tracking-tighter text-white uppercase italic leading-none">Order Matrix</h1>
