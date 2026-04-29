@@ -209,29 +209,21 @@ export const Settings: React.FC = () => {
                 
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
                   <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-white uppercase">Min Payment Size</label>
+                    <label className="text-[10px] font-bold text-white uppercase">Max Payment Size</label>
                     <div className="flex items-center gap-2 bg-black/40 border border-white/10 rounded-lg p-3">
-                        <input type="number" readOnly value={formData?.minPaymentSizeMloki} className="bg-transparent w-full text-white font-mono text-sm outline-none" />
-                        <button onClick={() => setEditingField({ field: 'minPaymentSizeMloki', source: 'MLOKI', value: formData?.minPaymentSizeMloki })} className="text-[9px] text-primary hover:underline font-mono uppercase">Edit</button>
-                        <span className="text-[9px] text-on-surface-variant font-mono whitespace-nowrap">≈ {formatAmount(formData?.minPaymentSizeMloki, 'AUTO', 'MLOKI')}</span>
+                        <input type="number" readOnly value={formData?.jitMaxPaymentSizeMloki} className="bg-transparent w-full text-white font-mono text-sm outline-none" />
+                        <button onClick={() => setEditingField({ field: 'jitMaxPaymentSizeMloki', source: 'MLOKI', value: formData?.jitMaxPaymentSizeMloki })} className="text-[9px] text-primary hover:underline font-mono uppercase">Edit</button>
+                        <span className="text-[9px] text-on-surface-variant font-mono whitespace-nowrap">≈ {formatAmount(formData?.jitMaxPaymentSizeMloki, 'AUTO', 'MLOKI')}</span>
                     </div>
                   </div>
-                  {/* Repeat for other fields... */}
                   <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-white uppercase">Min Payment Size</label>
+                    <label className="text-[10px] font-bold text-white uppercase">Base Fee</label>
                     <div className="flex items-center gap-2 bg-black/40 border border-white/10 rounded-lg p-3">
-                        <input type="number" readOnly value={formData?.minPaymentSizeMloki} className="bg-transparent w-full text-white font-mono text-sm outline-none" />
-                        <button onClick={() => setEditingField({ field: 'minPaymentSizeMloki', source: 'MLOKI', value: formData?.minPaymentSizeMloki })} className="text-[9px] text-primary hover:underline font-mono uppercase">Edit</button>
-                        <span className="text-[9px] text-on-surface-variant font-mono whitespace-nowrap">≈ {formatAmount(formData?.minPaymentSizeMloki, 'AUTO', 'MLOKI')}</span>
+                        <input type="number" readOnly value={formData?.baseFeeMloki} className="bg-transparent w-full text-white font-mono text-sm outline-none" />
+                        <button onClick={() => setEditingField({ field: 'baseFeeMloki', source: 'MLOKI', value: formData?.baseFeeMloki })} className="text-[9px] text-primary hover:underline font-mono uppercase">Edit</button>
+                        <span className="text-[9px] text-on-surface-variant font-mono whitespace-nowrap">≈ {formatAmount(formData?.baseFeeMloki, 'AUTO', 'MLOKI')}</span>
                     </div>
                   </div>
-
-                  <Input 
-                    label="Base Fee" 
-                    type="number"
-                    value={formData?.baseFeeMloki} 
-                    onChange={(v) => handleInputChange('baseFeeMloki', parseInt(v))}
-                  />
                   <Input 
                     label="Fee Rate" 
                     type="number"
@@ -245,12 +237,14 @@ export const Settings: React.FC = () => {
                     value={formData?.channelFeePermyriad} 
                     onChange={(v) => handleInputChange('channelFeePermyriad', parseInt(v))}
                   />
-                  <Input 
-                    label="Min Channel Capacity" 
-                    type="number"
-                    value={formData?.minChannelCapacityLoki} 
-                    onChange={(v) => handleInputChange('minChannelCapacityLoki', parseInt(v))}
-                  />
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-white uppercase">Min Channel Capacity</label>
+                    <div className="flex items-center gap-2 bg-black/40 border border-white/10 rounded-lg p-3">
+                        <input type="number" readOnly value={formData?.minChannelCapacityLoki} className="bg-transparent w-full text-white font-mono text-sm outline-none" />
+                        <button onClick={() => setEditingField({ field: 'minChannelCapacityLoki', source: 'LOKI', value: formData?.minChannelCapacityLoki })} className="text-[9px] text-primary hover:underline font-mono uppercase">Edit</button>
+                        <span className="text-[9px] text-on-surface-variant font-mono whitespace-nowrap">≈ {formatAmount(formData?.minChannelCapacityLoki, 'AUTO', 'LOKI')}</span>
+                    </div>
+                  </div>
                 </div>
               </GlassCard>
             )}
@@ -276,24 +270,38 @@ export const Settings: React.FC = () => {
                     value={formData?.lsps1OrderExpirySeconds} 
                     onChange={(v) => handleInputChange('lsps1OrderExpirySeconds', parseInt(v))}
                   />
-                  <Input 
-                    label="Min Initial Client Balance" 
-                    type="number"
-                    value={formData?.lsps1MinInitialClientBalanceLoki} 
-                    onChange={(v) => handleInputChange('lsps1MinInitialClientBalanceLoki', parseInt(v))}
-                  />
-                   <Input 
-                    label="Max Initial Client Balance" 
-                    type="number"
-                    value={formData?.lsps1MaxInitialClientBalanceLoki} 
-                    onChange={(v) => handleInputChange('lsps1MaxInitialClientBalanceLoki', parseInt(v))}
-                  />
-                   <Input 
-                    label="Min Initial LSP Balance" 
-                    type="number"
-                    value={formData?.lsps1MinInitialLspBalanceLoki} 
-                    onChange={(v) => handleInputChange('lsps1MinInitialLspBalanceLoki', parseInt(v))}
-                  />
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-white uppercase">Min Initial Client Balance</label>
+                    <div className="flex items-center gap-2 bg-black/40 border border-white/10 rounded-lg p-3">
+                        <input type="number" readOnly value={formData?.lsps1MinInitialClientBalanceLoki} className="bg-transparent w-full text-white font-mono text-sm outline-none" />
+                        <button onClick={() => setEditingField({ field: 'lsps1MinInitialClientBalanceLoki', source: 'LOKI', value: formData?.lsps1MinInitialClientBalanceLoki })} className="text-[9px] text-primary hover:underline font-mono uppercase">Edit</button>
+                        <span className="text-[9px] text-on-surface-variant font-mono whitespace-nowrap">≈ {formatAmount(formData?.lsps1MinInitialClientBalanceLoki, 'AUTO', 'LOKI')}</span>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-white uppercase">Max Initial Client Balance</label>
+                    <div className="flex items-center gap-2 bg-black/40 border border-white/10 rounded-lg p-3">
+                        <input type="number" readOnly value={formData?.lsps1MaxInitialClientBalanceLoki} className="bg-transparent w-full text-white font-mono text-sm outline-none" />
+                        <button onClick={() => setEditingField({ field: 'lsps1MaxInitialClientBalanceLoki', source: 'LOKI', value: formData?.lsps1MaxInitialClientBalanceLoki })} className="text-[9px] text-primary hover:underline font-mono uppercase">Edit</button>
+                        <span className="text-[9px] text-on-surface-variant font-mono whitespace-nowrap">≈ {formatAmount(formData?.lsps1MaxInitialClientBalanceLoki, 'AUTO', 'LOKI')}</span>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-white uppercase">Min Initial LSP Balance</label>
+                    <div className="flex items-center gap-2 bg-black/40 border border-white/10 rounded-lg p-3">
+                        <input type="number" readOnly value={formData?.lsps1MinInitialLspBalanceLoki} className="bg-transparent w-full text-white font-mono text-sm outline-none" />
+                        <button onClick={() => setEditingField({ field: 'lsps1MinInitialLspBalanceLoki', source: 'LOKI', value: formData?.lsps1MinInitialLspBalanceLoki })} className="text-[9px] text-primary hover:underline font-mono uppercase">Edit</button>
+                        <span className="text-[9px] text-on-surface-variant font-mono whitespace-nowrap">≈ {formatAmount(formData?.lsps1MinInitialLspBalanceLoki, 'AUTO', 'LOKI')}</span>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-white uppercase">Max Initial LSP Balance</label>
+                    <div className="flex items-center gap-2 bg-black/40 border border-white/10 rounded-lg p-3">
+                        <input type="number" readOnly value={formData?.lsps1MaxInitialLspBalanceLoki} className="bg-transparent w-full text-white font-mono text-sm outline-none" />
+                        <button onClick={() => setEditingField({ field: 'lsps1MaxInitialLspBalanceLoki', source: 'LOKI', value: formData?.lsps1MaxInitialLspBalanceLoki })} className="text-[9px] text-primary hover:underline font-mono uppercase">Edit</button>
+                        <span className="text-[9px] text-on-surface-variant font-mono whitespace-nowrap">≈ {formatAmount(formData?.lsps1MaxInitialLspBalanceLoki, 'AUTO', 'LOKI')}</span>
+                    </div>
+                  </div>
                 </div>
               </GlassCard>
             )}
