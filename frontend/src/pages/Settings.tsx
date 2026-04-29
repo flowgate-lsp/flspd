@@ -8,12 +8,15 @@ import { motion, AnimatePresence } from 'framer-motion';
 
 type Tab = 'general' | 'jit' | 'lsps1';
 
+import { CurrencyConverterModal } from '../components/CurrencyConverterModal';
+// ...
 export const Settings: React.FC = () => {
   const { config, loading, saving, error, refreshConfig, updateConfig } = useSettings();
   const { unit, setUnit } = useUnit();
   const [activeTab, setActiveTab] = useState<Tab>('general');
   const [formData, setFormData] = useState<any>(null);
   const [showSuccess, setShowSuccess] = useState(false);
+  const [editingField, setEditingField] = useState<{ field: string; source: 'LOKI' | 'MLOKI'; value: number } | null>(null);
 
   useEffect(() => {
     if (config) {
@@ -205,18 +208,24 @@ export const Settings: React.FC = () => {
                 </div>
                 
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-                  <Input 
-                    label="Min Payment Size" 
-                    type="number"
-                    value={formData?.minPaymentSizeMloki} 
-                    onChange={(v) => handleInputChange('minPaymentSizeMloki', parseInt(v))}
-                  />
-                  <Input 
-                    label="Max Payment Size" 
-                    type="number"
-                    value={formData?.jitMaxPaymentSizeMloki} 
-                    onChange={(v) => handleInputChange('jitMaxPaymentSizeMloki', parseInt(v))}
-                  />
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-white uppercase">Min Payment Size</label>
+                    <div className="flex items-center gap-2 bg-black/40 border border-white/10 rounded-lg p-3">
+                        <input type="number" readOnly value={formData?.minPaymentSizeMloki} className="bg-transparent w-full text-white font-mono text-sm outline-none" />
+                        <button onClick={() => setEditingField({ field: 'minPaymentSizeMloki', source: 'MLOKI', value: formData?.minPaymentSizeMloki })} className="text-[9px] text-primary hover:underline font-mono uppercase">Edit</button>
+                        <span className="text-[9px] text-on-surface-variant font-mono whitespace-nowrap">≈ {formatAmount(formData?.minPaymentSizeMloki, 'AUTO', 'MLOKI')}</span>
+                    </div>
+                  </div>
+                  {/* Repeat for other fields... */}
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-white uppercase">Min Payment Size</label>
+                    <div className="flex items-center gap-2 bg-black/40 border border-white/10 rounded-lg p-3">
+                        <input type="number" readOnly value={formData?.minPaymentSizeMloki} className="bg-transparent w-full text-white font-mono text-sm outline-none" />
+                        <button onClick={() => setEditingField({ field: 'minPaymentSizeMloki', source: 'MLOKI', value: formData?.minPaymentSizeMloki })} className="text-[9px] text-primary hover:underline font-mono uppercase">Edit</button>
+                        <span className="text-[9px] text-on-surface-variant font-mono whitespace-nowrap">≈ {formatAmount(formData?.minPaymentSizeMloki, 'AUTO', 'MLOKI')}</span>
+                    </div>
+                  </div>
+
                   <Input 
                     label="Base Fee" 
                     type="number"
@@ -290,6 +299,18 @@ export const Settings: React.FC = () => {
             )}
           </motion.div>
         </AnimatePresence>
+        {editingField && (
+            <CurrencyConverterModal 
+                isOpen={!!editingField}
+                onClose={() => setEditingField(null)}
+                onConfirm={(v) => {
+                    handleInputChange(editingField.field, v);
+                    setEditingField(null);
+                }}
+                currentValue={editingField.value}
+                sourceUnit={editingField.source}
+            />
+        )}
       </div>
     </div>
   );
