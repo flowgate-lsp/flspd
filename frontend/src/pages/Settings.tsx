@@ -17,37 +17,46 @@ const FinancialInput: React.FC<{
     value: any; 
     source: 'LOKI' | 'MLOKI';
     onEdit: (field: string, source: 'LOKI' | 'MLOKI', value: number, label: string, explanation: string) => void;
-    }> = ({ field, label, explanation, value, source, onEdit }) => (
-    <div className="space-y-2">
+}> = ({ field, label, explanation, value, source, onEdit }) => (
+  <div className="space-y-2">
     <div className="flex justify-between items-center">
-      <div className="flex items-center gap-1">
-        <label className="text-[10px] font-bold text-white uppercase">{label}</label>
+      <div className="flex items-center gap-1.5">
+        <label className="text-[11px] font-bold text-white uppercase tracking-wider">{label}</label>
         <div className="group relative">
-            <HelpCircle className="w-3 h-3 text-on-surface-variant cursor-help" />
-            <div className="absolute left-full ml-2 w-64 p-3 bg-black border border-white/10 rounded-lg text-[10px] text-white/70 shadow-xl z-50 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+            <HelpCircle className="w-4 h-4 text-primary cursor-help" />
+            <div className="absolute left-full ml-3 w-80 p-4 bg-black border border-primary/20 rounded-xl text-xs text-white/80 shadow-2xl z-50 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
                 {explanation}
             </div>
         </div>
       </div>
-      <button onClick={() => onEdit(field, source, value, label, explanation)} className="text-[9px] text-primary hover:underline font-mono uppercase">Edit</button>
+      <button onClick={() => onEdit(field, source, value, label, explanation)} className="text-[10px] text-primary hover:underline font-mono uppercase tracking-widest font-bold">Edit</button>
     </div>
-
-    <div className="flex items-center gap-2 bg-black/40 border border-white/10 rounded-lg p-3">
-        <input type="text" readOnly value={formatInput(value)} className="bg-transparent w-full text-white font-mono text-sm outline-none" />
-        <span className="text-[9px] text-on-surface-variant font-mono whitespace-nowrap">
+    <div className="flex items-center gap-3 bg-black/40 border border-white/10 rounded-xl p-4">
+        <input type="text" readOnly value={formatInput(value)} className="bg-transparent w-full text-white font-mono text-base outline-none" />
+        <span className="text-xs text-secondary font-mono font-bold whitespace-nowrap px-3 py-1 bg-secondary/10 rounded-lg border border-secondary/20">
             ≈ {formatAmount(value, 'AUTO', source)}
         </span>
     </div>
   </div>
 );
 
-const Input: React.FC<{ label: string; value: any; onChange: (v: any) => void; type?: string; placeholder?: string; step?: string }> = ({ 
-  label, value, onChange, type = 'text', placeholder, step 
+const Input: React.FC<{ label: string; explanation?: string; value: any; onChange: (v: any) => void; type?: string; placeholder?: string; step?: string }> = ({ 
+  label, explanation, value, onChange, type = 'text', placeholder, step 
 }) => (
   <div className="space-y-2 group">
-    <label className="text-[10px] font-mono uppercase tracking-[0.2em] text-on-surface-variant group-focus-within:text-primary transition-colors">
-      {label}
-    </label>
+    <div className="flex items-center gap-1.5">
+        <label className="text-[11px] font-mono uppercase tracking-[0.2em] text-on-surface-variant group-focus-within:text-primary transition-colors">
+        {label}
+        </label>
+        {explanation && (
+            <div className="group relative">
+                <HelpCircle className="w-3 h-3 text-on-surface-variant cursor-help" />
+                <div className="absolute left-full ml-2 w-64 p-3 bg-black border border-white/10 rounded-lg text-xs text-white/70 shadow-xl z-50 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+                    {explanation}
+                </div>
+            </div>
+        )}
+    </div>
     <input 
       type={type}
       step={step}
@@ -58,6 +67,7 @@ const Input: React.FC<{ label: string; value: any; onChange: (v: any) => void; t
     />
   </div>
 );
+
 
 const Switch: React.FC<{ checked: boolean; onChange: (v: boolean) => void }> = ({ checked, onChange }) => (
   <button 
@@ -203,24 +213,28 @@ export const Settings: React.FC = () => {
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                     <Input 
                       label="Display Name" 
+                      explanation="The friendly name for your LSP shown in the UI."
                       value={formData?.name} 
                       onChange={(v) => handleInputChange('name', v)}
                       placeholder="e.g. My Flowgate LSP"
                     />
                     <Input 
                       label="Public Host" 
+                      explanation="The public host and port for your LSP node."
                       value={formData?.host} 
                       onChange={(v) => handleInputChange('host', v)}
                       placeholder="e.g. lsp.example.com:9735"
                     />
                     <Input 
                       label="Target Confirmations" 
+                      explanation="The target number of confirmations for channel funding."
                       type="number"
                       value={formData?.targetConf} 
                       onChange={(v) => handleInputChange('targetConf', parseInt(v))}
                     />
                     <Input 
                       label="Min Confirmations" 
+                      explanation="The minimum number of confirmations required for a channel."
                       type="number"
                       value={formData?.minConfs} 
                       onChange={(v) => handleInputChange('minConfs', parseInt(v))}
