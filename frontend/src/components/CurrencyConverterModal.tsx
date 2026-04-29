@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { GlassCard } from '../components/GlassCard';
-import { formatAmount, DisplayUnit } from '../lib/utils';
+import { formatAmount, type DisplayUnit } from '../lib/utils';
 
 interface CurrencyConverterModalProps {
   isOpen: boolean;
