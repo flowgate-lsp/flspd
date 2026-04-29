@@ -272,9 +272,9 @@ export const Settings: React.FC = () => {
                 </div>
                 
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-                  <FinancialInput field="minPaymentSizeMloki" label="Min Payment Size" explanation="Minimum payment size in mLoki for JIT channel creation." value={formData?.minPaymentSizeMloki} source="MLOKI" onEdit={setEditingField} />
-                  <FinancialInput field="jitMaxPaymentSizeMloki" label="Max Payment Size" explanation="Maximum payment size in mLoki for JIT channel creation." value={formData?.jitMaxPaymentSizeMloki} source="MLOKI" onEdit={setEditingField} />
-                  <FinancialInput field="baseFeeMloki" label="Base Fee" explanation="Fixed base fee in mLoki per payment." value={formData?.baseFeeMloki} source="MLOKI" onEdit={setEditingField} />
+                  <FinancialInput field="minPaymentSizeMloki" label="Min Payment Size" explanation="Minimum payment size in mLoki for JIT channel creation." value={formData?.minPaymentSizeMloki} source="MLOKI" onEdit={(f, s, v, l, e) => setEditingField({ field: f, source: s, value: v, label: l, explanation: e })} />
+                  <FinancialInput field="jitMaxPaymentSizeMloki" label="Max Payment Size" explanation="Maximum payment size in mLoki for JIT channel creation." value={formData?.jitMaxPaymentSizeMloki} source="MLOKI" onEdit={(f, s, v, l, e) => setEditingField({ field: f, source: s, value: v, label: l, explanation: e })} />
+                  <FinancialInput field="baseFeeMloki" label="Base Fee" explanation="Fixed base fee in mLoki per payment." value={formData?.baseFeeMloki} source="MLOKI" onEdit={(f, s, v, l, e) => setEditingField({ field: f, source: s, value: v, label: l, explanation: e })} />
                   <Input 
                     label="Fee Rate" 
                     type="number"
@@ -288,7 +288,7 @@ export const Settings: React.FC = () => {
                     value={formData?.channelFeePermyriad} 
                     onChange={(v) => handleInputChange('channelFeePermyriad', parseInt(v))}
                   />
-                  <FinancialInput field="minChannelCapacityLoki" label="Min Channel Capacity" explanation="Minimum total capacity for a channel (Loki)." value={formData?.minChannelCapacityLoki} source="LOKI" onEdit={setEditingField} />
+                  <FinancialInput field="minChannelCapacityLoki" label="Min Channel Capacity" explanation="Minimum total capacity for a channel (Loki)." value={formData?.minChannelCapacityLoki} source="LOKI" onEdit={(f, s, v, l, e) => setEditingField({ field: f, source: s, value: v, label: l, explanation: e })} />
                 </div>
               </GlassCard>
             )}
@@ -314,10 +314,10 @@ export const Settings: React.FC = () => {
                     value={formData?.lsps1OrderExpirySeconds} 
                     onChange={(v) => handleInputChange('lsps1OrderExpirySeconds', parseInt(v))}
                   />
-                  <FinancialInput field="lsps1MinInitialClientBalanceLoki" label="Min Initial Client Balance" explanation="Minimum balance the client is required to maintain." value={formData?.lsps1MinInitialClientBalanceLoki} source="LOKI" onEdit={setEditingField} />
-                  <FinancialInput field="lsps1MaxInitialClientBalanceLoki" label="Max Initial Client Balance" explanation="Maximum balance allowed for the client." value={formData?.lsps1MaxInitialClientBalanceLoki} source="LOKI" onEdit={setEditingField} />
-                  <FinancialInput field="lsps1MinInitialLspBalanceLoki" label="Min Initial LSP Balance" explanation="Minimum initial liquidity provided by the LSP." value={formData?.lsps1MinInitialLspBalanceLoki} source="LOKI" onEdit={setEditingField} />
-                  <FinancialInput field="lsps1MaxInitialLspBalanceLoki" label="Max Initial LSP Balance" explanation="Maximum initial liquidity provided by the LSP." value={formData?.lsps1MaxInitialLspBalanceLoki} source="LOKI" onEdit={setEditingField} />
+                  <FinancialInput field="lsps1MinInitialClientBalanceLoki" label="Min Initial Client Balance" explanation="Minimum balance the client is required to maintain." value={formData?.lsps1MinInitialClientBalanceLoki} source="LOKI" onEdit={(f, s, v, l, e) => setEditingField({ field: f, source: s, value: v, label: l, explanation: e })} />
+                  <FinancialInput field="lsps1MaxInitialClientBalanceLoki" label="Max Initial Client Balance" explanation="Maximum balance allowed for the client." value={formData?.lsps1MaxInitialClientBalanceLoki} source="LOKI" onEdit={(f, s, v, l, e) => setEditingField({ field: f, source: s, value: v, label: l, explanation: e })} />
+                  <FinancialInput field="lsps1MinInitialLspBalanceLoki" label="Min Initial LSP Balance" explanation="Minimum initial liquidity provided by the LSP." value={formData?.lsps1MinInitialLspBalanceLoki} source="LOKI" onEdit={(f, s, v, l, e) => setEditingField({ field: f, source: s, value: v, label: l, explanation: e })} />
+                  <FinancialInput field="lsps1MaxInitialLspBalanceLoki" label="Max Initial LSP Balance" explanation="Maximum initial liquidity provided by the LSP." value={formData?.lsps1MaxInitialLspBalanceLoki} source="LOKI" onEdit={(f, s, v, l, e) => setEditingField({ field: f, source: s, value: v, label: l, explanation: e })} />
                 </div>
               </GlassCard>
             )}

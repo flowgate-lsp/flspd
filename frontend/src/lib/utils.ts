@@ -1,6 +1,8 @@
 import { type ClassValue, clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
-import { useUnit, DisplayUnit } from '../contexts/UnitContext';
+import { useUnit, type DisplayUnit } from '../contexts/UnitContext';
+export type { DisplayUnit };
+export { useUnit };
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -9,16 +11,10 @@ export function cn(...inputs: ClassValue[]) {
 export const LOKI_PER_FLC = 100000000;
 export const MLOKI_PER_FLC = 100000000000;
 
-/**
- * International number formatter for consistent UI display (with spacing)
- */
 export const numberFormatter = new Intl.NumberFormat('en-US', {
   maximumFractionDigits: 8,
 });
 
-/**
- * Core formatting logic that handles AUTO, FLC, and LOKI
- */
 export function formatAmount(
   value: number | string | undefined | null, 
   preferredUnit: DisplayUnit, 
@@ -27,11 +23,10 @@ export function formatAmount(
   if (value === undefined || value === null) return 'No activity';
   const n = typeof value === 'string' ? parseInt(value, 10) : value;
   if (isNaN(n)) return 'No activity';
-  
-  // Normalize to Loki
+  if (n === 0) return preferredUnit === 'LOKI' ? '0 LOKI' : '0.00 FLC';
+
   const lokiValue = sourceUnit === 'MLOKI' ? n / 1000 : n;
   
-  // Decide target unit
   let targetUnit: 'FLC' | 'LOKI' = 'FLC';
   if (preferredUnit === 'AUTO') {
     targetUnit = Math.abs(lokiValue) >= LOKI_PER_FLC ? 'FLC' : 'LOKI';
@@ -50,9 +45,16 @@ export function formatAmount(
   }
 }
 
-/**
- * Formatter specifically for inputs (clean numeric string)
- */
+export function useFormatAmount() {
+  const { unit } = useUnit();
+  
+  return {
+    format: (value: number | string | undefined | null, sourceUnit: 'LOKI' | 'MLOKI' = 'LOKI') => 
+      formatAmount(value, unit, sourceUnit),
+    unit
+  };
+}
+
 export function formatInput(value: number | string | undefined | null): string {
   if (value === undefined || value === null) return '';
   const n = typeof value === 'string' ? parseInt(value, 10) : value;
@@ -60,4 +62,16 @@ export function formatInput(value: number | string | undefined | null): string {
   return numberFormatter.format(n);
 }
 
-// ... rest of file (hooks and legacy aliases) ...
+export function formatLoki(loki: number | string | undefined | null): string {
+  return formatAmount(loki, 'LOKI');
+}
+
+export function formatFLC(loki: number | string | undefined | null): string {
+  return formatAmount(loki, 'FLC');
+}
+
+export function formatSmart(loki: number | string | undefined | null): string {
+  const saved = typeof window !== 'undefined' ? localStorage.getItem('flspd_unit') : 'AUTO';
+  const unit = (saved as DisplayUnit) || 'AUTO';
+  return formatAmount(loki, unit);
+}
