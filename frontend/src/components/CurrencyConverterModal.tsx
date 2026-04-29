@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { GlassCard } from '../components/GlassCard';
-import { formatAmount, type DisplayUnit } from '../lib/utils';
+import { formatAmount, formatInput, DisplayUnit } from '../lib/utils';
 
 interface CurrencyConverterModalProps {
   isOpen: boolean;
@@ -8,6 +8,8 @@ interface CurrencyConverterModalProps {
   onConfirm: (value: number) => void;
   currentValue: number;
   sourceUnit: 'LOKI' | 'MLOKI';
+  label: string;
+  explanation: string;
 }
 
 export const CurrencyConverterModal: React.FC<CurrencyConverterModalProps> = ({
@@ -16,6 +18,8 @@ export const CurrencyConverterModal: React.FC<CurrencyConverterModalProps> = ({
   onConfirm,
   currentValue,
   sourceUnit,
+  label,
+  explanation,
 }) => {
   const [inputValue, setInputValue] = useState(currentValue.toString());
   const [unit, setUnit] = useState<DisplayUnit>('AUTO');
@@ -23,7 +27,7 @@ export const CurrencyConverterModal: React.FC<CurrencyConverterModalProps> = ({
   if (!isOpen) return null;
 
   const handleConfirm = () => {
-    const val = parseInt(inputValue, 10);
+    const val = parseInt(inputValue.replace(/,/g, ''), 10);
     if (!isNaN(val)) {
       onConfirm(val);
       onClose();
@@ -33,11 +37,12 @@ export const CurrencyConverterModal: React.FC<CurrencyConverterModalProps> = ({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
       <GlassCard className="w-full max-w-md space-y-6 p-6">
-        <h3 className="text-sm font-bold text-white uppercase italic tracking-tighter">Edit Value</h3>
+        <h3 className="text-sm font-bold text-white uppercase italic tracking-tighter">Edit {label}</h3>
+        <p className="text-[10px] text-on-surface-variant font-mono">{explanation}</p>
         <input
-          type="number"
-          value={inputValue}
-          onChange={(e) => setInputValue(e.target.value)}
+          type="text"
+          value={formatInput(inputValue)}
+          onChange={(e) => setInputValue(e.target.value.replace(/,/g, ''))}
           className="w-full bg-black/40 border border-white/10 rounded-lg p-3 text-white font-mono"
         />
         <div className="flex gap-2">

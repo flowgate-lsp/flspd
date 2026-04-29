@@ -8,15 +8,42 @@ import { motion, AnimatePresence } from 'framer-motion';
 
 type Tab = 'general' | 'jit' | 'lsps1';
 
+import { HelpCircle } from 'lucide-react';
 import { CurrencyConverterModal } from '../components/CurrencyConverterModal';
 // ...
 export const Settings: React.FC = () => {
-  const { config, loading, saving, error, refreshConfig, updateConfig } = useSettings();
-  const { unit, setUnit } = useUnit();
-  const [activeTab, setActiveTab] = useState<Tab>('general');
-  const [formData, setFormData] = useState<any>(null);
-  const [showSuccess, setShowSuccess] = useState(false);
-  const [editingField, setEditingField] = useState<{ field: string; source: 'LOKI' | 'MLOKI'; value: number } | null>(null);
+// ...
+  const [editingField, setEditingField] = useState<{ field: string; source: 'LOKI' | 'MLOKI'; value: number; label: string; explanation: string } | null>(null);
+// ...
+// Enhanced FinancialInput
+const FinancialInput: React.FC<{ 
+    field: string;
+    label: string; 
+    explanation: string; 
+    value: any; 
+    source: 'LOKI' | 'MLOKI' 
+}> = ({ field, label, explanation, value, source }) => (
+  <div className="space-y-2">
+    <div className="flex justify-between items-center">
+      <div className="flex items-center gap-1">
+        <label className="text-[10px] font-bold text-white uppercase">{label}</label>
+        <div className="group relative">
+            <HelpCircle className="w-3 h-3 text-on-surface-variant cursor-help" />
+            <div className="absolute left-full ml-2 w-64 p-3 bg-black border border-white/10 rounded-lg text-[10px] text-white/70 shadow-xl z-50 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+                {explanation}
+            </div>
+        </div>
+      </div>
+      <button onClick={() => setEditingField({ field, source, value, label, explanation })} className="text-[9px] text-primary hover:underline font-mono uppercase">Edit</button>
+    </div>
+    <div className="flex items-center gap-2 bg-black/40 border border-white/10 rounded-lg p-3">
+        <input type="text" readOnly value={formatInput(value)} className="bg-transparent w-full text-white font-mono text-sm outline-none" />
+        <span className="text-[9px] text-on-surface-variant font-mono whitespace-nowrap">
+            ≈ {formatAmount(value, 'AUTO', source)}
+        </span>
+    </div>
+  </div>
+);
 
   useEffect(() => {
     if (config) {
@@ -270,38 +297,34 @@ export const Settings: React.FC = () => {
                     value={formData?.lsps1OrderExpirySeconds} 
                     onChange={(v) => handleInputChange('lsps1OrderExpirySeconds', parseInt(v))}
                   />
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-white uppercase">Min Initial Client Balance</label>
-                    <div className="flex items-center gap-2 bg-black/40 border border-white/10 rounded-lg p-3">
-                        <input type="number" readOnly value={formData?.lsps1MinInitialClientBalanceLoki} className="bg-transparent w-full text-white font-mono text-sm outline-none" />
-                        <button onClick={() => setEditingField({ field: 'lsps1MinInitialClientBalanceLoki', source: 'LOKI', value: formData?.lsps1MinInitialClientBalanceLoki })} className="text-[9px] text-primary hover:underline font-mono uppercase">Edit</button>
-                        <span className="text-[9px] text-on-surface-variant font-mono whitespace-nowrap">≈ {formatAmount(formData?.lsps1MinInitialClientBalanceLoki, 'AUTO', 'LOKI')}</span>
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-white uppercase">Max Initial Client Balance</label>
-                    <div className="flex items-center gap-2 bg-black/40 border border-white/10 rounded-lg p-3">
-                        <input type="number" readOnly value={formData?.lsps1MaxInitialClientBalanceLoki} className="bg-transparent w-full text-white font-mono text-sm outline-none" />
-                        <button onClick={() => setEditingField({ field: 'lsps1MaxInitialClientBalanceLoki', source: 'LOKI', value: formData?.lsps1MaxInitialClientBalanceLoki })} className="text-[9px] text-primary hover:underline font-mono uppercase">Edit</button>
-                        <span className="text-[9px] text-on-surface-variant font-mono whitespace-nowrap">≈ {formatAmount(formData?.lsps1MaxInitialClientBalanceLoki, 'AUTO', 'LOKI')}</span>
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-white uppercase">Min Initial LSP Balance</label>
-                    <div className="flex items-center gap-2 bg-black/40 border border-white/10 rounded-lg p-3">
-                        <input type="number" readOnly value={formData?.lsps1MinInitialLspBalanceLoki} className="bg-transparent w-full text-white font-mono text-sm outline-none" />
-                        <button onClick={() => setEditingField({ field: 'lsps1MinInitialLspBalanceLoki', source: 'LOKI', value: formData?.lsps1MinInitialLspBalanceLoki })} className="text-[9px] text-primary hover:underline font-mono uppercase">Edit</button>
-                        <span className="text-[9px] text-on-surface-variant font-mono whitespace-nowrap">≈ {formatAmount(formData?.lsps1MinInitialLspBalanceLoki, 'AUTO', 'LOKI')}</span>
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-white uppercase">Max Initial LSP Balance</label>
-                    <div className="flex items-center gap-2 bg-black/40 border border-white/10 rounded-lg p-3">
-                        <input type="number" readOnly value={formData?.lsps1MaxInitialLspBalanceLoki} className="bg-transparent w-full text-white font-mono text-sm outline-none" />
-                        <button onClick={() => setEditingField({ field: 'lsps1MaxInitialLspBalanceLoki', source: 'LOKI', value: formData?.lsps1MaxInitialLspBalanceLoki })} className="text-[9px] text-primary hover:underline font-mono uppercase">Edit</button>
-                        <span className="text-[9px] text-on-surface-variant font-mono whitespace-nowrap">≈ {formatAmount(formData?.lsps1MaxInitialLspBalanceLoki, 'AUTO', 'LOKI')}</span>
-                    </div>
-                  </div>
+                  <FinancialInput 
+                    field="lsps1MinInitialClientBalanceLoki"
+                    label="Min Initial Client Balance"
+                    explanation="Minimum balance the client is required to maintain in the channel."
+                    value={formData?.lsps1MinInitialClientBalanceLoki}
+                    source="LOKI"
+                  />
+                  <FinancialInput 
+                    field="lsps1MaxInitialClientBalanceLoki"
+                    label="Max Initial Client Balance"
+                    explanation="Maximum balance allowed for the client in the initial channel state."
+                    value={formData?.lsps1MaxInitialClientBalanceLoki}
+                    source="LOKI"
+                  />
+                  <FinancialInput 
+                    field="lsps1MinInitialLspBalanceLoki"
+                    label="Min Initial LSP Balance"
+                    explanation="Minimum initial liquidity provided by the LSP."
+                    value={formData?.lsps1MinInitialLspBalanceLoki}
+                    source="LOKI"
+                  />
+                  <FinancialInput 
+                    field="lsps1MaxInitialLspBalanceLoki"
+                    label="Max Initial LSP Balance"
+                    explanation="Maximum initial liquidity provided by the LSP."
+                    value={formData?.lsps1MaxInitialLspBalanceLoki}
+                    source="LOKI"
+                  />
                 </div>
               </GlassCard>
             )}
