@@ -1,6 +1,6 @@
 import { type ClassValue, clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
-import { useUnit, DisplayUnit } from '../contexts/UnitContext';
+import { useUnit, type DisplayUnit } from '../contexts/UnitContext';
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));

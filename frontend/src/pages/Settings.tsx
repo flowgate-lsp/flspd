@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { GlassCard } from '../components/GlassCard';
 import { Settings as SettingsIcon, Save, RefreshCw, Zap, Shield, Globe, Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { useSettings } from '../hooks/useSettings';
-import { useUnit, DisplayUnit } from '../contexts/UnitContext';
+import { useUnit, type DisplayUnit } from '../contexts/UnitContext';
 import { cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'framer-motion';
 
