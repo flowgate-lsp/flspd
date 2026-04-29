@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { GlassCard } from '../components/GlassCard';
 import { ArrowLeft, Clock, Zap, Hash, ExternalLink, Copy, CheckCircle, AlertCircle, Loader2, Activity, CornerUpRight } from 'lucide-react';
-import { formatSmart, formatLoki, cn } from '../lib/utils';
+import { useFormatAmount, cn } from '../lib/utils';
 import { useAuth } from '../hooks/useAuth';
 import { DashboardAPI } from '../lib/api';
 
@@ -26,6 +26,7 @@ const timelineColors: Record<string, string> = {
 
 export const OrderDetail: React.FC<OrderDetailProps> = ({ orderId, onBack }) => {
   const { getAuthHeader } = useAuth();
+  const { format } = useFormatAmount();
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -131,10 +132,10 @@ export const OrderDetail: React.FC<OrderDetailProps> = ({ orderId, onBack }) => 
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-y-10 gap-x-12 relative z-10">
-            <DetailRow label="Inbound Liquidity" value={formatSmart(order.lsp_balance_loki)} icon={CornerUpRight} color="text-secondary" />
-            <DetailRow label="Client Reserve" value={formatSmart(order.client_balance_loki)} />
-            <DetailRow label="Settlement Total" value={formatSmart(order.amount)} highlight />
-            <DetailRow label="Network Fee" value={formatLoki(order.fee)} />
+            <DetailRow label="Inbound Liquidity" value={format(order.lsp_balance_loki)} icon={CornerUpRight} color="text-secondary" />
+            <DetailRow label="Client Reserve" value={format(order.client_balance_loki)} />
+            <DetailRow label="Settlement Total" value={format(order.amount)} highlight />
+            <DetailRow label="Network Fee" value={format(order.fee)} />
             <DetailRow label="Inbound Window" value={`${order.funding_confirms_within_blocks} Blocks`} />
             <DetailRow label="Channel TTL" value={`${order.channel_expiry_blocks} Blocks`} />
             <DetailRow label="Public Announce" value={order.announce_channel ? 'ENABLED' : 'DISABLED'} color={order.announce_channel ? 'text-secondary' : 'text-error'} />
@@ -169,7 +170,7 @@ export const OrderDetail: React.FC<OrderDetailProps> = ({ orderId, onBack }) => 
                 value={order.funding_txid}
                 copied={copied}
                 onCopy={copyToClipboard}
-                explorerUrl={`https://lokichain.info/tx/${order.funding_txid}`}
+                explorerUrl={`https://flcscan.info/tx/${order.funding_txid}`}
               />
             )}
             {order.refund_onchain_address && (
@@ -221,7 +222,7 @@ export const OrderDetail: React.FC<OrderDetailProps> = ({ orderId, onBack }) => 
                       <div className="bg-black/40 border border-white/5 p-2 rounded-lg mt-2 inline-flex items-center gap-2 group/txLink hover:bg-white/10 transition-all">
                         <span className="text-[9px] font-mono text-on-surface-variant uppercase font-black tracking-tight">TX: </span>
                         <a 
-                          href={`https://lokichain.info/tx/${txMatch[1]}`}
+                          href={`https://flcscan.info/tx/${txMatch[1]}`}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="text-[9px] font-mono text-primary font-black underline decoration-primary/20 hover:decoration-primary underline-offset-2 transition-all italic"

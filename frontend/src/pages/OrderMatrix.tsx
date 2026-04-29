@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { GlassCard } from '../components/GlassCard';
 import { Search, ExternalLink, RefreshCw, Loader2, AlertCircle, ChevronRight } from 'lucide-react';
-import { cn, formatSmart, formatLoki } from '../lib/utils';
+import { useFormatAmount, cn } from '../lib/utils';
 import { useDashboard } from '../hooks/useDashboard';
 import { useEvents } from '../hooks/useEvents';
 import { useNavigate } from '@tanstack/react-router';
@@ -21,6 +21,7 @@ interface OrderMatrixProps {
 
 export const OrderMatrix: React.FC<OrderMatrixProps> = ({ onViewOrder, initialSearch = '' }) => {
   const { orders, loading, error, refreshOrders } = useDashboard();
+  const { format } = useFormatAmount();
   const [search, setSearch] = useState(initialSearch);
   const navigate = useNavigate();
 
@@ -171,8 +172,8 @@ export const OrderMatrix: React.FC<OrderMatrixProps> = ({ onViewOrder, initialSe
                     </td>
                     <td className="px-8 py-6">
                       <div className="flex flex-col gap-1">
-                        <span className="text-base font-black text-white italic tracking-tighter leading-none">{formatSmart(order.lsp_balance_loki)}</span>
-                        <span className="text-[9px] font-mono text-on-surface-variant/40 uppercase tracking-widest font-black italic">Fee: {formatLoki(order.amount)}</span>
+                        <span className="text-base font-black text-white italic tracking-tighter leading-none">{format(order.lsp_balance_loki)}</span>
+                        <span className="text-[9px] font-mono text-on-surface-variant/40 uppercase tracking-widest font-black italic">Fee: {format(order.amount)}</span>
                       </div>
                     </td>
                     <td className="px-8 py-6">
@@ -190,7 +191,7 @@ export const OrderMatrix: React.FC<OrderMatrixProps> = ({ onViewOrder, initialSe
                        <div className="flex items-center justify-end gap-3 group/tx">
                           {order.funding_txid ? (
                             <a 
-                              href={`https://lokichain.info/tx/${order.funding_txid}`}
+                              href={`https://flcscan.info/tx/${order.funding_txid}`}
                               target="_blank"
                               rel="noopener noreferrer"
                               title="View in Explorer" 
@@ -252,12 +253,12 @@ export const OrderMatrix: React.FC<OrderMatrixProps> = ({ onViewOrder, initialSe
                   <div className="flex flex-col gap-1">
                     <span className="text-[8px] font-mono text-on-surface-variant/40 uppercase tracking-[0.3em] font-black">Capacity</span>
                     <span className="text-xl font-black text-white italic tracking-tighter tabular-nums leading-none">
-                      {formatSmart(order.lsp_balance_loki).split(' ')[0]}
+                      {format(order.lsp_balance_loki).split(' ')[0]}
                       <span className="text-[9px] text-white/40 not-italic ml-1 uppercase font-mono tracking-widest">
-                        {formatSmart(order.lsp_balance_loki).split(' ')[1]}
+                        {format(order.lsp_balance_loki).split(' ')[1]}
                       </span>
                     </span>
-                    <span className="text-[8px] font-mono text-on-surface-variant/60 font-bold uppercase tracking-widest mt-1">Fee: {formatLoki(order.amount)}</span>
+                    <span className="text-[8px] font-mono text-on-surface-variant/60 font-bold uppercase tracking-widest mt-1">Fee: {format(order.amount)}</span>
                   </div>
                   <div className="flex flex-col gap-1 overflow-hidden">
                     <span className="text-[8px] font-mono text-on-surface-variant/40 uppercase tracking-[0.3em] font-black">Counterparty</span>
@@ -275,7 +276,7 @@ export const OrderMatrix: React.FC<OrderMatrixProps> = ({ onViewOrder, initialSe
                  <div className="flex items-center gap-4">
                    {order.funding_txid && (
                      <a 
-                       href={`https://lokichain.info/tx/${order.funding_txid}`}
+                       href={`https://flcscan.info/tx/${order.funding_txid}`}
                        target="_blank"
                        rel="noopener noreferrer"
                        onClick={(e) => e.stopPropagation()}

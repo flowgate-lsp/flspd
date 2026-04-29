@@ -13,12 +13,13 @@ import {
   Server,
   Network
 } from 'lucide-react';
-import { formatSmart, cn } from '../lib/utils';
+import { useFormatAmount, cn } from '../lib/utils';
 import { useDashboard } from '../hooks/useDashboard';
 import { useNavigate } from '@tanstack/react-router';
 
 export const CommandCenter: React.FC<{ onViewOrder?: (id: string) => void }> = ({ onViewOrder }) => {
   const { summary, orders } = useDashboard();
+  const { format } = useFormatAmount();
   const [copied, setCopied] = useState(false);
   const navigate = useNavigate();
 
@@ -93,7 +94,7 @@ export const CommandCenter: React.FC<{ onViewOrder?: (id: string) => void }> = (
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
             <StatCard 
               label="24h Revenue" 
-              value={formatSmart(summary?.revenue_24h || 0)} 
+              value={format(summary?.revenue_24h || 0)} 
               icon={ArrowUpRight} 
               trend={summary?.revenue_trend || "0%"}
               color="text-secondary" 
@@ -101,7 +102,7 @@ export const CommandCenter: React.FC<{ onViewOrder?: (id: string) => void }> = (
             />
             <StatCard 
               label="Trading Volume" 
-              value={formatSmart(summary?.liquidity_total || 0)} 
+              value={format(summary?.liquidity_total || 0)} 
               icon={Activity} 
               trend={summary?.volume_trend || "0%"}
               color="text-primary" 
@@ -109,7 +110,7 @@ export const CommandCenter: React.FC<{ onViewOrder?: (id: string) => void }> = (
             />
             <StatCard 
               label="Blocked Liq" 
-              value={formatSmart(summary?.liquidity_blocked || 0)} 
+              value={format(summary?.liquidity_blocked || 0)} 
               icon={Clock} 
               color="text-tertiary" 
               description="Pending commits"
@@ -137,7 +138,7 @@ export const CommandCenter: React.FC<{ onViewOrder?: (id: string) => void }> = (
                  label="Global Pool" 
                  tag="Inbound"
                  tagColor="text-primary"
-                 value={formatSmart(summary?.liquidity_total || 0)}
+                 value={format(summary?.liquidity_total || 0)}
               />
               <MiniStatusCard 
                  icon={Hash} 
@@ -176,7 +177,7 @@ export const CommandCenter: React.FC<{ onViewOrder?: (id: string) => void }> = (
                   <h4 className="text-[10px] font-black font-mono text-white/90 truncate group-hover:text-primary transition-colors tracking-widest break-all mb-1">{activity.title}</h4>
                   <div className="flex items-center justify-between w-full">
                     <p className="text-[8px] font-mono text-white/30 uppercase tracking-[0.1em]">{activity.time}</p>
-                    <p className="text-[9px] font-mono text-on-surface-variant uppercase font-black tracking-widest tabular-nums tabular-nums-variant">{formatSmart(activity.amount)}</p>
+                    <p className="text-[9px] font-mono text-on-surface-variant uppercase font-black tracking-widest tabular-nums tabular-nums-variant">{format(activity.amount)}</p>
                   </div>
                 </div>
               </div>

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { GlassCard } from '../components/GlassCard';
 import { Users, Globe, ArrowUpRight, ArrowDownLeft, Search, ShieldCheck, Activity, Copy, Check } from 'lucide-react';
 import { useDashboard } from '../hooks/useDashboard';
-import { formatSmart, cn } from '../lib/utils';
+import { useFormatAmount, cn } from '../lib/utils';
 
 /* --- Utilities --- */
 
@@ -24,6 +24,7 @@ interface PeerNodesProps {
 
 export const PeerNodes: React.FC<PeerNodesProps> = ({ onViewPeerOrders }) => {
   const { api } = useDashboard();
+  const { format } = useFormatAmount();
   const [peers, setPeers] = useState<Peer[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -98,6 +99,7 @@ export const PeerNodes: React.FC<PeerNodesProps> = ({ onViewPeerOrders }) => {
               key={peer.pub_key}
               peer={peer}
               onViewOrders={onViewPeerOrders}
+              format={format}
             />
           ))}
         </div>
@@ -111,9 +113,10 @@ export const PeerNodes: React.FC<PeerNodesProps> = ({ onViewPeerOrders }) => {
 interface PeerCardProps {
   peer: Peer;
   onViewOrders?: (pubkey: string) => void;
+  format: (value: number | string | undefined | null) => string;
 }
 
-const PeerCard: React.FC<PeerCardProps> = ({ peer, onViewOrders }) => {
+const PeerCard: React.FC<PeerCardProps> = ({ peer, onViewOrders, format }) => {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = () => {
@@ -181,11 +184,11 @@ const PeerCard: React.FC<PeerCardProps> = ({ peer, onViewOrders }) => {
       <div className="grid grid-cols-3 gap-2 mt-auto">
         <div className="space-y-1.5">
           <span className="text-[9px] font-mono text-white/30 uppercase tracking-widest font-black flex items-center gap-1.5"><ArrowUpRight className="w-3 h-3 text-secondary"/> Sent</span>
-          <div className="text-sm font-medium text-white tracking-tight tabular-nums">{formatSmart(peer.out_sat)}</div>
+          <div className="text-sm font-medium text-white tracking-tight tabular-nums">{format(peer.out_sat)}</div>
         </div>
         <div className="space-y-1.5 border-l border-white/5 pl-3">
           <span className="text-[9px] font-mono text-white/30 uppercase tracking-widest font-black flex items-center gap-1.5"><ArrowDownLeft className="w-3 h-3 text-primary"/> Recv</span>
-          <div className="text-sm font-medium text-white tracking-tight tabular-nums">{formatSmart(peer.in_sat)}</div>
+          <div className="text-sm font-medium text-white tracking-tight tabular-nums">{format(peer.in_sat)}</div>
         </div>
         <div className="space-y-1.5 border-l border-white/5 pl-3">
           <span className="text-[9px] font-mono text-white/30 uppercase tracking-widest font-black flex items-center gap-1.5"><Activity className="w-3 h-3 text-tertiary"/> Orders</span>

@@ -670,15 +670,19 @@ func (s *DashboardService) handleUpdateConfig(req *lsps.JsonRpcRequest) *lsps.Js
 		return lsps.NewJsonRpcErrorResponse(req.Id, -32602, "Invalid params", err.Error())
 	}
 
+	// 1. Validate the new configuration before applying
+	if err := params.Config.Validate(); err != nil {
+		log.Error().Err(err).Msg("Dashboard: configuration validation failed")
+		return lsps.NewJsonRpcErrorResponse(req.Id, -32602, "Validation failed", err.Error())
+	}
+
 	nodes := s.nodesService.GetNodes()
 	if len(nodes) == 0 {
 		return lsps.NewJsonRpcErrorResponse(req.Id, -32000, "No nodes configured", nil)
 	}
 
-	// Update in memory
-	*nodes[0].NodeConfig = params.Config
-
-	// Persist to file if configPath is set
+	// 2. Persist to file first (if configPath is set)
+	// This ensures we don't update memory if persistence fails.
 	if s.configPath != "" {
 		// In a real scenario, we'd marshal all nodes back to YAML
 		// For this implementation, we'll assume a single node for simplicity
@@ -686,15 +690,29 @@ func (s *DashboardService) handleUpdateConfig(req *lsps.JsonRpcRequest) *lsps.Js
 		data, err := yaml.Marshal(configs)
 		if err != nil {
 			log.Error().Err(err).Msg("Failed to marshal config for persistence")
-		} else {
-			err = os.WriteFile(s.configPath, data, 0644)
-			if err != nil {
-				log.Error().Err(err).Msg("Failed to write config file")
-			} else {
-				log.Info().Msgf("Persisted dashboard config changes to %s", s.configPath)
-			}
+			return lsps.NewJsonRpcErrorResponse(req.Id, -32603, "Failed to marshal configuration", err.Error())
 		}
+
+		// Use atomic-like write: write to .tmp and rename
+		tmpPath := s.configPath + ".tmp"
+		err = os.WriteFile(tmpPath, data, 0644)
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to write temporary config file")
+			return lsps.NewJsonRpcErrorResponse(req.Id, -32603, "Failed to write configuration file", err.Error())
+		}
+
+		err = os.Rename(tmpPath, s.configPath)
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to rename temporary config file")
+			os.Remove(tmpPath) // clean up
+			return lsps.NewJsonRpcErrorResponse(req.Id, -32603, "Failed to persist configuration", err.Error())
+		}
+
+		log.Info().Msgf("Persisted dashboard config changes to %s", s.configPath)
 	}
+
+	// 3. Update in memory only after successful persistence
+	*nodes[0].NodeConfig = params.Config
 
 	return lsps.NewJsonRpcResponse(req.Id, map[string]string{"status": "updated"})
 }

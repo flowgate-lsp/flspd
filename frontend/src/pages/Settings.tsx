@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { GlassCard } from '../components/GlassCard';
 import { Settings as SettingsIcon, Save, RefreshCw, Zap, Shield, Globe, Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { useSettings } from '../hooks/useSettings';
+import { useUnit, DisplayUnit } from '../contexts/UnitContext';
 import { cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -9,6 +10,7 @@ type Tab = 'general' | 'jit' | 'lsps1';
 
 export const Settings: React.FC = () => {
   const { config, loading, saving, error, refreshConfig, updateConfig } = useSettings();
+  const { unit, setUnit } = useUnit();
   const [activeTab, setActiveTab] = useState<Tab>('general');
   const [formData, setFormData] = useState<any>(null);
   const [showSuccess, setShowSuccess] = useState(false);
@@ -129,34 +131,64 @@ export const Settings: React.FC = () => {
             className="space-y-6"
           >
             {activeTab === 'general' && (
-              <GlassCard className="space-y-8">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                  <Input 
-                    label="Display Name" 
-                    value={formData?.name} 
-                    onChange={(v) => handleInputChange('name', v)}
-                    placeholder="e.g. My Flowgate LSP"
-                  />
-                  <Input 
-                    label="Public Host" 
-                    value={formData?.host} 
-                    onChange={(v) => handleInputChange('host', v)}
-                    placeholder="e.g. lsp.example.com:9735"
-                  />
-                  <Input 
-                    label="Target Confirmations" 
-                    type="number"
-                    value={formData?.targetConf} 
-                    onChange={(v) => handleInputChange('targetConf', parseInt(v))}
-                  />
-                   <Input 
-                    label="Min Confirmations" 
-                    type="number"
-                    value={formData?.minConfs} 
-                    onChange={(v) => handleInputChange('minConfs', parseInt(v))}
-                  />
-                </div>
-              </GlassCard>
+              <>
+                <GlassCard className="space-y-8">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                    <Input 
+                      label="Display Name" 
+                      value={formData?.name} 
+                      onChange={(v) => handleInputChange('name', v)}
+                      placeholder="e.g. My Flowgate LSP"
+                    />
+                    <Input 
+                      label="Public Host" 
+                      value={formData?.host} 
+                      onChange={(v) => handleInputChange('host', v)}
+                      placeholder="e.g. lsp.example.com:9735"
+                    />
+                    <Input 
+                      label="Target Confirmations" 
+                      type="number"
+                      value={formData?.targetConf} 
+                      onChange={(v) => handleInputChange('targetConf', parseInt(v))}
+                    />
+                    <Input 
+                      label="Min Confirmations" 
+                      type="number"
+                      value={formData?.minConfs} 
+                      onChange={(v) => handleInputChange('minConfs', parseInt(v))}
+                    />
+                  </div>
+                </GlassCard>
+
+                <GlassCard className="space-y-6">
+                  <div>
+                    <h3 className="text-sm font-bold text-white uppercase italic tracking-tighter mb-1">Display Settings</h3>
+                    <p className="text-[10px] font-mono text-on-surface-variant uppercase tracking-widest">Configure how financial values are displayed</p>
+                  </div>
+                  
+                  <div className="flex flex-col md:flex-row md:items-center justify-between p-4 bg-white/5 rounded-2xl border border-white/10 gap-4">
+                    <div className="space-y-1">
+                        <h4 className="text-xs font-bold text-white uppercase tracking-tight">Preferred Currency Unit</h4>
+                        <p className="text-[9px] font-mono text-on-surface-variant">Default is FLC. Loki is available for high-precision viewing.</p>
+                    </div>
+                    <div className="flex p-1 bg-black/40 rounded-xl border border-white/5 w-fit">
+                        {(['FLC', 'LOKI'] as DisplayUnit[]).map((u) => (
+                            <button
+                                key={u}
+                                onClick={() => setUnit(u)}
+                                className={cn(
+                                    "px-6 py-2 rounded-lg text-[10px] font-black tracking-widest transition-all",
+                                    unit === u ? "bg-primary text-black" : "text-on-surface-variant hover:text-white"
+                                )}
+                            >
+                                {u}
+                            </button>
+                        ))}
+                    </div>
+                  </div>
+                </GlassCard>
+              </>
             )}
 
             {activeTab === 'jit' && (
@@ -174,19 +206,19 @@ export const Settings: React.FC = () => {
                 
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
                   <Input 
-                    label="Min Payment Size (mLOKI)" 
+                    label="Min Payment Size" 
                     type="number"
                     value={formData?.minPaymentSizeMloki} 
                     onChange={(v) => handleInputChange('minPaymentSizeMloki', parseInt(v))}
                   />
                   <Input 
-                    label="Max Payment Size (mLOKI)" 
+                    label="Max Payment Size" 
                     type="number"
                     value={formData?.jitMaxPaymentSizeMloki} 
                     onChange={(v) => handleInputChange('jitMaxPaymentSizeMloki', parseInt(v))}
                   />
                   <Input 
-                    label="Base Fee (mLOKI)" 
+                    label="Base Fee" 
                     type="number"
                     value={formData?.baseFeeMloki} 
                     onChange={(v) => handleInputChange('baseFeeMloki', parseInt(v))}
@@ -205,7 +237,7 @@ export const Settings: React.FC = () => {
                     onChange={(v) => handleInputChange('channelFeePermyriad', parseInt(v))}
                   />
                   <Input 
-                    label="Min Channel Capacity (LOKI)" 
+                    label="Min Channel Capacity" 
                     type="number"
                     value={formData?.minChannelCapacityLoki} 
                     onChange={(v) => handleInputChange('minChannelCapacityLoki', parseInt(v))}
@@ -236,19 +268,19 @@ export const Settings: React.FC = () => {
                     onChange={(v) => handleInputChange('lsps1OrderExpirySeconds', parseInt(v))}
                   />
                   <Input 
-                    label="Min Initial Client Balance (LOKI)" 
+                    label="Min Initial Client Balance" 
                     type="number"
                     value={formData?.lsps1MinInitialClientBalanceLoki} 
                     onChange={(v) => handleInputChange('lsps1MinInitialClientBalanceLoki', parseInt(v))}
                   />
                    <Input 
-                    label="Max Initial Client Balance (LOKI)" 
+                    label="Max Initial Client Balance" 
                     type="number"
                     value={formData?.lsps1MaxInitialClientBalanceLoki} 
                     onChange={(v) => handleInputChange('lsps1MaxInitialClientBalanceLoki', parseInt(v))}
                   />
                    <Input 
-                    label="Min Initial LSP Balance (LOKI)" 
+                    label="Min Initial LSP Balance" 
                     type="number"
                     value={formData?.lsps1MinInitialLspBalanceLoki} 
                     onChange={(v) => handleInputChange('lsps1MinInitialLspBalanceLoki', parseInt(v))}

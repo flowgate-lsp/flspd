@@ -2,10 +2,11 @@ import React, { useState } from 'react';
 import { GlassCard } from '../components/GlassCard';
 import { Shield, Zap, Search, Activity, ExternalLink, Globe, Lock, Cpu, Copy } from 'lucide-react';
 import { useDashboard } from '../hooks/useDashboard';
-import { formatSmart, cn } from '../lib/utils';
+import { useFormatAmount, cn } from '../lib/utils';
 
 export const JITChannels: React.FC = () => {
   const { api } = useDashboard();
+  const { format } = useFormatAmount();
   const [channels, setChannels] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -123,7 +124,7 @@ export const JITChannels: React.FC = () => {
                 <div className="space-y-1.5">
                   <p className="text-[8px] font-mono text-on-surface-variant/50 uppercase tracking-[0.2em] font-black italic">Capacity</p>
                   <p className="text-lg font-black text-white tracking-tighter leading-none group-hover:text-secondary transition-colors tabular-nums">
-                    {formatSmart(ch.capacity)}
+                    {format(ch.capacity)}
                   </p>
                 </div>
                 <div className="space-y-1.5 border-l border-white/5 pl-4">
@@ -144,7 +145,7 @@ export const JITChannels: React.FC = () => {
                 </div>
                  <div className="flex gap-3">
                     <a 
-                      href={`https://lokichain.info/tx/${ch.txid}`}
+                      href={`https://flcscan.info/tx/${ch.txid}`}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="p-2 text-on-surface-variant hover:text-white bg-white/5 hover:bg-secondary/20 rounded-lg border border-white/5 transition-all shadow-xl active:scale-95"

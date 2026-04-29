@@ -14,13 +14,13 @@ import {
   Pie,
   Cell
 } from 'recharts';
-import { formatSmart } from '../lib/utils';
+import { useFormatAmount, cn } from '../lib/utils';
 import { useDashboard } from '../hooks/useDashboard';
 import { TrendingUp, Users, Zap, Award, Loader2, BarChart3, PieChart as PieIcon, Activity } from 'lucide-react';
-import { cn } from '../lib/utils';
 
 export const Analytics: React.FC = () => {
   const { api } = useDashboard();
+  const { format } = useFormatAmount();
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
@@ -97,7 +97,7 @@ export const Analytics: React.FC = () => {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <SummaryCard 
           label="Total Revenue" 
-          value={formatSmart(total_revenue || 0)} 
+          value={format(total_revenue || 0)} 
           icon={TrendingUp} 
           color="text-secondary" 
           description="Inbound fees earned"
@@ -115,7 +115,7 @@ export const Analytics: React.FC = () => {
         />
         <SummaryCard 
           label="Avg Order Size" 
-          value={formatSmart(avg_order_size || 0)} 
+          value={format(avg_order_size || 0)} 
           icon={Zap} 
           color="text-tertiary" 
           description="Mean liquidity request"
@@ -190,11 +190,11 @@ export const Analytics: React.FC = () => {
                   fontSize={10} 
                   tickLine={false} 
                   axisLine={false}
-                  tickFormatter={(val) => formatSmart(val).split(' ')[0]}
+                  tickFormatter={(val) => format(val).split(' ')[0]}
                   fontFamily="monospace"
                 />
                 <Tooltip 
-                  content={<CustomTooltip />}
+                  content={<CustomTooltip format={format} />}
                   cursor={{ stroke: '#ffffff10', strokeWidth: 1 }}
                 />
                 <Area 
@@ -270,7 +270,7 @@ export const Analytics: React.FC = () => {
                         ))}
                       </Pie>
                       <Tooltip 
-                        content={<CustomTooltip />}
+                        content={<CustomTooltip format={format} />}
                         cursor={{ stroke: '#ffffff10', strokeWidth: 1 }}
                       />
                     </PieChart>
@@ -332,10 +332,10 @@ export const Analytics: React.FC = () => {
                     fontSize={10} 
                     tickLine={false} 
                     axisLine={false}
-                    tickFormatter={(val) => formatSmart(val).split(' ')[0]}
+                    tickFormatter={(val) => format(val).split(' ')[0]}
                     fontFamily="monospace"
                   />
-                  <Tooltip content={<CustomTooltip />} cursor={{ fill: '#ffffff05' }} />
+                  <Tooltip content={<CustomTooltip format={format} />} cursor={{ fill: '#ffffff05' }} />
                   <Bar dataKey="revenue" fill="#B026FF" radius={[6, 6, 0, 0]} barSize={48} />
                   </BarChart>
                 </ResponsiveContainer>
@@ -406,7 +406,7 @@ const NoData: React.FC<{ label: string }> = ({ label }) => (
   </div>
 );
 
-const CustomTooltip = ({ active, payload, label }: any) => {
+const CustomTooltip = ({ active, payload, label, format }: any) => {
   if (active && payload && payload.length) {
     return (
       <div className="relative z-50 bg-[#0f172a]/95 border border-white/10 p-5 rounded-2xl shadow-[0_25px_50px_rgba(0,0,0,0.5)] backdrop-blur-2xl ring-1 ring-white/10">
@@ -421,7 +421,7 @@ const CustomTooltip = ({ active, payload, label }: any) => {
                  <span className="text-[10px] font-mono text-white/50 uppercase font-black tracking-widest">{item.name}</span>
               </div>
               <span className="text-xs font-mono font-black italic tracking-tighter" style={{ color: item.stroke || item.fill }}>
-                {typeof item.value === 'number' && (item.name === 'revenue' || item.name === 'volume') ? formatSmart(item.value) : item.value}
+                {typeof item.value === 'number' && (item.name === 'revenue' || item.name === 'volume') ? format(item.value) : item.value}
               </span>
             </div>
           ))}
