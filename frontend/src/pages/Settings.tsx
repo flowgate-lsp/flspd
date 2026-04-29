@@ -1,29 +1,24 @@
 import React, { useState, useEffect } from 'react';
 import { GlassCard } from '../components/GlassCard';
-import { Settings as SettingsIcon, Save, RefreshCw, Zap, Shield, Globe, Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { Settings as SettingsIcon, Save, RefreshCw, Zap, Shield, Globe, Loader2, AlertCircle, CheckCircle2, HelpCircle } from 'lucide-react';
 import { useSettings } from '../hooks/useSettings';
 import { useUnit, type DisplayUnit } from '../contexts/UnitContext';
-import { formatAmount, cn } from '../lib/utils';
+import { formatAmount, formatInput, cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'framer-motion';
+import { CurrencyConverterModal } from '../components/CurrencyConverterModal';
 
 type Tab = 'general' | 'jit' | 'lsps1';
 
-import { HelpCircle } from 'lucide-react';
-import { CurrencyConverterModal } from '../components/CurrencyConverterModal';
-// ...
-export const Settings: React.FC = () => {
-// ...
-  const [editingField, setEditingField] = useState<{ field: string; source: 'LOKI' | 'MLOKI'; value: number; label: string; explanation: string } | null>(null);
-// ...
 // Enhanced FinancialInput
 const FinancialInput: React.FC<{ 
     field: string;
     label: string; 
     explanation: string; 
     value: any; 
-    source: 'LOKI' | 'MLOKI' 
-}> = ({ field, label, explanation, value, source }) => (
-  <div className="space-y-2">
+    source: 'LOKI' | 'MLOKI';
+    onEdit: (field: string, source: 'LOKI' | 'MLOKI', value: number, label: string, explanation: string) => void;
+    }> = ({ field, label, explanation, value, source, onEdit }) => (
+    <div className="space-y-2">
     <div className="flex justify-between items-center">
       <div className="flex items-center gap-1">
         <label className="text-[10px] font-bold text-white uppercase">{label}</label>
@@ -34,8 +29,9 @@ const FinancialInput: React.FC<{
             </div>
         </div>
       </div>
-      <button onClick={() => setEditingField({ field, source, value, label, explanation })} className="text-[9px] text-primary hover:underline font-mono uppercase">Edit</button>
+      <button onClick={() => onEdit(field, source, value, label, explanation)} className="text-[9px] text-primary hover:underline font-mono uppercase">Edit</button>
     </div>
+
     <div className="flex items-center gap-2 bg-black/40 border border-white/10 rounded-lg p-3">
         <input type="text" readOnly value={formatInput(value)} className="bg-transparent w-full text-white font-mono text-sm outline-none" />
         <span className="text-[9px] text-on-surface-variant font-mono whitespace-nowrap">
@@ -44,6 +40,47 @@ const FinancialInput: React.FC<{
     </div>
   </div>
 );
+
+const Input: React.FC<{ label: string; value: any; onChange: (v: any) => void; type?: string; placeholder?: string; step?: string }> = ({ 
+  label, value, onChange, type = 'text', placeholder, step 
+}) => (
+  <div className="space-y-2 group">
+    <label className="text-[10px] font-mono uppercase tracking-[0.2em] text-on-surface-variant group-focus-within:text-primary transition-colors">
+      {label}
+    </label>
+    <input 
+      type={type}
+      step={step}
+      value={value ?? ''}
+      onChange={(e) => onChange(e.target.value)}
+      placeholder={placeholder}
+      className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm text-white font-mono placeholder:text-white/20 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all"
+    />
+  </div>
+);
+
+const Switch: React.FC<{ checked: boolean; onChange: (v: boolean) => void }> = ({ checked, onChange }) => (
+  <button 
+    onClick={() => onChange(!checked)}
+    className={cn(
+        "w-12 h-6 rounded-full transition-all duration-300 relative",
+        checked ? "bg-primary" : "bg-white/10"
+    )}
+  >
+    <div className={cn(
+        "absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-all duration-300",
+        checked ? "translate-x-6" : "translate-x-0"
+    )} />
+  </button>
+);
+
+export const Settings: React.FC = () => {
+  const { config, loading, saving, error, refreshConfig, updateConfig } = useSettings();
+  const { unit, setUnit } = useUnit();
+  const [activeTab, setActiveTab] = useState<Tab>('general');
+  const [formData, setFormData] = useState<any>(null);
+  const [showSuccess, setShowSuccess] = useState(false);
+  const [editingField, setEditingField] = useState<{ field: string; source: 'LOKI' | 'MLOKI'; value: number; label: string; explanation: string } | null>(null);
 
   useEffect(() => {
     if (config) {
@@ -200,7 +237,7 @@ const FinancialInput: React.FC<{
                   <div className="flex flex-col md:flex-row md:items-center justify-between p-4 bg-white/5 rounded-2xl border border-white/10 gap-4">
                     <div className="space-y-1">
                         <h4 className="text-xs font-bold text-white uppercase tracking-tight">Preferred Currency Unit</h4>
-                        <p className="text-[9px] font-mono text-on-surface-variant">Default is FLC. Loki is available for high-precision viewing.</p>
+                        <p className="text-[9px] font-mono text-on-surface-variant">Default is AUTO. Switch to FLC or Loki for fixed displays.</p>
                     </div>
                     <div className="flex p-1 bg-black/40 rounded-xl border border-white/5 w-fit">
                         {(['AUTO', 'FLC', 'LOKI'] as DisplayUnit[]).map((u) => (
@@ -235,22 +272,9 @@ const FinancialInput: React.FC<{
                 </div>
                 
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-white uppercase">Max Payment Size</label>
-                    <div className="flex items-center gap-2 bg-black/40 border border-white/10 rounded-lg p-3">
-                        <input type="number" readOnly value={formData?.jitMaxPaymentSizeMloki} className="bg-transparent w-full text-white font-mono text-sm outline-none" />
-                        <button onClick={() => setEditingField({ field: 'jitMaxPaymentSizeMloki', source: 'MLOKI', value: formData?.jitMaxPaymentSizeMloki })} className="text-[9px] text-primary hover:underline font-mono uppercase">Edit</button>
-                        <span className="text-[9px] text-on-surface-variant font-mono whitespace-nowrap">≈ {formatAmount(formData?.jitMaxPaymentSizeMloki, 'AUTO', 'MLOKI')}</span>
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-white uppercase">Base Fee</label>
-                    <div className="flex items-center gap-2 bg-black/40 border border-white/10 rounded-lg p-3">
-                        <input type="number" readOnly value={formData?.baseFeeMloki} className="bg-transparent w-full text-white font-mono text-sm outline-none" />
-                        <button onClick={() => setEditingField({ field: 'baseFeeMloki', source: 'MLOKI', value: formData?.baseFeeMloki })} className="text-[9px] text-primary hover:underline font-mono uppercase">Edit</button>
-                        <span className="text-[9px] text-on-surface-variant font-mono whitespace-nowrap">≈ {formatAmount(formData?.baseFeeMloki, 'AUTO', 'MLOKI')}</span>
-                    </div>
-                  </div>
+                  <FinancialInput field="minPaymentSizeMloki" label="Min Payment Size" explanation="Minimum payment size in mLoki for JIT channel creation." value={formData?.minPaymentSizeMloki} source="MLOKI" onEdit={setEditingField} />
+                  <FinancialInput field="jitMaxPaymentSizeMloki" label="Max Payment Size" explanation="Maximum payment size in mLoki for JIT channel creation." value={formData?.jitMaxPaymentSizeMloki} source="MLOKI" onEdit={setEditingField} />
+                  <FinancialInput field="baseFeeMloki" label="Base Fee" explanation="Fixed base fee in mLoki per payment." value={formData?.baseFeeMloki} source="MLOKI" onEdit={setEditingField} />
                   <Input 
                     label="Fee Rate" 
                     type="number"
@@ -264,14 +288,7 @@ const FinancialInput: React.FC<{
                     value={formData?.channelFeePermyriad} 
                     onChange={(v) => handleInputChange('channelFeePermyriad', parseInt(v))}
                   />
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-white uppercase">Min Channel Capacity</label>
-                    <div className="flex items-center gap-2 bg-black/40 border border-white/10 rounded-lg p-3">
-                        <input type="number" readOnly value={formData?.minChannelCapacityLoki} className="bg-transparent w-full text-white font-mono text-sm outline-none" />
-                        <button onClick={() => setEditingField({ field: 'minChannelCapacityLoki', source: 'LOKI', value: formData?.minChannelCapacityLoki })} className="text-[9px] text-primary hover:underline font-mono uppercase">Edit</button>
-                        <span className="text-[9px] text-on-surface-variant font-mono whitespace-nowrap">≈ {formatAmount(formData?.minChannelCapacityLoki, 'AUTO', 'LOKI')}</span>
-                    </div>
-                  </div>
+                  <FinancialInput field="minChannelCapacityLoki" label="Min Channel Capacity" explanation="Minimum total capacity for a channel (Loki)." value={formData?.minChannelCapacityLoki} source="LOKI" onEdit={setEditingField} />
                 </div>
               </GlassCard>
             )}
@@ -297,34 +314,10 @@ const FinancialInput: React.FC<{
                     value={formData?.lsps1OrderExpirySeconds} 
                     onChange={(v) => handleInputChange('lsps1OrderExpirySeconds', parseInt(v))}
                   />
-                  <FinancialInput 
-                    field="lsps1MinInitialClientBalanceLoki"
-                    label="Min Initial Client Balance"
-                    explanation="Minimum balance the client is required to maintain in the channel."
-                    value={formData?.lsps1MinInitialClientBalanceLoki}
-                    source="LOKI"
-                  />
-                  <FinancialInput 
-                    field="lsps1MaxInitialClientBalanceLoki"
-                    label="Max Initial Client Balance"
-                    explanation="Maximum balance allowed for the client in the initial channel state."
-                    value={formData?.lsps1MaxInitialClientBalanceLoki}
-                    source="LOKI"
-                  />
-                  <FinancialInput 
-                    field="lsps1MinInitialLspBalanceLoki"
-                    label="Min Initial LSP Balance"
-                    explanation="Minimum initial liquidity provided by the LSP."
-                    value={formData?.lsps1MinInitialLspBalanceLoki}
-                    source="LOKI"
-                  />
-                  <FinancialInput 
-                    field="lsps1MaxInitialLspBalanceLoki"
-                    label="Max Initial LSP Balance"
-                    explanation="Maximum initial liquidity provided by the LSP."
-                    value={formData?.lsps1MaxInitialLspBalanceLoki}
-                    source="LOKI"
-                  />
+                  <FinancialInput field="lsps1MinInitialClientBalanceLoki" label="Min Initial Client Balance" explanation="Minimum balance the client is required to maintain." value={formData?.lsps1MinInitialClientBalanceLoki} source="LOKI" onEdit={setEditingField} />
+                  <FinancialInput field="lsps1MaxInitialClientBalanceLoki" label="Max Initial Client Balance" explanation="Maximum balance allowed for the client." value={formData?.lsps1MaxInitialClientBalanceLoki} source="LOKI" onEdit={setEditingField} />
+                  <FinancialInput field="lsps1MinInitialLspBalanceLoki" label="Min Initial LSP Balance" explanation="Minimum initial liquidity provided by the LSP." value={formData?.lsps1MinInitialLspBalanceLoki} source="LOKI" onEdit={setEditingField} />
+                  <FinancialInput field="lsps1MaxInitialLspBalanceLoki" label="Max Initial LSP Balance" explanation="Maximum initial liquidity provided by the LSP." value={formData?.lsps1MaxInitialLspBalanceLoki} source="LOKI" onEdit={setEditingField} />
                 </div>
               </GlassCard>
             )}
@@ -340,43 +333,11 @@ const FinancialInput: React.FC<{
                 }}
                 currentValue={editingField.value}
                 sourceUnit={editingField.source}
+                label={editingField.label}
+                explanation={editingField.explanation}
             />
         )}
       </div>
     </div>
   );
 };
-
-// Internal Components
-const Input: React.FC<{ label: string; value: any; onChange: (v: any) => void; type?: string; placeholder?: string; step?: string }> = ({ 
-  label, value, onChange, type = 'text', placeholder, step 
-}) => (
-  <div className="space-y-2 group">
-    <label className="text-[10px] font-mono uppercase tracking-[0.2em] text-on-surface-variant group-focus-within:text-primary transition-colors">
-      {label}
-    </label>
-    <input 
-      type={type}
-      step={step}
-      value={value ?? ''}
-      onChange={(e) => onChange(e.target.value)}
-      placeholder={placeholder}
-      className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm text-white font-mono placeholder:text-white/20 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all"
-    />
-  </div>
-);
-
-const Switch: React.FC<{ checked: boolean; onChange: (v: boolean) => void }> = ({ checked, onChange }) => (
-  <button 
-    onClick={() => onChange(!checked)}
-    className={cn(
-        "w-12 h-6 rounded-full transition-all duration-300 relative",
-        checked ? "bg-primary" : "bg-white/10"
-    )}
-  >
-    <div className={cn(
-        "absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-all duration-300",
-        checked ? "translate-x-6" : "translate-x-0"
-    )} />
-  </button>
-);
