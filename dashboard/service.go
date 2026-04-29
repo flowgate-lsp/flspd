@@ -571,8 +571,8 @@ func (s *DashboardService) handleListPeers(req *lsps.JsonRpcRequest) *lsps.JsonR
 				"address":        p.Address,
 				"inbound":        p.Inbound,
 				"active":         p.Active,
-				"in_sat":         p.BytesSent, // bytes_sent as in_sat for simplicity if desired, or as is
-				"out_sat":        p.BytesReceived,
+				"in_loki":        p.LokiReceived, // Money received FROM peer (inbound for us)
+				"out_loki":       p.LokiSent,     // Money sent TO peer (outbound for us)
 				"order_count":    count,
 			}
 			allPeers = append(allPeers, enriched)

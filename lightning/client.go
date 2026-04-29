@@ -18,6 +18,8 @@ type Peer struct {
 	Inbound       bool   `json:"inbound"`
 	BytesSent     uint64 `json:"bytes_sent"`
 	BytesReceived uint64 `json:"bytes_received"`
+	LokiSent      uint64 `json:"loki_sent"`
+	LokiReceived  uint64 `json:"loki_received"`
 	Active        bool   `json:"active"`
 	Alias         string `json:"alias"`
 	Color         string `json:"color"`

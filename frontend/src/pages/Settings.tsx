@@ -173,7 +173,7 @@ export const Settings: React.FC = () => {
                         <p className="text-[9px] font-mono text-on-surface-variant">Default is FLC. Loki is available for high-precision viewing.</p>
                     </div>
                     <div className="flex p-1 bg-black/40 rounded-xl border border-white/5 w-fit">
-                        {(['FLC', 'LOKI'] as DisplayUnit[]).map((u) => (
+                        {(['AUTO', 'FLC', 'LOKI'] as DisplayUnit[]).map((u) => (
                             <button
                                 key={u}
                                 onClick={() => setUnit(u)}

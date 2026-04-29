@@ -173,7 +173,7 @@ export const OrderMatrix: React.FC<OrderMatrixProps> = ({ onViewOrder, initialSe
                     <td className="px-8 py-6">
                       <div className="flex flex-col gap-1">
                         <span className="text-base font-black text-white italic tracking-tighter leading-none">{format(order.lsp_balance_loki)}</span>
-                        <span className="text-[9px] font-mono text-on-surface-variant/40 uppercase tracking-widest font-black italic">Fee: {format(order.amount)}</span>
+                        <span className="text-[9px] font-mono text-on-surface-variant/40 uppercase tracking-widest font-black italic">Fee: {format(order.amount, 'MLOKI')}</span>
                       </div>
                     </td>
                     <td className="px-8 py-6">
@@ -191,7 +191,7 @@ export const OrderMatrix: React.FC<OrderMatrixProps> = ({ onViewOrder, initialSe
                        <div className="flex items-center justify-end gap-3 group/tx">
                           {order.funding_txid ? (
                             <a 
-                              href={`https://flcscan.info/tx/${order.funding_txid}`}
+                              href={`https://lokichain.info/tx/${order.funding_txid}`}
                               target="_blank"
                               rel="noopener noreferrer"
                               title="View in Explorer" 
@@ -258,7 +258,7 @@ export const OrderMatrix: React.FC<OrderMatrixProps> = ({ onViewOrder, initialSe
                         {format(order.lsp_balance_loki).split(' ')[1]}
                       </span>
                     </span>
-                    <span className="text-[8px] font-mono text-on-surface-variant/60 font-bold uppercase tracking-widest mt-1">Fee: {format(order.amount)}</span>
+                    <span className="text-[8px] font-mono text-on-surface-variant/60 font-bold uppercase tracking-widest mt-1">Fee: {format(order.amount, 'MLOKI')}</span>
                   </div>
                   <div className="flex flex-col gap-1 overflow-hidden">
                     <span className="text-[8px] font-mono text-on-surface-variant/40 uppercase tracking-[0.3em] font-black">Counterparty</span>
@@ -276,7 +276,7 @@ export const OrderMatrix: React.FC<OrderMatrixProps> = ({ onViewOrder, initialSe
                  <div className="flex items-center gap-4">
                    {order.funding_txid && (
                      <a 
-                       href={`https://flcscan.info/tx/${order.funding_txid}`}
+                       href={`https://lokichain.info/tx/${order.funding_txid}`}
                        target="_blank"
                        rel="noopener noreferrer"
                        onClick={(e) => e.stopPropagation()}

@@ -145,7 +145,7 @@ export const JITChannels: React.FC = () => {
                 </div>
                  <div className="flex gap-3">
                     <a 
-                      href={`https://flcscan.info/tx/${ch.txid}`}
+                      href={`https://lokichain.info/tx/${ch.txid}`}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="p-2 text-on-surface-variant hover:text-white bg-white/5 hover:bg-secondary/20 rounded-lg border border-white/5 transition-all shadow-xl active:scale-95"

@@ -652,6 +652,8 @@ func (c *LndClient) ListPeers() ([]*lightning.Peer, error) {
 			Inbound:       p.Inbound,
 			BytesSent:     p.BytesSent,
 			BytesReceived: p.BytesRecv,
+			LokiSent:      uint64(p.SatSent),
+			LokiReceived:  uint64(p.SatRecv),
 			Active:        true, // If they are in ListPeers, they are connected
 			Alias:         alias,
 			Color:         color,

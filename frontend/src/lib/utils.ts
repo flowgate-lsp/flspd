@@ -6,32 +6,43 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-export const LOKI_PER_FLC = 100000;
-export const MLOKI_PER_FLC = 100000000;
+// Corrected Conversion: 1 FLC = 100,000,000 Loki
+export const LOKI_PER_FLC = 100000000;
+export const MLOKI_PER_FLC = 100000000000;
 
 /**
- * Core formatting logic that handles both FLC and LOKI
+ * Core formatting logic that handles AUTO, FLC, and LOKI
  */
 export function formatAmount(
   value: number | string | undefined | null, 
-  unit: DisplayUnit, 
+  preferredUnit: DisplayUnit, 
   sourceUnit: 'LOKI' | 'MLOKI' = 'LOKI'
 ): string {
   if (value === undefined || value === null) return 'No activity';
   const n = typeof value === 'string' ? parseInt(value, 10) : value;
   if (isNaN(n)) return 'No activity';
-  if (n === 0) return unit === 'FLC' ? '0.00 FLC' : '0 LOKI';
+  if (n === 0) return preferredUnit === 'LOKI' ? '0 LOKI' : '0.00 FLC';
 
-  if (unit === 'FLC') {
-    const divisor = sourceUnit === 'MLOKI' ? MLOKI_PER_FLC : LOKI_PER_FLC;
-    const flc = n / divisor;
+  // Normalize everything to Loki for logic
+  const lokiValue = sourceUnit === 'MLOKI' ? n / 1000 : n;
+  
+  // Decide target unit
+  let targetUnit: 'FLC' | 'LOKI' = 'FLC';
+  if (preferredUnit === 'AUTO') {
+    // Switch to FLC if >= 0.1 FLC (10,000,000 Loki) or adjust as desired. 
+    // Using 1 FLC (100,000,000 Loki) as the threshold.
+    targetUnit = Math.abs(lokiValue) >= LOKI_PER_FLC ? 'FLC' : 'LOKI';
+  } else {
+    targetUnit = preferredUnit as 'FLC' | 'LOKI';
+  }
+
+  if (targetUnit === 'FLC') {
+    const flc = lokiValue / LOKI_PER_FLC;
     return new Intl.NumberFormat(undefined, {
       minimumFractionDigits: 2,
-      maximumFractionDigits: sourceUnit === 'MLOKI' ? 8 : 6
+      maximumFractionDigits: 8
     }).format(flc) + ' FLC';
   } else {
-    // Loki display
-    const lokiValue = sourceUnit === 'MLOKI' ? n / 1000 : n;
     return new Intl.NumberFormat().format(lokiValue) + ' LOKI';
   }
 }
@@ -51,7 +62,6 @@ export function useFormatAmount() {
 
 /**
  * Formats a value in Loki with thousand separators. (e.g. 12,500 LOKI)
- * Maintained for backward compatibility.
  */
 export function formatLoki(loki: number | string | undefined | null): string {
   return formatAmount(loki, 'LOKI');
@@ -59,7 +69,6 @@ export function formatLoki(loki: number | string | undefined | null): string {
 
 /**
  * Formats a value in FLC (e.g. 1.25 FLC)
- * Maintained for backward compatibility.
  */
 export function formatFLC(loki: number | string | undefined | null): string {
   return formatAmount(loki, 'FLC');
@@ -67,13 +76,10 @@ export function formatFLC(loki: number | string | undefined | null): string {
 
 /**
  * Smart formatter: uses FLC or LOKI based on global setting.
- * In the new design, "smart" simply means respecting the user's preference.
  */
 export function formatSmart(loki: number | string | undefined | null): string {
-  // Since we can't use hooks in a plain function, we'll try to get the unit from localStorage
-  // as a fallback for legacy non-component calls.
-  const saved = typeof window !== 'undefined' ? localStorage.getItem('flspd_unit') : 'FLC';
-  const unit = (saved as DisplayUnit) || 'FLC';
+  const saved = typeof window !== 'undefined' ? localStorage.getItem('flspd_unit') : 'AUTO';
+  const unit = (saved as DisplayUnit) || 'AUTO';
   
   return formatAmount(loki, unit);
 }

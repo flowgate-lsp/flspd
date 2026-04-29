@@ -75,7 +75,7 @@ func (m *liquidityManager) CheckOnChainLiquidity(ctx context.Context, amountSat 
 	}
 
 	if amountSat > available {
-		return fmt.Errorf("insufficient liquidity: requested %d sat, available %d sat", amountSat, available)
+		return fmt.Errorf("insufficient liquidity: requested %d loki, available %d loki", amountSat, available)
 	}
 
 	return nil

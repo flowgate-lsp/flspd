@@ -21,7 +21,15 @@ func (cfg *NodeConfig) Validate() error {
 		return fmt.Errorf("additionalChannelCapacity (%d) cannot be negative", cfg.AdditionalChannelCapacity)
 	}
 
-	// 2. LSPS1 Validation
+	// 2. Financial Sanity Checks (Prevent extreme fee settings)
+	if cfg.FeeRate > 0.1 { // Max 10% fee rate
+		return fmt.Errorf("feeRate (%f) is too high (max 0.1)", cfg.FeeRate)
+	}
+	if cfg.BaseFeeMloki > 100000 { // Max 100 Loki base fee
+		return fmt.Errorf("baseFeeMloki (%d) is too high (max 100000)", cfg.BaseFeeMloki)
+	}
+
+	// 3. LSPS1 Validation
 	if err := cfg.ValidateLsps1(); err != nil {
 		return fmt.Errorf("LSPS1 config validation failed: %w", err)
 	}
