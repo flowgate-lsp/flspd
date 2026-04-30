@@ -6,6 +6,7 @@ import { useUnit, type DisplayUnit } from '../contexts/UnitContext';
 import { formatAmount, formatInput, cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'framer-motion';
 import { CurrencyConverterModal } from '../components/CurrencyConverterModal';
+import { InfoModal } from '../components/InfoModal';
 
 type Tab = 'general' | 'jit' | 'lsps1';
 
