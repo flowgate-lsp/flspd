@@ -18,18 +18,15 @@ const FinancialInput: React.FC<{
     value: any; 
     source: 'LOKI' | 'MLOKI';
     onEdit: (field: string, source: 'LOKI' | 'MLOKI', value: number, label: string, explanation: string) => void;
-}> = ({ field, label, explanation, value, source, onEdit }) => (
+    onInfo: (label: string, explanation: string) => void;
+}> = ({ field, label, explanation, value, source, onEdit, onInfo }) => (
   <div className="space-y-2">
     <div className="flex justify-between items-center">
       <div className="flex items-center gap-1.5">
         <label className="text-[11px] font-bold text-white uppercase tracking-wider">{label}</label>
-        <div className="relative group/help">
-            <HelpCircle className="w-5 h-5 text-primary cursor-help" />
-            <div className="absolute top-0 left-full ml-4 w-80 p-5 bg-black border border-primary/30 rounded-2xl text-sm text-white/90 leading-relaxed shadow-[0_20px_50px_rgba(0,0,0,0.8)] z-[100] opacity-0 group-hover/help:opacity-100 transition-opacity pointer-events-none whitespace-normal">
-                {explanation}
-            </div>
-        </div>
-
+        <button onClick={() => onInfo(label, explanation)} className="text-primary hover:text-white transition-colors">
+            <HelpCircle className="w-5 h-5 cursor-pointer" />
+        </button>
       </div>
       <button onClick={() => onEdit(field, source, value, label, explanation)} className="text-[10px] text-primary hover:underline font-mono uppercase tracking-widest font-bold">Edit</button>
     </div>
@@ -42,8 +39,8 @@ const FinancialInput: React.FC<{
   </div>
 );
 
-const Input: React.FC<{ label: string; explanation?: string; value: any; onChange: (v: any) => void; type?: string; placeholder?: string; step?: string }> = ({ 
-  label, explanation, value, onChange, type = 'text', placeholder, step 
+const Input: React.FC<{ label: string; explanation?: string; value: any; onChange: (v: any) => void; type?: string; placeholder?: string; step?: string; onInfo: (label: string, explanation: string) => void }> = ({ 
+  label, explanation, value, onChange, type = 'text', placeholder, step, onInfo
 }) => (
   <div className="space-y-2 group">
     <div className="flex items-center gap-1.5">
@@ -51,15 +48,12 @@ const Input: React.FC<{ label: string; explanation?: string; value: any; onChang
         {label}
         </label>
         {explanation && (
-            <div className="group relative flex items-center">
-                <HelpCircle className="w-5 h-5 text-primary cursor-help" />
-                <div className="absolute left-full ml-4 w-96 p-6 bg-black border border-primary/30 rounded-2xl text-sm text-white/90 leading-relaxed shadow-[0_20px_50px_rgba(0,0,0,0.8)] z-50 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
-                    {explanation}
-                </div>
-            </div>
-
+            <button onClick={() => onInfo(label, explanation)} className="text-on-surface-variant hover:text-primary transition-colors">
+                <HelpCircle className="w-5 h-5 cursor-pointer" />
+            </button>
         )}
     </div>
+
     <input 
       type={type}
       step={step}
@@ -216,6 +210,7 @@ export const Settings: React.FC = () => {
                 <GlassCard className="space-y-8">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                     <Input 
+                    onInfo={setInfoModal}
                       label="Display Name" 
                       explanation="The friendly name for your LSP shown in the UI."
                       value={formData?.name} 
@@ -223,6 +218,7 @@ export const Settings: React.FC = () => {
                       placeholder="e.g. My Flowgate LSP"
                     />
                     <Input 
+                    onInfo={setInfoModal}
                       label="Public Host" 
                       explanation="The public host and port for your LSP node."
                       value={formData?.host} 
@@ -230,6 +226,7 @@ export const Settings: React.FC = () => {
                       placeholder="e.g. lsp.example.com:9735"
                     />
                     <Input 
+                    onInfo={setInfoModal}
                       label="Target Confirmations" 
                       explanation="The target number of confirmations for channel funding."
                       type="number"
@@ -237,6 +234,7 @@ export const Settings: React.FC = () => {
                       onChange={(v) => handleInputChange('targetConf', parseInt(v))}
                     />
                     <Input 
+                    onInfo={setInfoModal}
                       label="Min Confirmations" 
                       explanation="The minimum number of confirmations required for a channel."
                       type="number"
@@ -294,6 +292,7 @@ export const Settings: React.FC = () => {
                   <FinancialInput field="jitMaxPaymentSizeMloki" label="Max Payment Size" explanation="Maximum payment size in mLoki for JIT channel creation." value={formData?.jitMaxPaymentSizeMloki} source="MLOKI" onEdit={(f, s, v, l, e) => setEditingField({ field: f, source: s, value: v, label: l, explanation: e })} />
                   <FinancialInput field="baseFeeMloki" label="Base Fee" explanation="Fixed base fee in mLoki per payment." value={formData?.baseFeeMloki} source="MLOKI" onEdit={(f, s, v, l, e) => setEditingField({ field: f, source: s, value: v, label: l, explanation: e })} />
                   <Input 
+                    onInfo={setInfoModal}
                     label="Fee Rate" 
                     type="number"
                     step="0.0001"
@@ -301,6 +300,7 @@ export const Settings: React.FC = () => {
                     onChange={(v) => handleInputChange('feeRate', parseFloat(v))}
                   />
                   <Input 
+                    onInfo={setInfoModal}
                     label="Channel Fee (Permyriad)" 
                     type="number"
                     value={formData?.channelFeePermyriad} 
@@ -315,18 +315,21 @@ export const Settings: React.FC = () => {
               <GlassCard className="space-y-8">
                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
                   <Input 
+                    onInfo={setInfoModal}
                     label="Min Channel Confirms" 
                     type="number"
                     value={formData?.lsps1MinRequiredChannelConfirmations} 
                     onChange={(v) => handleInputChange('lsps1MinRequiredChannelConfirmations', parseInt(v))}
                   />
                   <Input 
+                    onInfo={setInfoModal}
                     label="Max Channel Expiry (Blocks)" 
                     type="number"
                     value={formData?.lsps1MaxChannelExpiryBlocks} 
                     onChange={(v) => handleInputChange('lsps1MaxChannelExpiryBlocks', parseInt(v))}
                   />
                   <Input 
+                    onInfo={setInfoModal}
                     label="Order Expiry (Seconds)" 
                     type="number"
                     value={formData?.lsps1OrderExpirySeconds} 
