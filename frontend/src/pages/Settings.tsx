@@ -93,6 +93,7 @@ export const Settings: React.FC = () => {
   const [formData, setFormData] = useState<any>(null);
   const [showSuccess, setShowSuccess] = useState(false);
   const [editingField, setEditingField] = useState<{ field: string; source: 'LOKI' | 'MLOKI'; value: number; label: string; explanation: string } | null>(null);
+  const [infoModal, setInfoModal] = useState<{ label: string; explanation: string } | null>(null);
 
   useEffect(() => {
     if (config) {
@@ -339,6 +340,14 @@ export const Settings: React.FC = () => {
             )}
           </motion.div>
         </AnimatePresence>
+        {infoModal && (
+            <InfoModal 
+                isOpen={!!infoModal}
+                onClose={() => setInfoModal(null)}
+                label={infoModal.label}
+                explanation={infoModal.explanation}
+            />
+        )}
         {editingField && (
             <CurrencyConverterModal 
                 isOpen={!!editingField}
