@@ -24,11 +24,11 @@ const FinancialInput: React.FC<{
     <div className="flex justify-between items-center">
       <div className="flex items-center gap-1.5">
         <label className="text-[11px] font-bold text-white uppercase tracking-wider">{label}</label>
-        <button onClick={() => onInfo(label, explanation)} className="text-primary hover:text-white transition-colors">
+        <button type="button" onClick={() => onInfo(label, explanation)} className="text-primary hover:text-white transition-colors">
             <HelpCircle className="w-5 h-5 cursor-pointer" />
         </button>
       </div>
-      <button onClick={() => onEdit(field, source, value, label, explanation)} className="text-[10px] text-primary hover:underline font-mono uppercase tracking-widest font-bold">Edit</button>
+      <button type="button" onClick={() => onEdit(field, source, value, label, explanation)} className="text-[10px] text-primary hover:underline font-mono uppercase tracking-widest font-bold">Edit</button>
     </div>
     <div className="flex items-center gap-3 bg-black/40 border border-white/10 rounded-xl p-4">
         <input type="text" readOnly value={formatInput(value)} className="bg-transparent w-full text-white font-mono text-base outline-none" />
@@ -39,7 +39,7 @@ const FinancialInput: React.FC<{
   </div>
 );
 
-const Input: React.FC<{ label: string; explanation?: string; value: any; onChange: (v: any) => void; type?: string; placeholder?: string; step?: string; onInfo: (label: string, explanation: string) => void }> = ({ 
+const Input: React.FC<{ label: string; explanation: string; value: any; onChange: (v: any) => void; type?: string; placeholder?: string; step?: string; onInfo: (label: string, explanation: string) => void }> = ({ 
   label, explanation, value, onChange, type = 'text', placeholder, step, onInfo
 }) => (
   <div className="space-y-2 group">
@@ -47,13 +47,10 @@ const Input: React.FC<{ label: string; explanation?: string; value: any; onChang
         <label className="text-[11px] font-mono uppercase tracking-[0.2em] text-on-surface-variant group-focus-within:text-primary transition-colors">
         {label}
         </label>
-        {explanation && (
-            <button onClick={() => onInfo(label, explanation)} className="text-on-surface-variant hover:text-primary transition-colors">
-                <HelpCircle className="w-5 h-5 cursor-pointer" />
-            </button>
-        )}
+        <button type="button" onClick={() => onInfo(label, explanation)} className="text-on-surface-variant hover:text-primary transition-colors">
+            <HelpCircle className="w-5 h-5 cursor-pointer" />
+        </button>
     </div>
-
     <input 
       type={type}
       step={step}
@@ -65,9 +62,9 @@ const Input: React.FC<{ label: string; explanation?: string; value: any; onChang
   </div>
 );
 
-
 const Switch: React.FC<{ checked: boolean; onChange: (v: boolean) => void }> = ({ checked, onChange }) => (
   <button 
+    type="button"
     onClick={() => onChange(!checked)}
     className={cn(
         "w-12 h-6 rounded-full transition-all duration-300 relative",
@@ -133,7 +130,6 @@ export const Settings: React.FC = () => {
 
   return (
     <div className="p-3 md:p-10 max-w-5xl mx-auto space-y-6 md:space-y-8 animate-in fade-in duration-1000 pb-32">
-      {/* Header */}
       <div className="flex flex-col md:flex-row md:justify-between md:items-end gap-6">
         <div className="space-y-2">
           <h1 className="text-2xl md:text-4xl font-black tracking-tighter text-white uppercase italic leading-none flex items-center gap-3">
@@ -177,12 +173,14 @@ export const Settings: React.FC = () => {
         </div>
       )}
 
-      {/* Tabs */}
       <div className="flex overflow-x-auto p-1 bg-white/5 rounded-xl md:rounded-2xl border border-white/5 w-full md:w-fit custom-scrollbar">
         {tabs.map((tab) => (
           <button
             key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
+            onClick={() => {
+                setActiveTab(tab.id);
+                localStorage.setItem('settings_tab', tab.id);
+            }}
             className={cn(
               "flex-shrink-0 whitespace-nowrap flex items-center gap-2 px-5 py-2.5 rounded-lg md:rounded-xl text-[9px] md:text-[10px] font-bold uppercase tracking-widest transition-all",
               activeTab === tab.id ? "bg-white/10 text-white border border-white/10" : "text-on-surface-variant hover:text-white"
@@ -194,7 +192,6 @@ export const Settings: React.FC = () => {
         ))}
       </div>
 
-      {/* Content */}
       <div className="relative">
         <AnimatePresence mode="wait">
           <motion.div
@@ -209,38 +206,10 @@ export const Settings: React.FC = () => {
               <>
                 <GlassCard className="space-y-8">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                    <Input 
-                    onInfo={setInfoModal}
-                      label="Display Name" 
-                      explanation="The friendly name for your LSP shown in the UI."
-                      value={formData?.name} 
-                      onChange={(v) => handleInputChange('name', v)}
-                      placeholder="e.g. My Flowgate LSP"
-                    />
-                    <Input 
-                    onInfo={setInfoModal}
-                      label="Public Host" 
-                      explanation="The public host and port for your LSP node."
-                      value={formData?.host} 
-                      onChange={(v) => handleInputChange('host', v)}
-                      placeholder="e.g. lsp.example.com:9735"
-                    />
-                    <Input 
-                    onInfo={setInfoModal}
-                      label="Target Confirmations" 
-                      explanation="The target number of confirmations for channel funding."
-                      type="number"
-                      value={formData?.targetConf} 
-                      onChange={(v) => handleInputChange('targetConf', parseInt(v))}
-                    />
-                    <Input 
-                    onInfo={setInfoModal}
-                      label="Min Confirmations" 
-                      explanation="The minimum number of confirmations required for a channel."
-                      type="number"
-                      value={formData?.minConfs} 
-                      onChange={(v) => handleInputChange('minConfs', parseInt(v))}
-                    />
+                    <Input label="Display Name" explanation="The friendly name for your LSP shown in the UI." value={formData?.name} onChange={(v) => handleInputChange('name', v)} placeholder="e.g. My Flowgate LSP" onInfo={(l, e) => setInfoModal({ label: l, explanation: e })} />
+                    <Input label="Public Host" explanation="The public host and port for your LSP node." value={formData?.host} onChange={(v) => handleInputChange('host', v)} placeholder="e.g. lsp.example.com:9735" onInfo={(l, e) => setInfoModal({ label: l, explanation: e })} />
+                    <Input label="Target Confirmations" explanation="The target number of confirmations for channel funding." type="number" value={formData?.targetConf} onChange={(v) => handleInputChange('targetConf', parseInt(v))} onInfo={(l, e) => setInfoModal({ label: l, explanation: e })} />
+                    <Input label="Min Confirmations" explanation="The minimum number of confirmations required for a channel." type="number" value={formData?.minConfs} onChange={(v) => handleInputChange('minConfs', parseInt(v))} onInfo={(l, e) => setInfoModal({ label: l, explanation: e })} />
                   </div>
                 </GlassCard>
 
@@ -259,6 +228,7 @@ export const Settings: React.FC = () => {
                         {(['AUTO', 'FLC', 'LOKI'] as DisplayUnit[]).map((u) => (
                             <button
                                 key={u}
+                                type="button"
                                 onClick={() => setUnit(u)}
                                 className={cn(
                                     "px-6 py-2 rounded-lg text-[10px] font-black tracking-widest transition-all",
@@ -281,32 +251,16 @@ export const Settings: React.FC = () => {
                         <h4 className="text-sm font-bold text-white uppercase italic tracking-tighter">Enable JIT Channels</h4>
                         <p className="text-[10px] font-mono text-on-surface-variant">Allow zero-conf JIT channel creation for incoming payments</p>
                     </div>
-                    <Switch 
-                        checked={formData?.jitEnabled} 
-                        onChange={(v) => handleInputChange('jitEnabled', v)} 
-                    />
+                    <Switch checked={formData?.jitEnabled} onChange={(v) => handleInputChange('jitEnabled', v)} />
                 </div>
                 
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-                  <FinancialInput field="minPaymentSizeMloki" label="Min Payment Size" explanation="Minimum payment size in mLoki for JIT channel creation." value={formData?.minPaymentSizeMloki} source="MLOKI" onEdit={(f, s, v, l, e) => setEditingField({ field: f, source: s, value: v, label: l, explanation: e })} />
-                  <FinancialInput field="jitMaxPaymentSizeMloki" label="Max Payment Size" explanation="Maximum payment size in mLoki for JIT channel creation." value={formData?.jitMaxPaymentSizeMloki} source="MLOKI" onEdit={(f, s, v, l, e) => setEditingField({ field: f, source: s, value: v, label: l, explanation: e })} />
-                  <FinancialInput field="baseFeeMloki" label="Base Fee" explanation="Fixed base fee in mLoki per payment." value={formData?.baseFeeMloki} source="MLOKI" onEdit={(f, s, v, l, e) => setEditingField({ field: f, source: s, value: v, label: l, explanation: e })} />
-                  <Input 
-                    onInfo={setInfoModal}
-                    label="Fee Rate" 
-                    type="number"
-                    step="0.0001"
-                    value={formData?.feeRate} 
-                    onChange={(v) => handleInputChange('feeRate', parseFloat(v))}
-                  />
-                  <Input 
-                    onInfo={setInfoModal}
-                    label="Channel Fee (Permyriad)" 
-                    type="number"
-                    value={formData?.channelFeePermyriad} 
-                    onChange={(v) => handleInputChange('channelFeePermyriad', parseInt(v))}
-                  />
-                  <FinancialInput field="minChannelCapacityLoki" label="Min Channel Capacity" explanation="Minimum total capacity for a channel (Loki)." value={formData?.minChannelCapacityLoki} source="LOKI" onEdit={(f, s, v, l, e) => setEditingField({ field: f, source: s, value: v, label: l, explanation: e })} />
+                  <FinancialInput field="minPaymentSizeMloki" label="Min Payment Size" explanation="The minimum payment size in mLoki that the LSP will accept for JIT channel creation." value={formData?.minPaymentSizeMloki} source="MLOKI" onEdit={(f, s, v, l, e) => setEditingField({ field: f, source: s, value: v, label: l, explanation: e })} onInfo={(l, e) => setInfoModal({ label: l, explanation: e })} />
+                  <FinancialInput field="jitMaxPaymentSizeMloki" label="Max Payment Size" explanation="The maximum payment size in mLoki that the LSP will accept for JIT channel creation." value={formData?.jitMaxPaymentSizeMloki} source="MLOKI" onEdit={(f, s, v, l, e) => setEditingField({ field: f, source: s, value: v, label: l, explanation: e })} onInfo={(l, e) => setInfoModal({ label: l, explanation: e })} />
+                  <FinancialInput field="baseFeeMloki" label="Base Fee" explanation="The fixed base fee in mLoki charged for each payment routed through the channel." value={formData?.baseFeeMloki} source="MLOKI" onEdit={(f, s, v, l, e) => setEditingField({ field: f, source: s, value: v, label: l, explanation: e })} onInfo={(l, e) => setInfoModal({ label: l, explanation: e })} />
+                  <Input label="Fee Rate" explanation="The proportional fee rate in parts per million (PPM) charged for routed payments." type="number" step="0.0001" value={formData?.feeRate} onChange={(v) => handleInputChange('feeRate', parseFloat(v))} onInfo={(l, e) => setInfoModal({ label: l, explanation: e })} />
+                  <Input label="Channel Fee (Permyriad)" explanation="The fee charged per myriad for channel operations." type="number" value={formData?.channelFeePermyriad} onChange={(v) => handleInputChange('channelFeePermyriad', parseInt(v))} onInfo={(l, e) => setInfoModal({ label: l, explanation: e })} />
+                  <FinancialInput field="minChannelCapacityLoki" label="Min Channel Capacity" explanation="The minimum total capacity for a channel (Loki)." value={formData?.minChannelCapacityLoki} source="LOKI" onEdit={(f, s, v, l, e) => setEditingField({ field: f, source: s, value: v, label: l, explanation: e })} onInfo={(l, e) => setInfoModal({ label: l, explanation: e })} />
                 </div>
               </GlassCard>
             )}
@@ -314,31 +268,13 @@ export const Settings: React.FC = () => {
             {activeTab === 'lsps1' && (
               <GlassCard className="space-y-8">
                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-                  <Input 
-                    onInfo={setInfoModal}
-                    label="Min Channel Confirms" 
-                    type="number"
-                    value={formData?.lsps1MinRequiredChannelConfirmations} 
-                    onChange={(v) => handleInputChange('lsps1MinRequiredChannelConfirmations', parseInt(v))}
-                  />
-                  <Input 
-                    onInfo={setInfoModal}
-                    label="Max Channel Expiry (Blocks)" 
-                    type="number"
-                    value={formData?.lsps1MaxChannelExpiryBlocks} 
-                    onChange={(v) => handleInputChange('lsps1MaxChannelExpiryBlocks', parseInt(v))}
-                  />
-                  <Input 
-                    onInfo={setInfoModal}
-                    label="Order Expiry (Seconds)" 
-                    type="number"
-                    value={formData?.lsps1OrderExpirySeconds} 
-                    onChange={(v) => handleInputChange('lsps1OrderExpirySeconds', parseInt(v))}
-                  />
-                  <FinancialInput field="lsps1MinInitialClientBalanceLoki" label="Min Initial Client Balance" explanation="Minimum balance the client is required to maintain." value={formData?.lsps1MinInitialClientBalanceLoki} source="LOKI" onEdit={(f, s, v, l, e) => setEditingField({ field: f, source: s, value: v, label: l, explanation: e })} />
-                  <FinancialInput field="lsps1MaxInitialClientBalanceLoki" label="Max Initial Client Balance" explanation="Maximum balance allowed for the client." value={formData?.lsps1MaxInitialClientBalanceLoki} source="LOKI" onEdit={(f, s, v, l, e) => setEditingField({ field: f, source: s, value: v, label: l, explanation: e })} />
-                  <FinancialInput field="lsps1MinInitialLspBalanceLoki" label="Min Initial LSP Balance" explanation="Minimum initial liquidity provided by the LSP." value={formData?.lsps1MinInitialLspBalanceLoki} source="LOKI" onEdit={(f, s, v, l, e) => setEditingField({ field: f, source: s, value: v, label: l, explanation: e })} />
-                  <FinancialInput field="lsps1MaxInitialLspBalanceLoki" label="Max Initial LSP Balance" explanation="Maximum initial liquidity provided by the LSP." value={formData?.lsps1MaxInitialLspBalanceLoki} source="LOKI" onEdit={(f, s, v, l, e) => setEditingField({ field: f, source: s, value: v, label: l, explanation: e })} />
+                  <Input label="Min Channel Confirms" explanation="The minimum number of channel confirmations required for LSPS1 order processing." type="number" value={formData?.lsps1MinRequiredChannelConfirmations} onChange={(v) => handleInputChange('lsps1MinRequiredChannelConfirmations', parseInt(v))} onInfo={(l, e) => setInfoModal({ label: l, explanation: e })} />
+                  <Input label="Max Channel Expiry (Blocks)" explanation="The maximum block height for channel expiry." type="number" value={formData?.lsps1MaxChannelExpiryBlocks} onChange={(v) => handleInputChange('lsps1MaxChannelExpiryBlocks', parseInt(v))} onInfo={(l, e) => setInfoModal({ label: l, explanation: e })} />
+                  <Input label="Order Expiry (Seconds)" explanation="The duration in seconds before an LSPS1 order expires." type="number" value={formData?.lsps1OrderExpirySeconds} onChange={(v) => handleInputChange('lsps1OrderExpirySeconds', parseInt(v))} onInfo={(l, e) => setInfoModal({ label: l, explanation: e })} />
+                  <FinancialInput field="lsps1MinInitialClientBalanceLoki" label="Min Initial Client Balance" explanation="Minimum balance the client is required to maintain in the channel." value={formData?.lsps1MinInitialClientBalanceLoki} source="LOKI" onEdit={(f, s, v, l, e) => setEditingField({ field: f, source: s, value: v, label: l, explanation: e })} onInfo={(l, e) => setInfoModal({ label: l, explanation: e })} />
+                  <FinancialInput field="lsps1MaxInitialClientBalanceLoki" label="Max Initial Client Balance" explanation="Maximum balance allowed for the client in the initial channel state." value={formData?.lsps1MaxInitialClientBalanceLoki} source="LOKI" onEdit={(f, s, v, l, e) => setEditingField({ field: f, source: s, value: v, label: l, explanation: e })} onInfo={(l, e) => setInfoModal({ label: l, explanation: e })} />
+                  <FinancialInput field="lsps1MinInitialLspBalanceLoki" label="Min Initial LSP Balance" explanation="Minimum initial liquidity provided by the LSP." value={formData?.lsps1MinInitialLspBalanceLoki} source="LOKI" onEdit={(f, s, v, l, e) => setEditingField({ field: f, source: s, value: v, label: l, explanation: e })} onInfo={(l, e) => setInfoModal({ label: l, explanation: e })} />
+                  <FinancialInput field="lsps1MaxInitialLspBalanceLoki" label="Max Initial LSP Balance" explanation="Maximum initial liquidity provided by the LSP." value={formData?.lsps1MaxInitialLspBalanceLoki} source="LOKI" onEdit={(f, s, v, l, e) => setEditingField({ field: f, source: s, value: v, label: l, explanation: e })} onInfo={(l, e) => setInfoModal({ label: l, explanation: e })} />
                 </div>
               </GlassCard>
             )}
