@@ -22,9 +22,9 @@ const FinancialInput: React.FC<{
     <div className="flex justify-between items-center">
       <div className="flex items-center gap-1.5">
         <label className="text-[11px] font-bold text-white uppercase tracking-wider">{label}</label>
-        <div className="group relative flex items-center">
+        <div className="relative group/help">
             <HelpCircle className="w-5 h-5 text-primary cursor-help" />
-            <div className="absolute left-full ml-4 w-96 p-6 bg-black border border-primary/30 rounded-2xl text-sm text-white/90 leading-relaxed shadow-[0_20px_50px_rgba(0,0,0,0.8)] z-50 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+            <div className="absolute left-full ml-4 w-96 p-6 bg-black border border-primary/30 rounded-2xl text-sm text-white/90 leading-relaxed shadow-[0_20px_50px_rgba(0,0,0,0.8)] z-[100] opacity-0 group-hover/help:opacity-100 transition-opacity pointer-events-none whitespace-normal">
                 {explanation}
             </div>
         </div>
