@@ -22,12 +22,13 @@ const FinancialInput: React.FC<{
     <div className="flex justify-between items-center">
       <div className="flex items-center gap-1.5">
         <label className="text-[11px] font-bold text-white uppercase tracking-wider">{label}</label>
-        <div className="group relative">
-            <HelpCircle className="w-4 h-4 text-primary cursor-help" />
-            <div className="absolute left-full ml-3 w-80 p-4 bg-black border border-primary/20 rounded-xl text-xs text-white/80 shadow-2xl z-50 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+        <div className="group relative flex items-center">
+            <HelpCircle className="w-5 h-5 text-primary cursor-help" />
+            <div className="absolute left-full ml-4 w-96 p-6 bg-black border border-primary/30 rounded-2xl text-sm text-white/90 leading-relaxed shadow-[0_20px_50px_rgba(0,0,0,0.8)] z-50 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
                 {explanation}
             </div>
         </div>
+
       </div>
       <button onClick={() => onEdit(field, source, value, label, explanation)} className="text-[10px] text-primary hover:underline font-mono uppercase tracking-widest font-bold">Edit</button>
     </div>
@@ -49,12 +50,13 @@ const Input: React.FC<{ label: string; explanation?: string; value: any; onChang
         {label}
         </label>
         {explanation && (
-            <div className="group relative">
-                <HelpCircle className="w-3 h-3 text-on-surface-variant cursor-help" />
-                <div className="absolute left-full ml-2 w-64 p-3 bg-black border border-white/10 rounded-lg text-xs text-white/70 shadow-xl z-50 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+            <div className="group relative flex items-center">
+                <HelpCircle className="w-5 h-5 text-primary cursor-help" />
+                <div className="absolute left-full ml-4 w-96 p-6 bg-black border border-primary/30 rounded-2xl text-sm text-white/90 leading-relaxed shadow-[0_20px_50px_rgba(0,0,0,0.8)] z-50 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
                     {explanation}
                 </div>
             </div>
+
         )}
     </div>
     <input 
