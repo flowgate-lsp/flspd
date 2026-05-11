@@ -194,9 +194,15 @@ func (s *Server) handleLsps5SetWebhook(req *JsonRpcRequest, peer []byte) *JsonRp
 
 		// bLIP-55: Send lsps5.webhook_registered notification to newly registered webhook
 		if s.notificationService != nil {
-			log.Trace().Msg("LSPS5: set_webhook triggering immediate notification")
 			go s.notificationService.NotifyWebhookRegistered(peerId, webhook)
 		}
+
+		log.Info().
+			Str("component", string(common.LogComponentLSPS5)).
+			Str("peer_id", peerId).
+			Str("app_name", params.AppName).
+			Str("transport", transport).
+			Msg("LSPS5: webhook registered")
 	}
 
 	numWebhooks := len(existingWebhooks)
@@ -210,10 +216,6 @@ func (s *Server) handleLsps5SetWebhook(req *JsonRpcRequest, peer []byte) *JsonRp
 		NoChange:    noChange,
 	}
 
-	log.Trace().
-		Str("component", string(common.LogComponentLSPS5)).
-		Str("action", string(common.LogActionResponse)).
-		Msgf("LSPS5: set_webhook success, total=%d, no_change=%v", resp.NumWebhooks, noChange)
 	return NewJsonRpcResponse(req.Id, resp)
 }
 

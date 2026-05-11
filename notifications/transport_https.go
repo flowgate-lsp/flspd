@@ -130,12 +130,12 @@ func (t *HTTPSTransport) Send(ctx context.Context, webhookURL string, method str
 		return ErrWebhookFailed
 	}
 
-	log.Debug().
+	log.Info().
 		Str("component", string(common.LogComponentNotifications)).
 		Str("action", string(common.LogActionSuccess)).
 		Str("url", webhookURL).
 		Str("method", method).
-		Msg("HTTPSTransport: Notification delivered successfully")
+		Msg("HTTPS: notification delivered")
 
 	return nil
 }

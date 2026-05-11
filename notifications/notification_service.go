@@ -223,7 +223,7 @@ func (s *NotificationService) NotifyWebhookRegistered(
 	pubkey string,
 	webhook *common.Lsps5Webhook,
 ) bool {
-	log.Debug().
+	log.Info().
 		Str("component", string(common.LogComponentNotifications)).
 		Str("action", string(common.LogActionRequest)).
 		Str("pubkey", pubkey).
@@ -459,6 +459,13 @@ func (s *NotificationService) deliverOne(
 			Msg("Notifications: Delivery failed")
 		return false
 	}
+
+	log.Info().
+		Str("component", string(common.LogComponentNotifications)).
+		Str("action", string(common.LogActionSuccess)).
+		Str("method", method).
+		Str("transport", string(transport.Type())).
+		Msg("Notifications: Delivery succeeded")
 
 	return true
 }
