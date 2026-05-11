@@ -103,7 +103,7 @@ func (t *NostrTransport) Send(ctx context.Context, targetUri string, method stri
 				return
 			}
 
-			log.Debug().Str("relay", relayUrl).Msg("Published LSPS5 notification")
+			log.Info().Str("relay", relayUrl).Str("method", method).Msg("Nostr: notification delivered")
 			select {
 			case successChan <- true:
 			default:
@@ -158,18 +158,16 @@ func (rp *RelayPool) GetOrConnect(ctx context.Context, url string) (*nostr.Relay
 		if relay.IsConnected() {
 			return relay, nil
 		}
-
-		log.Debug().Str("relay", url).Msg("NostrRelay: connection lost, reconnecting")
-		if err := relay.Connect(connectCtx); err != nil {
-			return nil, fmt.Errorf("failed to reconnect: %w", err)
-		}
-		return relay, nil
+		// relay.Connect() cannot revive a closed relay — the internal connectionContext
+		// is permanently cancelled once close() is called. Create a fresh relay object.
+		log.Info().Str("relay", url).Msg("NostrRelay: connection lost, reconnecting")
+	} else {
+		log.Info().Str("relay", url).Msg("NostrRelay: connecting")
 	}
 
-	// Connect new
 	relay, err := nostr.RelayConnect(connectCtx, url)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to reconnect to relay: %w", err)
 	}
 	rp.relays.Store(url, relay)
 	return relay, nil
