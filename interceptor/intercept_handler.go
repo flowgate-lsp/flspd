@@ -170,7 +170,7 @@ func (i *Interceptor) Intercept(req common.InterceptRequest) common.InterceptRes
 			// Make sure the client is connected by potentially notifying them to come online.
 			notifyResult := i.notifyAndWait(reqPaymentHashStr, nextHop, isRegistered)
 			if notifyResult != nil {
-				log.Debug().Msgf("Intercept: paymentHash=%s peer offline, notification sent", reqPaymentHashStr)
+				log.Debug().Msgf("Intercept: paymentHash=%s peer not notified or did not come online, continuing", reqPaymentHashStr)
 				// return *notifyResult, nil
 			}
 		}
@@ -364,6 +364,16 @@ func (i *Interceptor) Intercept(req common.InterceptRequest) common.InterceptRes
 						req.OutgoingAmountMloki,
 						amt,
 						err,
+					)
+				}
+
+				if data.orderId != "" {
+					go i.notificationService.NotifyOrderStateChanged(
+						hex.EncodeToString(destination),
+						data.orderId,
+						"COMPLETED",
+						channelPoint.String(),
+						"",
 					)
 				}
 
