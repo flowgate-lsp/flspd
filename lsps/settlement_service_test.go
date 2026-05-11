@@ -115,6 +115,11 @@ func (m *MockLightningClient) GetNodeInfo(pubkey string) (*lightning.NodeInfo, e
 	return args.Get(0).(*lightning.NodeInfo), args.Error(1)
 }
 
+func (m *MockLightningClient) LookupInvoiceState(ctx context.Context, paymentRequest string) (lightning.InvoiceState, error) {
+	args := m.Called(ctx, paymentRequest)
+	return args.Get(0).(lightning.InvoiceState), args.Error(1)
+}
+
 // MockOpeningStore for testing
 type MockOpeningStore struct {
 	mock.Mock
@@ -214,6 +219,11 @@ func (m *MockOpeningStore) GetAllPaidLsps1Orders() ([]*common.Lsps1Order, error)
 
 func (m *MockOpeningStore) ListLsps1Orders(limit, offset int) ([]*common.Lsps1Order, error) {
 	args := m.Called(limit, offset)
+	return args.Get(0).([]*common.Lsps1Order), args.Error(1)
+}
+
+func (m *MockOpeningStore) GetAllCreatedLsps1Orders() ([]*common.Lsps1Order, error) {
+	args := m.Called()
 	return args.Get(0).([]*common.Lsps1Order), args.Error(1)
 }
 
@@ -514,6 +524,7 @@ func TestGracefulShutdown(t *testing.T) {
 
 	mockClient.On("SubscribeInvoices").Return((<-chan *lightning.InvoiceUpdate)(invoiceChan), (<-chan error)(errChan), nil)
 	mockStore.On("GetAllPaidLsps1Orders").Return([]*common.Lsps1Order{}, nil)
+	mockStore.On("GetAllCreatedLsps1Orders").Return([]*common.Lsps1Order{}, nil)
 
 	historyStore := new(MockHistoryStore)
 	feeEstimator := new(MockFeeEstimator)
@@ -560,8 +571,9 @@ func TestLsps1SettlementService_StartupRecovery(t *testing.T) {
 		LspBalanceLoki:    5000000,
 	}
 
-	// 1. Return the stale order during recovery check
+	// 1. Return the stale order during recovery check; no CREATED orders with settled invoices
 	mockStore.On("GetAllPaidLsps1Orders").Return([]*common.Lsps1Order{staleOrder}, nil)
+	mockStore.On("GetAllCreatedLsps1Orders").Return([]*common.Lsps1Order{}, nil)
 
 	// 2. Mock the channel opening process
 	mockClient.On("IsConnected", peerIdBytes).Return(true, nil)

@@ -140,6 +140,11 @@ func (m *MockOpeningStore) ListLsps1Orders(limit, offset int) ([]*common.Lsps1Or
 	return args.Get(0).([]*common.Lsps1Order), args.Error(1)
 }
 
+func (m *MockOpeningStore) GetAllCreatedLsps1Orders() ([]*common.Lsps1Order, error) {
+	args := m.Called()
+	return args.Get(0).([]*common.Lsps1Order), args.Error(1)
+}
+
 type MockOpeningService struct {
 	mock.Mock
 }
@@ -307,6 +312,11 @@ func (m *MockLightningClient) SubscribePeerOnline(ctx context.Context) (<-chan s
 func (m *MockLightningClient) AddInvoice(ctx context.Context, invoice *lnrpc.Invoice) (*lnrpc.AddInvoiceResponse, error) {
 	args := m.Called(ctx, invoice)
 	return args.Get(0).(*lnrpc.AddInvoiceResponse), args.Error(1)
+}
+
+func (m *MockLightningClient) LookupInvoiceState(ctx context.Context, paymentRequest string) (lightning.InvoiceState, error) {
+	args := m.Called(ctx, paymentRequest)
+	return args.Get(0).(lightning.InvoiceState), args.Error(1)
 }
 
 func TestDashboardService_RPC(t *testing.T) {

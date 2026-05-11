@@ -84,6 +84,7 @@ type Client interface {
 	ListChannels() ([]*Channel, error)
 	ListPeers() ([]*Peer, error)
 	SubscribeInvoices() (<-chan *InvoiceUpdate, <-chan error, error)
+	LookupInvoiceState(ctx context.Context, paymentRequest string) (InvoiceState, error)
 	WalletBalance(ctx context.Context) (*WalletBalanceResult, error)
 
 	GetBlockHeight() (uint32, error)

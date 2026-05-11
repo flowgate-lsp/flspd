@@ -76,6 +76,7 @@ type OpeningStore interface {
 	GetPaidLsps1Order(clientNodeId string) (*Lsps1Order, error)
 	GetPaidLsps1Orders(clientNodeId string) ([]*Lsps1Order, error)
 	GetAllPaidLsps1Orders() ([]*Lsps1Order, error)
+	GetAllCreatedLsps1Orders() ([]*Lsps1Order, error)
 	ListLsps1Orders(limit, offset int) ([]*Lsps1Order, error)
 	UpdateLsps1OrderState(orderId string, newState string, newPaymentState string) error
 	UpdateLsps1OrderFunding(orderId string, fundingTxid string, fundingOutpoint int) error

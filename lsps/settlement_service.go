@@ -287,32 +287,126 @@ func (s *Lsps1SettlementService) openChannelForOrder(order *common.Lsps1Order) {
 	}
 }
 
-// recoverStuckOrders finds and retries orders that were PAID but never fulfilled
-// (e.g. because flspd crashed before opening the channel).
+// recoverStuckOrders finds and retries orders that were never fulfilled:
+//  1. PAID orders: flspd crashed after marking PAID but before opening the channel.
+//  2. CREATED orders whose LND invoice is already SETTLED: flspd crashed after the
+//     invoice was settled in LND but before it could write PAID to the DB. The
+//     SubscribeInvoices replay handles this eventually, but an explicit LND lookup
+//     on startup makes recovery deterministic.
 func (s *Lsps1SettlementService) recoverStuckOrders() {
 	log.Info().
 		Str("component", string(common.LogComponentSettlement)).
 		Msg("LSPS1 Settlement: Checking for stuck PAID orders to recover...")
 
-	orders, err := s.openingStore.GetAllPaidLsps1Orders()
+	paidOrders, err := s.openingStore.GetAllPaidLsps1Orders()
 	if err != nil {
-		log.Error().Err(err).Msg("LSPS1 Settlement: Failed to retrieve stuck orders")
+		log.Error().Err(err).Msg("LSPS1 Settlement: Failed to retrieve stuck PAID orders")
 		return
 	}
 
-	if len(orders) == 0 {
+	if len(paidOrders) == 0 {
 		log.Debug().Msg("LSPS1 Settlement: No stuck orders found")
+	} else {
+		log.Info().
+			Str("component", string(common.LogComponentSettlement)).
+			Int("count", len(paidOrders)).
+			Msgf("LSPS1 Settlement: Found %d stuck PAID orders, recovering...", len(paidOrders))
+
+		for _, order := range paidOrders {
+			s.openChannelForOrder(order)
+		}
+	}
+
+	// Also check CREATED orders: if the invoice was settled in LND while flspd
+	// was down, the order never progressed. Look each one up directly in LND.
+	s.recoverSettledCreatedOrders()
+}
+
+// recoverSettledCreatedOrders queries LND for any CREATED order whose invoice
+// is already SETTLED, then processes it as if the settlement event just arrived.
+func (s *Lsps1SettlementService) recoverSettledCreatedOrders() {
+	createdOrders, err := s.openingStore.GetAllCreatedLsps1Orders()
+	if err != nil {
+		log.Error().Err(err).Msg("LSPS1 Settlement: Failed to retrieve CREATED orders for LND check")
+		return
+	}
+	if len(createdOrders) == 0 {
+		return
+	}
+
+	log.Debug().
+		Str("component", string(common.LogComponentSettlement)).
+		Int("count", len(createdOrders)).
+		Msg("LSPS1 Settlement: Checking CREATED orders against LND for missed settlements")
+
+	for _, order := range createdOrders {
+		if order.PaymentInvoice == "" {
+			continue
+		}
+		state, err := s.client.LookupInvoiceState(s.ctx, order.PaymentInvoice)
+		if err != nil {
+			log.Warn().Err(err).
+				Str("order_id", order.OrderId).
+				Msg("LSPS1 Settlement: Could not look up invoice state in LND, skipping")
+			continue
+		}
+
+		stateStr := "OPEN"
+		switch state {
+		case lightning.InvoiceStateSettled:
+			stateStr = "SETTLED"
+		case lightning.InvoiceStateCanceled:
+			stateStr = "CANCELED"
+		case lightning.InvoiceStateAccepted:
+			stateStr = "ACCEPTED"
+		}
+
+		log.Info().
+			Str("component", string(common.LogComponentSettlement)).
+			Str("order_id", order.OrderId).
+			Str("invoice_state", stateStr).
+			Int64("order_total_loki", order.OrderTotalLoki).
+			Msg("LSPS1 Settlement: CREATED order invoice state")
+
+		switch state {
+		case lightning.InvoiceStateSettled:
+			log.Info().
+				Str("component", string(common.LogComponentSettlement)).
+				Str("order_id", order.OrderId).
+				Str("peer_id", order.PeerId).
+				Msg("LSPS1 Settlement: Found CREATED order with settled invoice — recovering")
+			s.processSettledOrder(order)
+		case lightning.InvoiceStateCanceled:
+			log.Warn().
+				Str("component", string(common.LogComponentSettlement)).
+				Str("order_id", order.OrderId).
+				Msg("LSPS1 Settlement: Invoice is CANCELED — order cannot be fulfilled")
+		}
+	}
+}
+
+// processSettledOrder is the DB-update + channel-open logic factored out of
+// processSettledInvoice so that recoverSettledCreatedOrders can reuse it
+// without needing the full InvoiceUpdate.
+func (s *Lsps1SettlementService) processSettledOrder(order *common.Lsps1Order) {
+	err := s.openingStore.UpdateLsps1OrderState(order.OrderId, string(Lsps1OrderStatePaid), string(Lsps1OrderStatePaid))
+	if err != nil {
+		log.Error().Err(err).
+			Str("order_id", order.OrderId).
+			Msg("LSPS1 Settlement: Failed to update order state to PAID during recovery")
 		return
 	}
 
 	log.Info().
 		Str("component", string(common.LogComponentSettlement)).
-		Int("count", len(orders)).
-		Msgf("LSPS1 Settlement: Found %d stuck orders, recovering...", len(orders))
+		Str("order_id", order.OrderId).
+		Str("peer_id", order.PeerId).
+		Msg("LSPS1 Settlement: Order marked as PAID (recovery)")
 
-	for _, order := range orders {
-		// Process each order sequentially to avoid overwhelming LND on startup
-		s.openChannelForOrder(order)
+	if s.notificationService != nil {
+		go s.notificationService.NotifyOrderStateChanged(order.PeerId, order.OrderId, string(Lsps1OrderStatePaid), "", "")
 	}
+
+	s.openChannelForOrder(order)
 }
 

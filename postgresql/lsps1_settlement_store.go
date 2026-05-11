@@ -151,6 +151,41 @@ func (s *PostgresOpeningStore) GetAllPaidLsps1Orders() ([]*common.Lsps1Order, er
 }
 
 
+// GetAllCreatedLsps1Orders returns all orders still in CREATED state that have not expired.
+// Used during startup to check whether any invoice was settled in LND while flspd was down.
+func (s *PostgresOpeningStore) GetAllCreatedLsps1Orders() ([]*common.Lsps1Order, error) {
+	rows, err := s.pool.Query(context.Background(),
+		`SELECT order_id, peer_id, lsp_balance_loki, client_balance_loki,
+			funding_confirms_within_blocks, required_channel_confirmations,
+			channel_expiry_blocks, token, announce_channel, created_at,
+			order_state, payment_state, payment_invoice, funding_txid, funding_outpoint,
+			COALESCE(refund_onchain_address, ''), COALESCE(order_total_loki, 0), COALESCE(fee_total_loki, 0)
+		 FROM lsps1.orders
+		 WHERE order_state='CREATED'
+		 ORDER BY created_at ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var orders []*common.Lsps1Order
+	for rows.Next() {
+		var order common.Lsps1Order
+		err := rows.Scan(
+			&order.OrderId, &order.PeerId, &order.LspBalanceLoki, &order.ClientBalanceLoki,
+			&order.FundingConfirmsWithinBlocks, &order.RequiredChannelConfirmations,
+			&order.ChannelExpiryBlocks, &order.Token, &order.AnnounceChannel, &order.CreatedAt,
+			&order.OrderState, &order.PaymentState, &order.PaymentInvoice, &order.FundingTxid, &order.FundingOutpoint,
+			&order.RefundOnchainAddress, &order.OrderTotalLoki, &order.FeeTotalLoki,
+		)
+		if err != nil {
+			return nil, err
+		}
+		orders = append(orders, &order)
+	}
+	return orders, rows.Err()
+}
+
 // UpdateLsps1OrderFunding updates the funding_txid and funding_outpoint of an LSPS1 order
 func (s *PostgresOpeningStore) UpdateLsps1OrderFunding(orderId string, fundingTxid string, fundingOutpoint int) error {
 	result, err := s.pool.Exec(context.Background(),
