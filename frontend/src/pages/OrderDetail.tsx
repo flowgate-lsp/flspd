@@ -126,9 +126,9 @@ export const OrderDetail: React.FC<OrderDetailProps> = ({ orderId, onBack }) => 
         <GlassCard className="lg:col-span-2 p-10 space-y-12 shadow-2xl relative overflow-hidden group">
           <div className="absolute top-0 right-0 w-64 h-64 bg-primary/5 blur-[120px] rounded-full opacity-30 group-hover:opacity-60 transition-opacity" />
           
-          <div className="flex items-center gap-3 pb-6">
+          <div className="flex items-center gap-3 pb-4 border-b border-white/5">
             <Activity className="w-4 h-4 text-primary" />
-            <h2 className="text-sm font-black text-white uppercase tracking-[0.2em]">Operational Parameters</h2>
+            <h2 className="text-[11px] font-semibold text-on-surface uppercase tracking-[0.25em]">Operational Parameters</h2>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-y-10 gap-x-12 relative z-10">
@@ -138,16 +138,16 @@ export const OrderDetail: React.FC<OrderDetailProps> = ({ orderId, onBack }) => 
             <DetailRow label="Network Fee" value={format(order.fee, 'MLOKI')} />
             <DetailRow label="Inbound Window" value={`${order.funding_confirms_within_blocks} Blocks`} />
             <DetailRow label="Channel TTL" value={`${order.channel_expiry_blocks} Blocks`} />
-            <DetailRow label="Public Announce" value={order.announce_channel ? 'ENABLED' : 'DISABLED'} color={order.announce_channel ? 'text-secondary' : 'text-error'} />
+            <DetailRow label="Public Announce" value={order.announce_channel ? 'ENABLED' : 'DISABLED'} color={order.announce_channel ? 'text-secondary' : 'text-on-surface'} />
             <DetailRow label="Payment State" value={order.payment_state} color="text-tertiary" />
           </div>
 
           {/* Persistent Cryptographic Identifiers */}
           <div className="space-y-6 pt-10 relative z-10">
-            <h3 className="text-[10px] font-black text-on-surface-variant uppercase tracking-[0.4em] mb-4">Cryptographic Identity</h3>
+            <h3 className="text-[10px] font-semibold text-on-surface uppercase tracking-[0.25em] mb-4">Cryptographic Identity</h3>
             <div className="space-y-4">
               <div className="flex items-center gap-3">
-                <p className="text-[9px] font-mono text-on-surface-variant/40 uppercase tracking-[0.3em] font-black italic leading-none">Peer Identity</p>
+                <p className="text-[10px] font-mono text-on-surface uppercase tracking-[0.15em] font-semibold leading-none">Peer Identity</p>
                 {order.peer_alias && (
                   <span 
                     className="text-[10px] font-mono font-black uppercase italic px-2 py-0.5 rounded border border-current/20 bg-current/5"
@@ -186,9 +186,9 @@ export const OrderDetail: React.FC<OrderDetailProps> = ({ orderId, onBack }) => 
 
         {/* Temporal Sequence / Timeline */}
         <GlassCard className="lg:col-span-1 p-10 space-y-10 h-full flex flex-col shadow-2xl">
-          <div className="flex items-center justify-between pb-6">
-            <h2 className="text-sm font-black text-white uppercase tracking-[0.2em]">Sequence</h2>
-            <Clock className="w-4 h-4 text-on-surface-variant/30" />
+          <div className="flex items-center justify-between pb-4 border-b border-white/5">
+            <h2 className="text-[11px] font-semibold text-on-surface uppercase tracking-[0.25em]">Sequence</h2>
+            <Clock className="w-4 h-4 text-on-surface-variant" />
           </div>
           
           <div className="space-y-0 relative flex-1">
@@ -220,7 +220,7 @@ export const OrderDetail: React.FC<OrderDetailProps> = ({ orderId, onBack }) => 
                     
                     {txMatch ? (
                       <div className="bg-black/40 border border-white/5 p-2 rounded-lg mt-2 inline-flex items-center gap-2 group/txLink hover:bg-white/10 transition-all">
-                        <span className="text-[9px] font-mono text-on-surface-variant uppercase font-black tracking-tight">TX: </span>
+                        <span className="text-[9px] font-mono text-on-surface uppercase font-semibold tracking-tight">TX: </span>
                         <a 
                           href={`https://lokichain.info/tx/${txMatch[1]}`}
                           target="_blank"
@@ -231,10 +231,10 @@ export const OrderDetail: React.FC<OrderDetailProps> = ({ orderId, onBack }) => 
                         </a>
                       </div>
                     ) : (
-                      <p className="text-[10px] font-mono text-on-surface-variant/60 mt-1 leading-relaxed max-w-[200px]">{event.detail}</p>
+                      <p className="text-[10px] font-mono text-on-surface mt-1 leading-relaxed max-w-[200px]">{event.detail}</p>
                     )}
                     
-                    <p className="text-[9px] font-mono text-on-surface-variant/30 mt-2 italic font-black uppercase tracking-widest">
+                    <p className="text-[9px] font-mono text-on-surface-variant mt-2 uppercase tracking-widest">
                       {new Date(event.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                     </p>
                   </div>
@@ -244,7 +244,7 @@ export const OrderDetail: React.FC<OrderDetailProps> = ({ orderId, onBack }) => 
           </div>
           
           <div className="pt-8 mt-auto">
-             <p className="text-[9px] font-mono text-on-surface-variant/20 uppercase font-black text-center tracking-[0.2em]">Verified Secure Chain Record</p>
+             <p className="text-[9px] font-mono text-on-surface-variant uppercase text-center tracking-[0.2em]">Verified Secure Chain Record</p>
           </div>
         </GlassCard>
       </div>
@@ -257,8 +257,8 @@ export const OrderDetail: React.FC<OrderDetailProps> = ({ orderId, onBack }) => 
 const DetailRow: React.FC<{ label: string; value: string; highlight?: boolean; icon?: any; color?: string }> = ({ label, value, highlight, icon: Icon, color }) => (
   <div className="group/row">
     <div className="flex items-center gap-2 mb-2">
-      {Icon && <Icon className={cn("w-3 h-3 opacity-30 group-hover/row:opacity-100 transition-opacity", color || 'text-primary')} />}
-      <p className="text-[9px] font-mono text-on-surface-variant uppercase tracking-[0.2em] font-black italic">{label}</p>
+      {Icon && <Icon className={cn("w-3 h-3 opacity-40 group-hover/row:opacity-100 transition-opacity", color || 'text-primary')} />}
+      <p className="text-[10px] font-mono text-on-surface uppercase tracking-[0.15em] font-semibold">{label}</p>
     </div>
     <p className={cn("text-lg md:text-xl font-black italic tracking-tighter leading-none transition-all duration-300 group-hover/row:translate-x-1", highlight ? "text-primary drop-shadow-[0_0_10px_rgba(0,186,255,0.2)]" : color || "text-white")}>{value}</p>
   </div>
@@ -272,9 +272,9 @@ const CopyableField: React.FC<{
   explorerUrl?: string;
 }> = ({ label, value, copied, onCopy, explorerUrl }) => (
   <div className="group/field">
-    <p className="text-[9px] font-mono text-on-surface-variant/40 uppercase tracking-[0.3em] mb-2 font-black italic leading-none">{label}</p>
+    {label && <p className="text-[10px] font-mono text-on-surface uppercase tracking-[0.15em] mb-2 font-semibold leading-none">{label}</p>}
     <div className="flex items-center gap-3 p-4 rounded-2xl bg-black/40 border border-white/10 group-focus-within:border-primary/40 transition-all duration-500 hover:bg-white/[0.03]">
-      <code className="text-[11px] font-mono text-white/70 truncate flex-1 font-bold group-hover/field:text-white transition-colors">{value}</code>
+      <code className="text-[11px] font-mono text-on-background/80 truncate flex-1 font-bold group-hover/field:text-white transition-colors">{value}</code>
       <div className="flex items-center gap-2 border-l border-white/10 pl-3">
         <button
           onClick={() => onCopy(value, label)}

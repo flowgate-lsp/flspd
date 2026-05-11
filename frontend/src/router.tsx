@@ -1,7 +1,8 @@
-import { 
-  createRouter, 
-  createRootRoute, 
-  createRoute, 
+import {
+  createRouter,
+  createRootRoute,
+  createRoute,
+  createHashHistory,
   Outlet,
   useLocation
 } from '@tanstack/react-router'
@@ -148,8 +149,10 @@ const routeTree = rootRoute.addChildren([
   settingsRoute,
 ])
 
-// Create the router
-export const router = createRouter({ routeTree })
+// Hash history keeps the path in the fragment (#/orders/123) so the server
+// always receives "/" — no server-side catch-all needed.
+const hashHistory = createHashHistory()
+export const router = createRouter({ routeTree, history: hashHistory })
 
 // Register for type safety
 declare module '@tanstack/react-router' {

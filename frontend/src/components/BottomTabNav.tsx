@@ -22,7 +22,7 @@ export const BottomTabNav: React.FC = () => {
             key={item.id}
             to={to}
           >
-            {({ isActive }) => (
+            {({ isActive }: { isActive: boolean }) => (
               <div className={cn(
                 "relative flex flex-col items-center gap-1.5 px-3 py-2 rounded-2xl transition-all duration-300 cursor-pointer",
                 isActive ? "text-primary" : "text-on-surface-variant hover:text-white"

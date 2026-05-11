@@ -32,7 +32,7 @@ export const Sidebar: React.FC = () => {
               key={item.id}
               to={to}
             >
-              {({ isActive }) => (
+              {({ isActive }: { isActive: boolean }) => (
                 <div className={cn(
                   "w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all duration-300 group hover:bg-white/5 cursor-pointer",
                   isActive ? "bg-primary/10 text-white" : "text-on-surface-variant hover:text-white"
