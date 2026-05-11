@@ -138,6 +138,16 @@ func (i *LndHtlcInterceptor) intercept() error {
 				})
 				switch interceptResult.Action {
 				case common.INTERCEPT_RESUME_WITH_ONION:
+					phantomSCID := request.OutgoingRequestedChanId
+					realSCID := uint64(interceptResult.Scid)
+					if phantomSCID != 0 && phantomSCID != realSCID {
+						if err := i.client.RegisterChannelAlias(i.ctx, realSCID, phantomSCID); err != nil {
+							log.Warn().Err(err).
+								Uint64("phantom_scid", phantomSCID).
+								Uint64("real_scid", realSCID).
+								Msg("Interceptor: failed to register phantom SCID alias — payment may fail")
+						}
+					}
 					interceptorClient.Send(i.createOnionResponse(interceptResult, request))
 				case common.INTERCEPT_FAIL_HTLC_WITH_CODE:
 					log.Error().Str("payment_hash", hex.EncodeToString(request.PaymentHash)).Msgf("LND: Failing HTLC with code %x", interceptResult.FailureCode)
@@ -179,12 +189,8 @@ func (i *LndHtlcInterceptor) mapFailureCode(original common.InterceptFailureCode
 
 func (i *LndHtlcInterceptor) createOnionResponse(interceptResult common.InterceptResult, request *routerrpc.ForwardHtlcInterceptRequest) *routerrpc.ForwardHtlcInterceptResponse {
 	return &routerrpc.ForwardHtlcInterceptResponse{
-		IncomingCircuitKey:      request.IncomingCircuitKey,
-		Action:                  routerrpc.ResolveHoldForwardAction_RESUME_MODIFIED,
-		OutAmountMsat:           interceptResult.AmountMloki,
-		OutgoingRequestedChanId: uint64(interceptResult.Scid),
+		IncomingCircuitKey: request.IncomingCircuitKey,
+		Action:             routerrpc.ResolveHoldForwardAction_RESUME_MODIFIED,
+		OutAmountMsat:      interceptResult.AmountMloki,
 	}
-	// Note: We do NOT set OutWireCustomRecords here for JIT channels.
-	// The HTLC already contains the correct payment secret from the client's invoice.
-	// We only need to redirect to the newly opened channel via OutgoingRequestedChanId.
 }

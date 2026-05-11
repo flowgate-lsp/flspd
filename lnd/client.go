@@ -718,6 +718,24 @@ func (c *LndClient) AddInvoice(ctx context.Context, req *lnrpc.Invoice) (*lnrpc.
 	return c.client.AddInvoice(ctx, req)
 }
 
+// LookupInvoiceState decodes the payment request to obtain the payment hash,
+// then queries LND directly for the invoice's current state.
+func (c *LndClient) LookupInvoiceState(ctx context.Context, paymentRequest string) (lightning.InvoiceState, error) {
+	decoded, err := c.client.DecodePayReq(ctx, &lnrpc.PayReqString{PayReq: paymentRequest})
+	if err != nil {
+		return lightning.InvoiceStateOpen, fmt.Errorf("DecodePayReq: %w", err)
+	}
+	hashBytes, err := hex.DecodeString(decoded.PaymentHash)
+	if err != nil {
+		return lightning.InvoiceStateOpen, fmt.Errorf("decode payment hash: %w", err)
+	}
+	inv, err := c.client.LookupInvoice(ctx, &lnrpc.PaymentHash{RHash: hashBytes})
+	if err != nil {
+		return lightning.InvoiceStateOpen, fmt.Errorf("LookupInvoice: %w", err)
+	}
+	return convertInvoiceState(inv.State), nil
+}
+
 func (c *LndClient) WalletBalance(ctx context.Context) (*lightning.WalletBalanceResult, error) {
 	resp, err := c.client.WalletBalance(ctx, &lnrpc.WalletBalanceRequest{})
 	if err != nil {
@@ -728,6 +746,15 @@ func (c *LndClient) WalletBalance(ctx context.Context) (*lightning.WalletBalance
 		ConfirmedBalance:   resp.ConfirmedBalance,
 		UnconfirmedBalance: resp.UnconfirmedBalance,
 	}, nil
+}
+
+func (c *LndClient) RegisterChannelAlias(ctx context.Context, baseSCID uint64, phantomSCID uint64) error {
+	_, err := c.routerClient.XAddLocalChanAliases(ctx, &routerrpc.AddAliasesRequest{
+		AliasMaps: []*lnrpc.AliasMap{
+			{BaseScid: baseSCID, Aliases: []uint64{phantomSCID}},
+		},
+	})
+	return err
 }
 
 func (c *LndClient) QueryRoutes(destination []byte, amountMloki uint64, outgoingChanId uint64) ([]*lightning.Route, error) {

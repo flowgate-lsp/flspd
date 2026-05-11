@@ -59,13 +59,13 @@ func runLspd(cliCtx *cli.Context) error {
 	}
 
 	// LSP Min Capacity must be <= Network Max Funding (otherwise we can never open a standard channel)
-	if AbsoluteMinChannelCapacityLoki > uint64(funding.MaxFlcFundingAmount) {
-		return fmt.Errorf("configuration error: AbsoluteMinChannelCapacityLoki (%d) exceeds standard maximum funding amount (%d)", AbsoluteMinChannelCapacityLoki, funding.MaxFlcFundingAmount)
+	if AbsoluteMinChannelCapacityLoki > uint64(funding.MaxFlokicoinFundingAmount) {
+		return fmt.Errorf("configuration error: AbsoluteMinChannelCapacityLoki (%d) exceeds standard maximum funding amount (%d)", AbsoluteMinChannelCapacityLoki, funding.MaxFlokicoinFundingAmount)
 	}
 
 	// Network Min Funding must be <= Network Max Funding (Basic sanity of external package)
-	if funding.MinChanFundingSize > funding.MaxFlcFundingAmount {
-		return fmt.Errorf("external consistency error: Network MinChanFundingSize (%d) > MaxFlcFundingAmount (%d)", funding.MinChanFundingSize, funding.MaxFlcFundingAmount)
+	if funding.MinChanFundingSize > funding.MaxFlokicoinFundingAmount {
+		return fmt.Errorf("external consistency error: Network MinChanFundingSize (%d) > MaxFlokicoinFundingAmount (%d)", funding.MinChanFundingSize, funding.MaxFlokicoinFundingAmount)
 	}
 	common.InitLogger()
 	log.Info().Msgf(`Starting flspd, tag='%s', revision='%s'`, build.GetTag(), build.GetRevision())
@@ -423,19 +423,19 @@ func initializeNodes(configs []*config.NodeConfig) ([]*common.Node, error) {
 		}
 
 		// Validate wumbo limits (PublicChannelAmount or explicit wumbo needs)
-		if config.PublicChannelAmount > int64(funding.MaxFlcFundingAmountWumbo) {
-			return nil, fmt.Errorf("publicChannelAmount %d exceeds MaxFlcFundingAmountWumbo %d", config.PublicChannelAmount, funding.MaxFlcFundingAmountWumbo)
+		if config.PublicChannelAmount > int64(funding.MaxFlokicoinFundingAmountWumbo) {
+			return nil, fmt.Errorf("publicChannelAmount %d exceeds MaxFlokicoinFundingAmountWumbo %d", config.PublicChannelAmount, funding.MaxFlokicoinFundingAmountWumbo)
 		}
 		// Warn if exceeding standard limit but under wumbo
-		if config.PublicChannelAmount > int64(funding.MaxFlcFundingAmount) {
-			log.Warn().Msgf("PublicChannelAmount %d exceeds standard MaxFlcFundingAmount %d. Ensure wumbo is enabled.", config.PublicChannelAmount, funding.MaxFlcFundingAmount)
+		if config.PublicChannelAmount > int64(funding.MaxFlokicoinFundingAmount) {
+			log.Warn().Msgf("PublicChannelAmount %d exceeds standard MaxFlokicoinFundingAmount %d. Ensure wumbo is enabled.", config.PublicChannelAmount, funding.MaxFlokicoinFundingAmount)
 		}
 
-		if err := ValidateLsps1Config(config); err != nil {
+		if err := config.ValidateLsps1(); err != nil {
 			return nil, fmt.Errorf("LSPS1 config validation failed: %w", err)
 		}
 
-		if err := ValidateJitConfig(config); err != nil {
+		if err := config.ValidateJit(); err != nil {
 			return nil, fmt.Errorf("JIT config validation failed: %w", err)
 		}
 

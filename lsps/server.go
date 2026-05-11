@@ -269,7 +269,18 @@ func generateRandomScid() (uint64, error) {
 	if err != nil {
 		return 0, err
 	}
-	return binary.BigEndian.Uint64(b), nil
+	raw := binary.BigEndian.Uint64(b)
+
+	// Phantom SCIDs must be in LND's alias block-height range [16,000,000, 16,250,000)
+	// so that XAddLocalChanAliases can register them after a JIT channel opens,
+	// allowing the switch to route the resumed HTLC to the newly opened channel.
+	const aliasStart = uint64(16_000_000)
+	const aliasRange = uint64(250_000)
+
+	blockHeight := aliasStart + (raw>>40)%aliasRange
+	lower40 := raw & 0xFF_FFFF_FFFF // 24-bit tx index + 16-bit output index
+
+	return (blockHeight << 40) | lower40, nil
 }
 
 func generateUUID() (string, error) {
