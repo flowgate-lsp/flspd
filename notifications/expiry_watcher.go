@@ -11,19 +11,29 @@ import (
 )
 
 const (
-	// Check expiry every 10 minutes
 	expiryCheckInterval = 10 * time.Minute
-	// Notify when expiry is within 144 blocks (approx 24 hours)
-	expiryNotificationThresholdBlocks = 144
 )
 
-// ExpiryWatcher monitors pending HTLCs and notifies clients when expiry is approaching
+// expiryMilestones are the block thresholds at which we notify, in descending order.
+// Each HTLC gets at most one notification per milestone (warning → urgent → critical).
+var expiryMilestones = []int{144, 72, 24}
+
+type milestoneKey struct {
+	pubkey      string
+	paymentHash string
+	threshold   int
+}
+
+// ExpiryWatcher monitors pending HTLCs and notifies clients when expiry is approaching.
 type ExpiryWatcher struct {
 	client              lightning.Client
 	notificationService Notifier
 	nodeConfig          *config.NodeConfig
 	quit                chan struct{}
 	wg                  sync.WaitGroup
+
+	mu                 sync.Mutex
+	notifiedMilestones map[milestoneKey]struct{}
 }
 
 // NewExpiryWatcher creates a new expiry watcher service
@@ -37,11 +47,13 @@ func NewExpiryWatcher(
 		notificationService: notificationService,
 		nodeConfig:          nodeConfig,
 		quit:                make(chan struct{}),
+		notifiedMilestones:  make(map[milestoneKey]struct{}),
 	}
 }
 
 // Start begins the monitoring loop
 func (w *ExpiryWatcher) Start() {
+	log.Info().Msg("ExpiryWatcher: started")
 	w.wg.Add(1)
 	go w.checkLoop()
 }
@@ -50,6 +62,7 @@ func (w *ExpiryWatcher) Start() {
 func (w *ExpiryWatcher) Stop() {
 	close(w.quit)
 	w.wg.Wait()
+	log.Info().Msg("ExpiryWatcher: stopped")
 }
 
 func (w *ExpiryWatcher) checkLoop() {
@@ -69,9 +82,6 @@ func (w *ExpiryWatcher) checkLoop() {
 }
 
 func (w *ExpiryWatcher) checkExpiries() {
-	// Get all pending channels/HTLCs
-	// This depends on what the Lightning Client interface exposes.
-	// Typically we'd list channels and inspect pending HTLCs.
 	channels, err := w.client.ListChannels()
 	if err != nil {
 		log.Error().Err(err).Msg("ExpiryWatcher: Failed to list channels")
@@ -84,24 +94,65 @@ func (w *ExpiryWatcher) checkExpiries() {
 		return
 	}
 
+	// Track which (pubkey, paymentHash) pairs are still live so we can
+	// evict stale milestone entries for HTLCs that have settled or expired.
+	liveKeys := make(map[milestoneKey]struct{})
+
 	for _, ch := range channels {
+		pubkey := hex.EncodeToString(ch.PeerId)
+
 		for _, htlc := range ch.PendingHtlcs {
-			// Only interested in incoming HTLCs that we are holding?
-			// Or outgoing ones? Typically incoming ones that are waiting for user to come online.
-			// Let's assume incoming HTLCs waiting for settlement.
+			if !htlc.Incoming {
+				continue
+			}
 
-			if htlc.Incoming {
-				blocksToExpiry := int(htlc.ExpirationHeight) - int(currentBlockHeight)
+			paymentHash := hex.EncodeToString(htlc.HashLock)
+			blocksToExpiry := int(htlc.ExpirationHeight) - int(currentBlockHeight)
 
-				if blocksToExpiry > 0 && blocksToExpiry <= expiryNotificationThresholdBlocks {
-					// Notify!
-					// We need the pubkey of the peer.
-					pubkey := hex.EncodeToString(ch.PeerId)
+			// Mark all milestones for this HTLC as live so we don't evict them yet.
+			for _, threshold := range expiryMilestones {
+				liveKeys[milestoneKey{pubkey, paymentHash, threshold}] = struct{}{}
+			}
 
-					// Avoid spamming? The NotificationService dedupes based on payment hash+interval.
-					w.notificationService.NotifyExpirySoon(pubkey, blocksToExpiry, nil, hex.EncodeToString(htlc.HashLock))
+			if blocksToExpiry <= 0 {
+				continue
+			}
+
+			// Find the most urgent milestone this HTLC has crossed that hasn't
+			// been notified yet, and fire exactly one notification for it.
+			for _, threshold := range expiryMilestones {
+				if blocksToExpiry > threshold {
+					break
 				}
+
+				key := milestoneKey{pubkey, paymentHash, threshold}
+				w.mu.Lock()
+				_, already := w.notifiedMilestones[key]
+				if !already {
+					w.notifiedMilestones[key] = struct{}{}
+				}
+				w.mu.Unlock()
+
+				if !already {
+					log.Info().
+						Str("pubkey", pubkey).
+						Str("payment_hash", paymentHash).
+						Int("blocks_to_expiry", blocksToExpiry).
+						Int("milestone", threshold).
+						Msg("ExpiryWatcher: notifying expiry milestone")
+					w.notificationService.NotifyExpirySoon(pubkey, blocksToExpiry, nil, paymentHash)
+				}
+				break
 			}
 		}
 	}
+
+	// Evict milestone entries for HTLCs that are no longer pending.
+	w.mu.Lock()
+	for key := range w.notifiedMilestones {
+		if _, live := liveKeys[key]; !live {
+			delete(w.notifiedMilestones, key)
+		}
+	}
+	w.mu.Unlock()
 }
