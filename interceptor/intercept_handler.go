@@ -573,6 +573,31 @@ func (i *Interceptor) openChannel(paymentHash, destination []byte, incomingAmoun
 	return channelPoint, err
 }
 
+// computeJitOutgoingAmount derives the amount to forward for an LSPS2 JIT
+// payment, given the gross amount the sender paid (paymentSizeMloki) and
+// the opening-fee params. Lightning fees are charged on the forwarded
+// (outgoing) amount, so given input = outgoing + outgoing*rate, solving
+// for outgoing yields outgoing = input / (1 + rate). minFeeMloki acts as
+// a floor: if the proportional fee implied by that formula falls below
+// it, the floor is charged instead and outgoing is reduced accordingly.
+func computeJitOutgoingAmount(paymentSizeMloki, minFeeMloki int64, proportional uint32) (outgoing int64, fee int64) {
+	rate := float64(proportional) / 1_000_000.0
+
+	outgoing = int64(float64(paymentSizeMloki) / (1.0 + rate))
+	fee = paymentSizeMloki - outgoing
+
+	if fee < minFeeMloki {
+		fee = minFeeMloki
+		outgoing = paymentSizeMloki - fee
+	}
+
+	if outgoing < 0 {
+		outgoing = 0
+	}
+
+	return outgoing, fee
+}
+
 type interceptData struct {
 	token               string
 	orderId             string
@@ -612,37 +637,10 @@ func (i *Interceptor) resolvePayment(req common.InterceptRequest) (*interceptDat
 			paymentSecret = []byte("lsps2-jit") // Mark as registered
 			if lsps2Order.PaymentSizeMloki != nil {
 				paymentSize := int64(*lsps2Order.PaymentSizeMloki)
-
-				// Calculate Fee matching computeOpeningFee in lsps/server.go
 				minFee := int64(lsps2Order.ParamsMinFeeMloki)
 
-				// Fee Logic:
-				// Standard Lightning fees are charged on the FORWARDED (outgoing) amount.
-				// Fee = Outgoing * Rate + Base (we treat MinFee as a floor here, effectively base=0 usually).
-				// We know Input (PaymentSize). We need to find Outgoing such that:
-				// Outgoing + Fee(Outgoing) <= Input
-				// Outgoing + Outgoing * Rate = Input
-				// Outgoing * (1 + Rate) = Input
-				// Outgoing = Input / (1 + Rate)
-
-				rate := float64(lsps2Order.ParamsProportional) / 1_000_000.0
-
-				// Calculate Outgoing based on proportional fee
-				// outgoing = input / (1 + rate)
-				outgoingAmountMloki = int64(float64(paymentSize) / (1.0 + rate))
-
-				// Calculate the implied fee
-				fee := paymentSize - outgoingAmountMloki
-
-				// Enforce MinFee floor
-				if fee < minFee {
-					fee = minFee
-					outgoingAmountMloki = paymentSize - fee
-				}
-
-				if outgoingAmountMloki < 0 {
-					outgoingAmountMloki = 0
-				}
+				var fee int64
+				outgoingAmountMloki, fee = computeJitOutgoingAmount(paymentSize, minFee, lsps2Order.ParamsProportional)
 
 				log.Info().Msgf("LSPS2 JIT: PaymentSize=%d, Fee=%d, Outgoing=%d", paymentSize, fee, outgoingAmountMloki)
 

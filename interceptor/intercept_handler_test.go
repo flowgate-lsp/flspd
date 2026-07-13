@@ -74,9 +74,11 @@ func TestResolvePayment_JIT_Success(t *testing.T) {
 	mockStore.On("PaymentInfo", mock.Anything).Return("", "", nil, nil, nil, nil, int64(0), int64(0), nil, nil, nil) // Not found in payments table
 	mockStore.On("GetLsps2Order", scid).Return(order, nil)
 
-	// Expect Registration with CORRECT Fee Calculation
-	// Fee = max(1000, ceil(20M * 4000 / 1M)) = max(1000, 80000) = 80000.
-	// Outgoing = 20M - 80k = 19920000.
+	// Expect Registration with CORRECT Fee Calculation: fees are charged on
+	// the forwarded (outgoing) amount, so outgoing = input / (1 + rate).
+	// rate = 4000/1_000_000 = 0.004
+	// outgoing = 20_000_000 / 1.004 = 19920318 (truncated)
+	// fee = 20_000_000 - 19920318 = 79682, which is above the 1000 floor.
 	mockStore.On("RegisterPayment",
 		"token_1",
 		"order_1",
@@ -85,7 +87,7 @@ func TestResolvePayment_JIT_Success(t *testing.T) {
 		mock.Anything,   // hash
 		mock.Anything,   // secret
 		int64(20000000), // Incoming (Gross)
-		int64(19920000), // Outgoing (Net)
+		int64(19920318), // Outgoing (Net)
 		"",
 	).Return(nil)
 
@@ -100,7 +102,7 @@ func TestResolvePayment_JIT_Success(t *testing.T) {
 
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
-	assert.Equal(t, int64(19920000), result.outgoingAmountMloki)
+	assert.Equal(t, int64(19920318), result.outgoingAmountMloki)
 	assert.True(t, result.isJit)
 }
 
@@ -136,6 +138,54 @@ func TestResolvePayment_JIT_Underpayment(t *testing.T) {
 	assert.Error(t, err)
 	assert.Nil(t, result)
 	assert.Contains(t, err.Error(), "underpayment")
+}
+
+// TestComputeJitOutgoingAmount covers the fee/floor math independently of
+// the mock store, including the case where the proportional fee falls
+// below the minFee floor (untested previously, since the panicking mock
+// setup masked it).
+func TestComputeJitOutgoingAmount(t *testing.T) {
+	tests := []struct {
+		name             string
+		paymentSizeMloki int64
+		minFeeMloki      int64
+		proportional     uint32
+		wantOutgoing     int64
+		wantFee          int64
+	}{
+		{
+			name:             "proportional fee above floor",
+			paymentSizeMloki: 20000000,
+			minFeeMloki:      1000,
+			proportional:     4000,
+			wantOutgoing:     19920318,
+			wantFee:          79682,
+		},
+		{
+			name:             "proportional fee below floor, floor applies",
+			paymentSizeMloki: 100000,
+			minFeeMloki:      1000,
+			proportional:     4000,
+			wantOutgoing:     99000,
+			wantFee:          1000,
+		},
+		{
+			name:             "zero proportional rate",
+			paymentSizeMloki: 20000000,
+			minFeeMloki:      1000,
+			proportional:     0,
+			wantOutgoing:     19999000,
+			wantFee:          1000,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			outgoing, fee := computeJitOutgoingAmount(tt.paymentSizeMloki, tt.minFeeMloki, tt.proportional)
+			assert.Equal(t, tt.wantOutgoing, outgoing, "outgoing mismatch")
+			assert.Equal(t, tt.wantFee, fee, "fee mismatch")
+		})
+	}
 }
 
 // TestOpenChannel_CapacityLogic verifies that padding and floor are correctly applied
