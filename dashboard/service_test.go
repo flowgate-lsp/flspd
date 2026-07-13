@@ -3,6 +3,7 @@ package dashboard
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -342,6 +343,21 @@ func TestDashboardService_RPC(t *testing.T) {
 	s := NewDashboardService(mockNodes, mockOpeningSvc, mockStore, mockHistory, "pubkey_test", "/tmp/nodes.test.yaml")
 
 	t.Run("get_summary", func(t *testing.T) {
+		// Scoped with .Once() so these don't leak into later subtests that
+		// register their own, more specific expectations for the same
+		// mocked methods (list_peers, list_orders below).
+		mockLnd.On("WalletBalance", mock.Anything).Return(&lightning.WalletBalanceResult{
+			ConfirmedBalance: 1000000,
+		}, nil).Once()
+		// Matches the specific (summaryListLimit, 0) args handleGetSummary
+		// and handleListPeers both call with — not scoped with .Once()
+		// since handleListPeers (next subtest) calls it too. Distinct from
+		// list_orders' own (defaultListLimit, 0) expectation below, since
+		// summaryListLimit != defaultListLimit.
+		mockStore.On("ListLsps1Orders", 1000, 0).Return([]*common.Lsps1Order{}, nil)
+		mockLnd.On("GetBlockHeight").Return(uint32(100), nil).Once()
+		mockLnd.On("ListPeers").Return([]*lightning.Peer{}, nil).Once()
+
 		req := &lsps.JsonRpcRequest{
 			Id:     json.RawMessage(`1`),
 			Method: "get_summary",
@@ -374,6 +390,9 @@ func TestDashboardService_RPC(t *testing.T) {
 		mockStore.On("ListLsps1Orders", 100, 0).Return([]*common.Lsps1Order{
 			{OrderId: "order1", OrderState: "CREATED"},
 		}, nil)
+		// order1's PeerId ("") doesn't match any peer from ListPeers, so
+		// handleListOrders falls back to GetNodeInfo to enrich it.
+		mockLnd.On("GetNodeInfo", "").Return(nil, fmt.Errorf("not found"))
 
 		req := &lsps.JsonRpcRequest{
 			Id:     json.RawMessage(`3`),
