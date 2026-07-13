@@ -36,7 +36,7 @@ number-soup and then get reorganized a second time.
 | Phase | Theme | Gate to proceed | Status |
 |---|---|---|---|
 | 0 | Contain live secret exposure | Secrets rotated, file untracked | ◐ Untracked; rotation + history purge still open |
-| 1 | Green the build + safety net | `go test ./... -race` passes in CI | ◐ T1-1..T1-3 done; T1-4 open |
+| 1 | Green the build + safety net | `go test ./... -race` passes in CI | ◐ T1-1..T1-3 done; T1-4, T1-5 open |
 | 2 | Fix defects on current structure | All P2 items merged w/ regression test | ☐ Not started |
 | 3 | Unit-test coverage buildout | Critical-four packages ≥70–80% | ☐ Not started |
 | 4 | YAML-driven integration tests | Runner + 3 seed scenarios merged | ☐ Not started |
@@ -166,6 +166,68 @@ now covers well) still has no direct test — doing so needs a full
 which is real scaffolding work, not a quick addition. Deferred rather than
 rushed; revisit before starting Phase 5/6, since those are the phases this
 item actually gates.
+
+### T1-5: Full CI/CD pipeline review & modernization
+**Severity:** Medium · **Depends on:** T1-3 (done — this extends it)
+
+**Finding:** Beyond "no CI ran tests at all" (T1-3), the two workflows that
+do exist have their own gaps worth a proper pass now that a real test
+pipeline exists to build on:
+
+- `release.yml` pins `go-version: '1.22'`, while `go.mod` requires `1.26.1`
+  — a real version drift, not just cosmetic (differs from `ci.yml`, which
+  correctly reads `go-version-file: go.mod`).
+- Docker image builds are only ever exercised inside `release.yml`
+  (`workflow_dispatch`, manual) — a broken `Dockerfile` or `Dockerfile.dev`
+  is invisible until someone manually cuts a release, not on the PR that
+  broke it.
+- No lint step in CI at all, despite `justfile` already having a `lint`
+  recipe (`golangci-lint run ./...`) that nothing calls.
+- No frontend CI — `justfile`'s `test-frontend`/`build-frontend` recipes
+  exist but nothing runs them on PRs touching `frontend/`.
+- Release is entirely manual (`workflow_dispatch`) and gated only on a
+  `releasenotes/${VERSION}.md` file existing — there's a changelog
+  convention already in place (`releasenotes/*.md` + `VERSION`), but no
+  automation ties a merged changelog entry to an actual release.
+
+**Scope of work:**
+1. **Fix the version drift.** Point `release.yml` at `go-version-file:
+   go.mod` too, so CI and release always build with the same toolchain
+   `go.mod` declares — this class of drift is exactly what caused F-3/F-4
+   and the itest/lntest `bitcoin.*` vs `flokicoin.*` flag confusion found
+   during the earlier review.
+2. **Split pipelines by purpose, not by copy-paste** — a fast PR/diff
+   pipeline (build, vet, unit tests, lint — target under a few minutes,
+   blocks merge) versus a heavier pipeline (Docker image build validation,
+   itest/devnet-backed integration tests from Phase 4) that can run on
+   `main` and on release tags without slowing down every PR.
+3. **Validate Docker builds on every PR** that touches `Dockerfile`,
+   `Dockerfile.dev`, `go.mod`, or `go.sum` — at minimum `docker build` for
+   both, ideally using the `test/devnet` sibling-checkout build pattern as
+   a template for caching. Catches breakage before release time, not
+   during it.
+4. **Wire up lint and frontend CI** using the existing `justfile` recipes
+   rather than inventing new ones — `just lint`, `just test-frontend`,
+   `just build-frontend`.
+5. **Changelog-driven auto-release.** Formalize what `release.yml`
+   currently checks manually: on merge to `main`, detect whether `VERSION`
+   changed and `releasenotes/${VERSION}.md` exists, and if so trigger the
+   existing release pipeline automatically instead of requiring a manual
+   `workflow_dispatch`. Keep the changelog file as the source of truth
+   (human-written release notes gating the release), just remove the
+   manual trigger step once that file lands.
+6. **Docker build best practices pass** while touching these files:
+   multi-stage build caching (buildx cache-from/cache-to, already used
+   ad-hoc in `test/devnet`'s images), pinned base image digests rather
+   than floating tags, and a basic image vulnerability scan (e.g. `trivy`)
+   as a non-blocking CI report to start.
+
+**Acceptance criteria:** PR pipeline (build/vet/test/lint) completes in a
+few minutes and blocks merge on failure; a broken Dockerfile fails on the
+PR that broke it, not at release time; a merged changelog entry with a
+bumped `VERSION` triggers a release without a human clicking
+`workflow_dispatch`; `go-version` is declared in exactly one place
+(`go.mod`) across all workflows.
 
 ---
 
