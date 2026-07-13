@@ -35,8 +35,8 @@ number-soup and then get reorganized a second time.
 
 | Phase | Theme | Gate to proceed | Status |
 |---|---|---|---|
-| 0 | Contain live secret exposure | Secrets rotated, file untracked | ☐ Not started |
-| 1 | Green the build + safety net | `go test ./... -race` passes in CI | ☐ Not started |
+| 0 | Contain live secret exposure | Secrets rotated, file untracked | ◐ Untracked; rotation + history purge still open |
+| 1 | Green the build + safety net | `go test ./... -race` passes in CI | ◐ T1-1..T1-3 done; T1-4 open |
 | 2 | Fix defects on current structure | All P2 items merged w/ regression test | ☐ Not started |
 | 3 | Unit-test coverage buildout | Critical-four packages ≥70–80% | ☐ Not started |
 | 4 | YAML-driven integration tests | Runner + 3 seed scenarios merged | ☐ Not started |
@@ -71,7 +71,7 @@ placeholders:
    needs reissuing (it's the LND gRPC cert — rotate if it was generated
    specifically for this deployment).
 3. `git rm --cached data/nodes.prod.yaml` and commit — stops future tracking;
-   file remains on disk locally.
+   file remains on disk locally. **Done** (commit `447dd14`).
 4. Scrub history with `git filter-repo` (preferred) or BFG Repo-Cleaner to
    remove the file from all past commits. Coordinate force-push with anyone
    else who has a clone (their clones will need to be re-fetched/rebased).
@@ -106,6 +106,10 @@ the shared-fee-model work in Phase 5.
 **Acceptance criteria:** `go test ./interceptor/...` passes; new pure function
 has its own table test covering the values above.
 
+**Status:** ✅ Done (commit `af77853`). Extracted `computeJitOutgoingAmount`,
+fixed the stale assertion, added a table test covering the minFee-floor
+branch that had no prior coverage.
+
 ### T1-2: Repair `dashboard` suite (root cause of F-4)
 **Severity:** High (blocking) · **Location:** `dashboard/service_test.go:349` vs `dashboard/service.go:812`
 
@@ -115,6 +119,11 @@ has its own table test covering the values above.
 missing expectation returning a realistic `*lightning.WalletBalanceResult`.
 
 **Acceptance criteria:** `go test ./dashboard/...` passes with no panic.
+
+**Status:** ✅ Done (commit `9e99139`). Turned out to be four layers of the
+same drift, each masked by the previous panic — also needed
+`ListLsps1Orders`, `GetBlockHeight`/`ListPeers`, and `GetNodeInfo`
+expectations before the full suite went green.
 
 ### T1-3: Stand up CI running the full suite with the race detector
 **Severity:** High (blocking)
@@ -127,6 +136,11 @@ fail CI is why F-3/F-4 went unnoticed.
 
 **Acceptance criteria:** a PR that reintroduces either T1-1 or T1-2's bug
 fails CI.
+
+**Status:** ✅ Done (commit `4785220`, `.github/workflows/ci.yml`). There was
+no test-running CI at all before this — only manual release/promote
+workflows — which is the structural reason F-3/F-4 went unnoticed. itest
+is excluded from this job (needs external binaries/docker); see Phase 4.
 
 ### T1-4: Characterization tests for the two money paths
 **Severity:** High (blocking for Phase 5/6)
