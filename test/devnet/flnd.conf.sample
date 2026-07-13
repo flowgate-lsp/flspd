@@ -1,0 +1,31 @@
+; flnd dev config for the flspd integration-test devnet. Shared template
+; for every flnd-<role> instance (lsp/client/payer) — the container-internal
+; ports are the same for each; only the host-side port mapping in
+; docker-compose.yml differs per role. Copied to data/flnd-<role>/flnd.conf
+; on first ./setup.sh.
+;
+; Connects via neutrino (light client, P2P) to the devnet's own private
+; lokid regtest chain — no bitcoind/bitcoin-core involved anywhere. This
+; is the same chain-backend mode flspd's own single-instance dev flnd
+; already uses against real mainnet (see ../../data/flnd/flnd.conf.sample);
+; here it just points at a private regtest peer instead.
+
+flokicoin.regtest=true
+flokicoin.node=neutrino
+neutrino.connect=chain:25212
+
+tlsextraip=0.0.0.0
+tlsextradomain=localhost
+tlsautorefresh=true
+
+rpclisten=0.0.0.0:10009
+restlisten=0.0.0.0:8080
+listen=0.0.0.0:9735
+
+; Disposable devnet wallet, no funds worth protecting — never do this
+; against a real node.
+noseedbackup=true
+
+[protocol]
+protocol.option-scid-alias=true
+protocol.zero-conf=true

@@ -1,0 +1,79 @@
+services:
+  # Private, disposable regtest chain for integration testing — lokid
+  # (go-flokicoin's own full node daemon), not bitcoin-core. Built from
+  # source against the sibling flokiorg/go-flokicoin checkout.
+  chain:
+    build:
+      context: .
+      dockerfile: lokid.dev.Dockerfile
+      additional_contexts:
+        gflc: ../../../../flokiorg/go-flokicoin
+    container_name: flspd-devnet-chain
+    restart: unless-stopped
+    volumes:
+      - ./data/chain:/root/.lokid
+    command: ["--configfile=/root/.lokid/lokid.conf"]
+    ports:
+      - "${DEVNET_CHAIN_RPC_PORT:-19001}:25216"
+      - "${DEVNET_CHAIN_P2P_PORT:-19002}:25212"
+    networks:
+      - flspd-devnet
+
+  # Named flnd roles for realistic LSP scenarios: an LSP node, a client
+  # that buys inbound liquidity / JIT channels, and a third-party payer
+  # to exercise multi-hop/MPP forwarding. Copy one of these blocks to add
+  # another peer (e.g. an offline-peer test) — just give it its own
+  # container_name, data volume, and distinct host ports.
+  flnd-lsp:
+    build: &flnd-build
+      context: ../../../../flokiorg/flnd
+      dockerfile: dev.Dockerfile
+      additional_contexts:
+        walletd: ../../../../flokiorg/walletd
+        flokicoin-neutrino: ../../../../flokiorg/flokicoin-neutrino
+    container_name: flspd-devnet-flnd-lsp
+    restart: unless-stopped
+    volumes:
+      - ./data/flnd-lsp:/root/.flnd
+    command: ["--configfile=/root/.flnd/flnd.conf"]
+    ports:
+      - "${DEVNET_LSP_RPC_PORT:-20001}:10009"
+      - "${DEVNET_LSP_P2P_PORT:-20011}:9735"
+    depends_on:
+      - chain
+    networks:
+      - flspd-devnet
+
+  flnd-client:
+    build: *flnd-build
+    container_name: flspd-devnet-flnd-client
+    restart: unless-stopped
+    volumes:
+      - ./data/flnd-client:/root/.flnd
+    command: ["--configfile=/root/.flnd/flnd.conf"]
+    ports:
+      - "${DEVNET_CLIENT_RPC_PORT:-20002}:10009"
+      - "${DEVNET_CLIENT_P2P_PORT:-20012}:9735"
+    depends_on:
+      - chain
+    networks:
+      - flspd-devnet
+
+  flnd-payer:
+    build: *flnd-build
+    container_name: flspd-devnet-flnd-payer
+    restart: unless-stopped
+    volumes:
+      - ./data/flnd-payer:/root/.flnd
+    command: ["--configfile=/root/.flnd/flnd.conf"]
+    ports:
+      - "${DEVNET_PAYER_RPC_PORT:-20003}:10009"
+      - "${DEVNET_PAYER_P2P_PORT:-20013}:9735"
+    depends_on:
+      - chain
+    networks:
+      - flspd-devnet
+
+networks:
+  flspd-devnet:
+    driver: bridge

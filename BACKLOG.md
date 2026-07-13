@@ -306,6 +306,17 @@ codec, NIP-98 valid/expired/tampered (F-7).
 
 ## Phase 4 — YAML-driven integration tests
 
+### T4-0: Devnet backing infrastructure (done)
+`test/devnet/` — a persistent, inspectable, native-Flokicoin regtest
+network (`lokid` + three named `flnd` roles: lsp/client/payer, connected
+via neutrino — no bitcoin-core anywhere) for interactive testing and for
+backing the scenario runner below. Distinct from `itest/lntest`'s own
+ephemeral subprocess-based regtest miner (which uses literal `bitcoind`
+and is fine for CI, but isn't the native chain and isn't left running
+between test runs). See `test/devnet/README.md`. Verified working
+end-to-end: all three roles connect, sync, and can be funded via
+`./collect-addresses.sh` + `./generate.sh`.
+
 ### T4-1: Generic scenario runner
 Add `itest/scenarios/` + `itest/runner_test.go` that globs
 `scenarios/*.yaml`, decodes into a typed `Scenario` struct (unknown keys are
@@ -345,19 +356,22 @@ safe to commit as a real example, and directly prevents a recurrence of
 SEC-1.
 
 ### T5-2: One unit at the operator surface
-Amounts in `sats` everywhere at the config/API boundary (convert to mloki
-internally); fees as `%` + floor `sats`; routing as `ppm` + `base_sats`.
-Retire `permyriad` and the bare `0.000001` fraction from anything a human
-edits directly.
+Amounts in `loki` everywhere at the config/API boundary (flspd's native
+base unit — 1 FLC = 100,000,000 loki, converting to mloki internally
+where the code already does); fees as `%` + floor `loki`; routing as
+`ppm` + `base_loki`. Retire `permyriad` and the bare `0.000001` fraction
+from anything a human edits directly. **flspd is Flokicoin, not Bitcoin —
+never introduce `sats`/`BTC` naming here or anywhere else in the config,
+docs, or code; the unit names are `loki` and `FLC`.**
 
 ### T5-3: One shared fee model
 Confirm F-5's unified fee function (landed in Phase 2) is the single
-implementation referenced by the new `opening_fee: {rate_percent, min_sats}`
+implementation referenced by the new `opening_fee: {rate_percent, min_loki}`
 config block — no parallel fee math anywhere.
 
 ### T5-4: Derived channel-size bounds
 Replace the six independent LSPS1/JIT min/max balance fields with one
-`channel_size: {min_sats, max_sats, padding_sats}` block; derive the
+`channel_size: {min_loki, max_loki, padding_loki}` block; derive the
 protocol-specific bounds from it with validated defaults.
 
 ### T5-5: Risk profile presets
@@ -417,7 +431,8 @@ in `rpc/`, `notifications/`).
 ### T6-5: Relocate samples, deploy, frontend
 `configs/examples/` for the sample YAML/env files (out of repo root);
 `deploy/` for Dockerfiles + compose; `web/` for the frontend; `test/`
-housing both `itest/` and the new `scenarios/` from Phase 4.
+housing `itest/`, the new `scenarios/` from Phase 4, and `devnet/`
+(already landed at `test/devnet/` — see T4-0).
 
 **Acceptance criteria:** tree matches the target layout from the structure
 report; `go build ./...`, `go vet ./...`, and the full test suite pass after

@@ -1,0 +1,29 @@
+; lokid dev config for the flspd integration-test devnet. Copied to
+; data/chain/lokid.conf on first `./setup.sh`.
+;
+; This is a disposable, private regtest chain. Credentials below are
+; throwaway devnet-only values — never used for anything real.
+;
+; IMPORTANT: lokid unconditionally wipes its regtest database on every
+; startup (see removeRegressionDB in go-flokicoin/lokid.go — this is
+; inherited btcd-family behavior, unlike bitcoind which persists regtest
+; state across restarts). Do not restart the `chain` container mid-session
+; expecting to keep mined blocks/balances; bring the whole devnet up once
+; per session and use ./generate.sh for on-demand block production
+; instead of restarting anything.
+
+regtest=1
+rpcuser=devnet
+rpcpass=devnet
+rpclisten=0.0.0.0:25216
+listen=0.0.0.0:25212
+notls=1
+nostalldetect=1
+
+; Filled in by ./collect-addresses.sh once the flnd nodes are up (one
+; miningaddr line per node). Setting these does NOT start mining by
+; itself — call ./generate.sh <n> afterwards to mine on demand via the
+; `generate` RPC, same as itest's own regtest miner does.
+; miningaddr=REPLACE_WITH_FLND_LSP_ADDRESS
+; miningaddr=REPLACE_WITH_FLND_CLIENT_ADDRESS
+; miningaddr=REPLACE_WITH_FLND_PAYER_ADDRESS
