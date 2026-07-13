@@ -69,16 +69,50 @@ placeholders:
 2. **Rotate all four**: regenerate the LSP `flspdPrivateKey`, bake a fresh
    LND macaroon, reissue the auth token, and confirm whether the TLS cert
    needs reissuing (it's the LND gRPC cert — rotate if it was generated
-   specifically for this deployment).
+   specifically for this deployment). **Verified procedure below** (tested
+   against a real flnd instance in `test/devnet` before writing this down —
+   the first two approaches tried did *not* work as expected, see notes).
 3. `git rm --cached data/nodes.prod.yaml` and commit — stops future tracking;
    file remains on disk locally. **Done** (commit `447dd14`).
 4. Scrub history with `git filter-repo` (preferred) or BFG Repo-Cleaner to
    remove the file from all past commits. Coordinate force-push with anyone
    else who has a clone (their clones will need to be re-fetched/rebased).
+   **Blocked pending explicit operator sign-off** — this rewrites all commit
+   hashes and requires a force-push to a shared GitHub remote
+   (`flowgate-lsp/flspd`); the harness's own safety classifier refused to
+   run `git filter-repo` on a general "proceed with everything" instruction,
+   correctly treating history rewrites as needing their own explicit
+   approval separate from other work. `git-filter-repo` is installed and
+   ready; the command is `git filter-repo --path data/nodes.prod.yaml
+   --invert-paths --force` (run from a fresh clone, or with `--force` on the
+   existing one — take a `git bundle create backup.bundle --all` first
+   regardless). Re-add `origin` afterward (filter-repo strips remotes by
+   design) before force-pushing.
 5. Add a pre-commit or CI check that fails the build if any file under
    `data/` (or any path matching common secret patterns) is staged for commit,
    so this class of mistake can't silently recur before Phase 5 lands the
    structural fix.
+
+**Verified LND-macaroon rotation procedure** (tested on a disposable devnet
+`flnd` node, not assumed from docs — flnd is an LND fork and some
+LND-family macaroon mechanics are non-obvious):
+- ~~`flncli bakemacaroon --root_key_id=<new-id> ...` then `flncli
+  deletemacaroonid 0`~~ does **not** work: flnd explicitly refuses
+  (`deleting the default root key ID 0 is not allowed`) — root key 0 (what
+  the default `admin.macaroon` uses) can never be individually revoked.
+- ~~Delete only `macaroons.db` and let flnd regenerate~~ does **not** fully
+  work either: flnd only writes `admin.macaroon` if that file is *missing*.
+  Deleting just `macaroons.db` produces a fresh root key but leaves the old
+  macaroon file's signature mismatched against it (`signature mismatch
+  after caveat verification`) — not a working replacement.
+- **What actually works**: stop `flnd`, delete **both**
+  `data/chain/flokicoin/<network>/macaroons.db` *and* every `*.macaroon`
+  file in that same directory, then restart. flnd generates a brand new
+  root key and a fresh, internally-consistent `admin.macaroon` (and the
+  other service macaroons) on startup. Every macaroon derived from the old
+  root key — including the leaked one — stops verifying immediately.
+  Update `nodes.yaml`'s `flnd.macaroon` with the new file's hex content and
+  restart flspd.
 
 **Acceptance criteria:** old key/macaroon/token are confirmed non-functional
 against the live node; `git log --all -- data/nodes.prod.yaml` returns nothing
