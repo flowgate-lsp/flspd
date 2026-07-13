@@ -157,6 +157,16 @@ table-driven tests in Phase 3.
 **Acceptance criteria:** at least one characterization test exists per
 public entrypoint of `Interceptor` and `Lsps1SettlementService`.
 
+**Status:** ◐ Partially covered, not done. `Lsps1SettlementService`'s state
+transitions are already reasonably pinned by the existing
+`TestProcessSettledInvoice_*` tests in `lsps/settlement_service_test.go`.
+`Interceptor.Intercept()` itself (as opposed to `resolvePayment`, which T1-1
+now covers well) still has no direct test — doing so needs a full
+`lightning.Client` + `notifications.Notifier` + `history.Store` mock set,
+which is real scaffolding work, not a quick addition. Deferred rather than
+rushed; revisit before starting Phase 5/6, since those are the phases this
+item actually gates.
+
 ---
 
 ## Phase 2 — Fix defects that exist on today's structure
