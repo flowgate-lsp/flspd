@@ -40,7 +40,7 @@ number-soup and then get reorganized a second time.
 | 2 | Fix defects on current structure | All P2 items merged w/ regression test | ✅ F-1, F-2, C-1, C-2, C-3, F-5, F-7, F-9, F-10, F-11, F-12, F-13 done; F-8 (medium) remains |
 | 3 | Unit-test coverage buildout | Critical-four packages ≥70–80% | ◐ In progress: F-5, F-6, F-7, F-9, F-12, F-13 done, T3-2/T3-3/T3-4/T3-5/T3-6 done; interceptor 38.9%, lsps 49.4%, postgresql 69.1%, notifications 54.3%, lnd 4.7%, common 36.0%, config 93.4%, lightning 86.9%, auth 76.5% |
 | 4 | YAML-driven integration tests | Runner + 3 seed scenarios merged | ◐ Foundation built + proven (Devnet/FlspdProcess/LSPS2 client, 2 more real bugs found — F-10 additions); YAML schema/runner not started; scenario 1's Go-level proof blocked on a devnet gossip-propagation gap, see T4-1 |
-| 5 | Config model + secrets-by-reference | New model shipped behind compat shim | ◐ T5-1..T5-5 done (secrets-by-reference, unit/fee/channel-size model, profiles); T5-6 (CLI tooling), T5-7 (Settings.tsx re-skin) not started |
+| 5 | Config model + secrets-by-reference | New model shipped behind compat shim | ◐ T5-1..T5-6 done (secrets-by-reference, unit/fee/channel-size model, profiles, CLI tooling); T5-7 (Settings.tsx re-skin) not started |
 | 6 | Repo structure / arbo migration | Tree matches target layout, build green throughout | ☐ Not started |
 | — | Performance backlog (parallel, non-blocking) | — | ☐ Not started |
 
@@ -1012,6 +1012,25 @@ Add `flspd config check` (validate, human-readable errors), `flspd config
 show --effective` (print the fully-resolved config, nothing hidden), and
 `flspd config explain fees` (plain-language fee example for a given channel
 size).
+
+**Status:** ✅ Done (commit `8a5ee00`). All three are config-file-only
+(no Postgres/flnd connection), sharing `loadNodeConfigs` with the daemon
+itself (extracted out of `runLspd` so there's one loading path, not two
+that could drift). `check` runs full `Validate()` *and* attempts to
+resolve all three `SecretRef` fields — Validate() deliberately doesn't
+touch those (see `config/secretref.go`), so this is the only place a
+missing `from_env` var or unreadable `from_file` path gets caught before
+the daemon itself starts. `show` prints the fully-expanded config as
+YAML — tiered blocks and profile defaults applied, secrets shown in
+their reference form (never resolved/printed). Writing `show`'s test
+surfaced a real bug: `secretRefYAML`'s yaml tags were missing
+`omitempty`, so every ref marshaled with both `from_env` and `from_file`
+present (one empty) — cosmetically misleading for exactly the tool meant
+to give operators a trustworthy view of their config, even though it
+round-tripped fine. Fixed, and strengthened the existing round-trip test
+(which only checked post-parse struct equality) to check the raw
+marshaled text too. `explain fees` reuses `lsps.ComputeOpeningFee`
+(F-5) directly.
 
 ### T5-7: Re-skin `Settings.tsx` to the tiered model
 Connect / Business policy / Advanced cards per the config-UX report,
