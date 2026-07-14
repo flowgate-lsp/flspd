@@ -37,8 +37,8 @@ number-soup and then get reorganized a second time.
 |---|---|---|---|
 | 0 | Contain live secret exposure | Untracked, purged, guarded | ✅ Done — confirmed test data, no rotation needed |
 | 1 | Green the build + safety net | `go test ./... -race` passes in CI | ◐ T1-1..T1-3 done; T1-4, T1-5 open |
-| 2 | Fix defects on current structure | All P2 items merged w/ regression test | ✅ F-1, F-2, C-1, C-2, C-3, F-7, F-9, F-10, F-11, F-12 done; F-5, F-8 (medium) remain |
-| 3 | Unit-test coverage buildout | Critical-four packages ≥70–80% | ◐ In progress: F-6, F-7, F-9, F-12 done, T3-2/T3-4/T3-5/T3-6 done; interceptor 38.9%, lsps 49.0%, postgresql 54.6%, notifications 54.3%, lnd 4.7%, common 36.0%, config 89.3%, lightning 86.9%, auth 76.5% |
+| 2 | Fix defects on current structure | All P2 items merged w/ regression test | ✅ F-1, F-2, C-1, C-2, C-3, F-7, F-9, F-10, F-11, F-12, F-13 done; F-5, F-8 (medium) remain |
+| 3 | Unit-test coverage buildout | Critical-four packages ≥70–80% | ◐ In progress: F-6, F-7, F-9, F-12, F-13 done, T3-2/T3-3/T3-4/T3-5/T3-6 done; interceptor 38.9%, lsps 49.0%, postgresql 69.1%, notifications 54.3%, lnd 4.7%, common 36.0%, config 89.3%, lightning 86.9%, auth 76.5% |
 | 4 | YAML-driven integration tests | Runner + 3 seed scenarios merged | ◐ Foundation built + proven (Devnet/FlspdProcess/LSPS2 client, 2 more real bugs found — F-10 additions); YAML schema/runner not started; scenario 1's Go-level proof blocked on a devnet gossip-propagation gap, see T4-1 |
 | 5 | Config model + secrets-by-reference | New model shipped behind compat shim | ☐ Not started |
 | 6 | Repo structure / arbo migration | Tree matches target layout, build green throughout | ☐ Not started |
@@ -558,6 +558,43 @@ unconditional-`break` code.
 
 ---
 
+### F-13: flspd_revenue_cli's revenue report generation was 100% broken
+**Severity:** High · **Location:** `postgresql/revenue_cli_store.go` — all
+three query methods (`GetForwards`, `GetOpenChannelHtlcs`,
+`ExportTokenForwardsForExternalNode`)
+
+**Scope of work:** Every query method `cmd/flspd_revenue_cli` calls had a
+raw SQL error that fires unconditionally, not an edge case — this CLI tool
+could never have produced a report against the real schema, ever:
+- `GetForwards` selected `h.peerid_in`/`h.peerid_out` and `GetOpenChannelHtlcs`
+  selected `h.peerid`, both from `forwarding_history` — but that table has
+  no peerid columns at all (only `chanid_in`/`chanid_out`; peerid only
+  exists on `channels`, reachable through the join already present in both
+  queries).
+- `ExportTokenForwardsForExternalNode`'s `SELECT * FROM (... UNION ALL ...)`
+  subquery had no alias, which Postgres rejects outright with "subquery in
+  FROM must have an alias".
+
+`flspd_revenue_cli` is a separate CLI binary from the daemon, has no test
+coverage, and isn't exercised by CI, so this SQL — whether it was ever
+schema-matched to begin with, or the schema changed out from under it —
+plausibly went unexecuted since it was written.
+
+**Status:** ✅ Fixed (commit `7796cc2`). `GetForwards` now selects
+`c_in.peerid`/`c_out.peerid`; `GetOpenChannelHtlcs`'s inner subquery selects
+`c.peerid`; the UNION ALL subquery got an alias. Found and confirmed via
+revert-and-verify while writing this file's first-ever test coverage
+against a real Postgres container (`postgresql/revenue_cli_store_test.go`,
+5 cases) — 4 of 5 fail with these exact SQL errors against the original
+code. Also fixed a test-isolation issue this surfaced: three
+`history_store_test.go` forward fixtures used orphaned SCIDs with "now"
+timestamps, which spuriously broke `sanityCheck`'s nodeid-unscoped query
+for any other "now"-windowed test in the package — moved to fixed past
+dates. `postgresql` coverage: 54.6% → 69.1%. This closes out T3-3 in
+full — Phase 3's postgresql scope is now done.
+
+---
+
 ## Phase 3 — Unit-test coverage buildout
 
 Ordered by blast radius, per the original audit. Target: **70–80% on the
@@ -602,10 +639,10 @@ Introduce a container-backed store test harness (reuse itest's
 (F-2), SCID int64/uint64 round-trips, `ExpireStaleOrders`, reserved-liquidity
 SQL.
 
-**Status:** ◐ In progress (commits `b4ff434`, `589235a`, `6dbcbf2`,
-`4100095`, `ded3998`). Own harness landed (`TestMain` + disposable
+**Status:** ✅ Done (commits `b4ff434`, `589235a`, `6dbcbf2`, `4100095`,
+`ded3998`, `7796cc2`). Own harness landed (`TestMain` + disposable
 postgres container, not itest's — keeps postgresql/ independently
-testable without an itest dependency). Done: `PaymentInfo` null-params
+testable without an itest dependency). Covered: `PaymentInfo` null-params
 (F-2), CAS atomicity at the SQL level (F-1, 20 concurrent goroutines on
 one real row), `GetReservedLiquidity`, `ExpireStaleOrders`,
 `PostgresOpeningStore`'s LSPS1 order registry (register/get/list/count
@@ -617,15 +654,16 @@ pending/backoff transitions), the SCID int64/uint64 sign-flip round-trip
 (a bit-63-set SCID through both the LSPS2 buy-registration write path and
 `InterceptStore.GetLsps2Order`'s previously-uncovered read path — the
 existing round-trip test's own comment claimed to cover this but used a
-fixture value that never actually set the sign bit), and `history_store.go`'s
+fixture value that never actually set the sign bit), `history_store.go`'s
 CopyFrom-based write paths in full (`UpdateChannels` insert-then-upsert
 incl. nil-scid and first_seen-preserved-on-upsert, `InsertForwards`
 DO-NOTHING vs `UpdateForwards` DO-UPDATE on conflict, `FetchLndForwardOffset`,
 `AddOpenChannelHtlc`) — this is also where F-9's outpoint-byte-order fix
-lives, now with direct coverage instead of only pure-function tests.
-Only remaining gap: `revenue_cli_store.go` (the revenue-export CLI's
-reads — complex multi-table JOIN SQL, no bugs suspected, lower urgency
-than the write-path coverage above). `postgresql` coverage: 11.7% → 54.6%.
+lives, now with direct coverage instead of only pure-function tests —
+and `revenue_cli_store.go`, which turned out to be the highest-value find
+in this whole subtask: all three of its query methods were completely
+broken (F-13), never caught because `flspd_revenue_cli` had zero test
+coverage and isn't exercised by CI. `postgresql` coverage: 11.7% → 69.1%.
 
 ### T3-4: lnd adapter mapping tests
 Pure mappers (`mapScidsFromChannel`, `extractChannelPoint`, invoice-state /
