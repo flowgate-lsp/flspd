@@ -38,7 +38,7 @@ number-soup and then get reorganized a second time.
 | 0 | Contain live secret exposure | Untracked, purged, guarded | ✅ Done — confirmed test data, no rotation needed |
 | 1 | Green the build + safety net | `go test ./... -race` passes in CI | ◐ T1-1..T1-3 done; T1-4, T1-5 open |
 | 2 | Fix defects on current structure | All P2 items merged w/ regression test | ✅ F-1, F-2, C-1, C-2, C-3, F-7, F-9 done; F-5, F-8 (medium) remain |
-| 3 | Unit-test coverage buildout | Critical-four packages ≥70–80% | ◐ In progress: F-6, F-7, F-9 done, T3-4/T3-6 done; interceptor 12.2%, lsps 45.9%, postgresql 35.8%, notifications 23.2%, lnd 4.7%, common 36.0%, config 89.3%, lightning 86.9%, auth 76.5% |
+| 3 | Unit-test coverage buildout | Critical-four packages ≥70–80% | ◐ In progress: F-6, F-7, F-9 done, T3-4/T3-6 done; interceptor 38.9%, lsps 45.9%, postgresql 35.8%, notifications 23.2%, lnd 4.7%, common 36.0%, config 89.3%, lightning 86.9%, auth 76.5% |
 | 4 | YAML-driven integration tests | Runner + 3 seed scenarios merged | ☐ Not started |
 | 5 | Config model + secrets-by-reference | New model shipped behind compat shim | ☐ Not started |
 | 6 | Repo structure / arbo migration | Tree matches target layout, build green throughout | ☐ Not started |
@@ -476,9 +476,19 @@ not-found, probe detection) and the fee/capacity math in `openChannel`
 (reuse the pure function from T1-1/F-5). Fake `InterceptStore` +
 `lightning.Client`; assert `InterceptResult` actions and failure codes.
 
-**Status:** ◐ In progress. `resolvePayment` well covered by T1-1's table
-tests; `Interceptor.Intercept()` itself still untested (same scaffolding
-gap as T1-4). `interceptor` package coverage: 12.2%.
+**Status:** ◐ In progress (commits `258c5e2`, `78cd852`). `resolvePayment`
+well covered by T1-1's table tests. Added: a full `lightning.Client` +
+`notifications.Notifier` testify mock, real `openChannel` coverage
+(network/business floor rejections, JIT vs non-JIT routing-policy and
+zero-conf selection, fee-estimator-failure fallback, client-error
+propagation — replacing the old `TestOpenChannel_CapacityLogic` test that
+only re-derived the formula inline rather than calling the real method),
+`notifyAndWait`'s full offline/reconnect state machine, both
+`discord.go` webhook senders, and `NewInterceptHandler`'s pubkey decode.
+`Interceptor.Intercept()` itself (the streaming HTLC entrypoint) is still
+untested — same scaffolding gap as T1-4, appropriately Phase 4's territory
+since it needs devnet-realistic HTLC flows, not deeper mocking.
+`interceptor` package coverage: 12.2% → 38.9%.
 
 ### T3-2: lsps settlement — lift from 44.6%
 Cover `recoverStuckOrders`, `recoverSettledCreatedOrders`, and the F-1
