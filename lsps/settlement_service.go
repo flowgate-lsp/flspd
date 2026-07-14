@@ -141,13 +141,23 @@ func (s *Lsps1SettlementService) processSettledInvoice(update *lightning.Invoice
 		return
 	}
 
-	// Update order state to PAID
-	err = s.openingStore.UpdateLsps1OrderState(order.OrderId, string(Lsps1OrderStatePaid), string(Lsps1OrderStatePaid))
+	// Update order state to PAID. This is a compare-and-set on the CREATED
+	// state we just observed: if a concurrent writer (e.g. the startup
+	// recovery sweep in recoverSettledCreatedOrders) already transitioned
+	// this order, updated is false and we must not proceed — otherwise
+	// both paths would call openChannelForOrder for the same order (F-1).
+	updated, err := s.openingStore.UpdateLsps1OrderState(order.OrderId, string(Lsps1OrderStatePaid), string(Lsps1OrderStatePaid), string(Lsps1OrderStateCreated))
 	if err != nil {
 		log.Error().
 			Err(err).
 			Str("order_id", order.OrderId).
 			Msg("LSPS1 Settlement: Failed to update order state")
+		return
+	}
+	if !updated {
+		log.Info().
+			Str("order_id", order.OrderId).
+			Msg("LSPS1 Settlement: Order already transitioned out of CREATED by a concurrent writer, skipping")
 		return
 	}
 
@@ -248,7 +258,7 @@ func (s *Lsps1SettlementService) openChannelForOrder(order *common.Lsps1Order) {
 		log.Error().Err(err).Str("order_id", order.OrderId).Msg("LSPS1 Settlement: Failed to open channel")
 
 		// Update state to FAILED
-		dbErr := s.openingStore.UpdateLsps1OrderState(order.OrderId, string(Lsps1OrderStateFailed), string(Lsps1OrderStatePaid))
+		_, dbErr := s.openingStore.UpdateLsps1OrderState(order.OrderId, string(Lsps1OrderStateFailed), string(Lsps1OrderStatePaid), string(Lsps1OrderStatePaid))
 		if dbErr != nil {
 			log.Error().Err(dbErr).Str("order_id", order.OrderId).Msg("LSPS1 Settlement: Failed to update order state to FAILED")
 		}
@@ -276,7 +286,7 @@ func (s *Lsps1SettlementService) openChannelForOrder(order *common.Lsps1Order) {
 		log.Error().Err(err).Str("order_id", order.OrderId).Msg("LSPS1 Settlement: Failed to update order funding details")
 	}
 
-	err = s.openingStore.UpdateLsps1OrderState(order.OrderId, string(Lsps1OrderStateCompleted), string(Lsps1OrderStatePaid))
+	_, err = s.openingStore.UpdateLsps1OrderState(order.OrderId, string(Lsps1OrderStateCompleted), string(Lsps1OrderStatePaid), string(Lsps1OrderStatePaid))
 	if err != nil {
 		log.Error().Err(err).Str("order_id", order.OrderId).Msg("LSPS1 Settlement: Failed to update order state to COMPLETED")
 	}
@@ -389,11 +399,21 @@ func (s *Lsps1SettlementService) recoverSettledCreatedOrders() {
 // processSettledInvoice so that recoverSettledCreatedOrders can reuse it
 // without needing the full InvoiceUpdate.
 func (s *Lsps1SettlementService) processSettledOrder(order *common.Lsps1Order) {
-	err := s.openingStore.UpdateLsps1OrderState(order.OrderId, string(Lsps1OrderStatePaid), string(Lsps1OrderStatePaid))
+	// Compare-and-set on CREATED, mirroring processSettledInvoice: this is
+	// the other side of the F-1 race, where the live SubscribeInvoices
+	// event and this startup recovery sweep can both observe the same
+	// order as CREATED. Only the winner proceeds to open a channel.
+	updated, err := s.openingStore.UpdateLsps1OrderState(order.OrderId, string(Lsps1OrderStatePaid), string(Lsps1OrderStatePaid), string(Lsps1OrderStateCreated))
 	if err != nil {
 		log.Error().Err(err).
 			Str("order_id", order.OrderId).
 			Msg("LSPS1 Settlement: Failed to update order state to PAID during recovery")
+		return
+	}
+	if !updated {
+		log.Info().
+			Str("order_id", order.OrderId).
+			Msg("LSPS1 Settlement: Order already transitioned out of CREATED by a concurrent writer, skipping recovery")
 		return
 	}
 

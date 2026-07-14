@@ -109,7 +109,7 @@ func TestMatrixProcessSettledInvoice(t *testing.T) {
 
 			// Setup State Update to PAID
 			if tt.expectStateUpdate {
-				mockStore.On("UpdateLsps1OrderState", tt.order.OrderId, string(Lsps1OrderStatePaid), string(Lsps1OrderStatePaid)).Return(nil)
+				mockStore.On("UpdateLsps1OrderState", tt.order.OrderId, string(Lsps1OrderStatePaid), string(Lsps1OrderStatePaid), string(Lsps1OrderStateCreated)).Return(true, nil)
 			}
 
 			// Setup Channel Opening Logic
@@ -130,7 +130,7 @@ func TestMatrixProcessSettledInvoice(t *testing.T) {
 					// Open Channel
 					if tt.openChannelError != nil {
 						mockClient.On("OpenChannel", mock.Anything).Return(nil, tt.openChannelError)
-						mockStore.On("UpdateLsps1OrderState", tt.order.OrderId, string(Lsps1OrderStateFailed), string(Lsps1OrderStatePaid)).Return(nil)
+						mockStore.On("UpdateLsps1OrderState", tt.order.OrderId, string(Lsps1OrderStateFailed), string(Lsps1OrderStatePaid), string(Lsps1OrderStatePaid)).Return(true, nil)
 					} else {
 						chanPoint := &wire.OutPoint{Hash: chainhash.Hash{}, Index: 0}
 						mockClient.On("OpenChannel", mock.Anything).Return(chanPoint, nil)
@@ -138,7 +138,7 @@ func TestMatrixProcessSettledInvoice(t *testing.T) {
 						// Completion Updates
 						if tt.expectCompletion {
 							mockStore.On("UpdateLsps1OrderFunding", tt.order.OrderId, mock.Anything, mock.Anything).Return(nil)
-							mockStore.On("UpdateLsps1OrderState", tt.order.OrderId, tt.expectedEndState, string(Lsps1OrderStatePaid)).Return(nil)
+							mockStore.On("UpdateLsps1OrderState", tt.order.OrderId, tt.expectedEndState, string(Lsps1OrderStatePaid), string(Lsps1OrderStatePaid)).Return(true, nil)
 						}
 					}
 				}

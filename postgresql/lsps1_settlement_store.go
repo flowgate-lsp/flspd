@@ -31,25 +31,31 @@ func (s *PostgresOpeningStore) GetLsps1OrderByPaymentInvoice(paymentInvoice stri
 	return &order, nil
 }
 
-// UpdateLsps1OrderState updates the order_state and payment_state of an LSPS1 order
-func (s *PostgresOpeningStore) UpdateLsps1OrderState(orderId string, newState string, newPaymentState string) error {
+// UpdateLsps1OrderState performs a compare-and-set update of order_state
+// and payment_state: the WHERE clause requires order_state to still equal
+// expectedCurrentState, so two concurrent writers racing to transition the
+// same order (e.g. a live settlement event vs. a startup recovery sweep,
+// see F-1) can't both succeed. The loser gets updated=false and must not
+// proceed with any side effect that assumes it won the transition.
+func (s *PostgresOpeningStore) UpdateLsps1OrderState(orderId string, newState string, newPaymentState string, expectedCurrentState string) (bool, error) {
 	result, err := s.pool.Exec(context.Background(),
-		`UPDATE lsps1.orders 
+		`UPDATE lsps1.orders
 		 SET order_state = $2, payment_state = $3
-		 WHERE order_id = $1`,
-		orderId, newState, newPaymentState)
+		 WHERE order_id = $1 AND order_state = $4`,
+		orderId, newState, newPaymentState, expectedCurrentState)
 
 	if err != nil {
 		log.Error().Err(err).Msgf("UpdateLsps1OrderState: failed to update order %s", orderId)
-		return err
+		return false, err
 	}
 
 	rowsAffected := result.RowsAffected()
 	if rowsAffected == 0 {
-		log.Warn().Msgf("UpdateLsps1OrderState: no rows updated for order %s", orderId)
+		log.Warn().Msgf("UpdateLsps1OrderState: no rows updated for order %s (expected current state %s did not match, or order not found)", orderId, expectedCurrentState)
+		return false, nil
 	}
 
-	return nil
+	return true, nil
 }
 
 // GetPaidLsps1Order finds the oldest PAID order for a client that hasn't been fulfilled yet

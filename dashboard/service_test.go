@@ -95,8 +95,9 @@ func (m *MockOpeningStore) GetAllPaidLsps1Orders() ([]*common.Lsps1Order, error)
 	return args.Get(0).([]*common.Lsps1Order), args.Error(1)
 }
 
-func (m *MockOpeningStore) UpdateLsps1OrderState(orderId string, newState string, newPaymentState string) error {
-	return m.Called(orderId, newState, newPaymentState).Error(0)
+func (m *MockOpeningStore) UpdateLsps1OrderState(orderId string, newState string, newPaymentState string, expectedCurrentState string) (bool, error) {
+	args := m.Called(orderId, newState, newPaymentState, expectedCurrentState)
+	return args.Bool(0), args.Error(1)
 }
 
 func (m *MockOpeningStore) UpdateLsps1OrderFunding(orderId string, fundingTxid string, fundingOutpoint int) error {

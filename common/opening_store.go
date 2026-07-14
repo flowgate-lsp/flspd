@@ -78,7 +78,14 @@ type OpeningStore interface {
 	GetAllPaidLsps1Orders() ([]*Lsps1Order, error)
 	GetAllCreatedLsps1Orders() ([]*Lsps1Order, error)
 	ListLsps1Orders(limit, offset int) ([]*Lsps1Order, error)
-	UpdateLsps1OrderState(orderId string, newState string, newPaymentState string) error
+	// UpdateLsps1OrderState performs a compare-and-set: it only applies
+	// newState/newPaymentState if the order's current order_state still
+	// equals expectedCurrentState. Returns updated=false (with a nil
+	// error) if another writer already moved the order out of
+	// expectedCurrentState — callers MUST check this and not proceed with
+	// side effects (like opening a channel) on a failed CAS, since it
+	// means a concurrent writer already handled this transition.
+	UpdateLsps1OrderState(orderId string, newState string, newPaymentState string, expectedCurrentState string) (updated bool, err error)
 	UpdateLsps1OrderFunding(orderId string, fundingTxid string, fundingOutpoint int) error
 	RegisterLsps5Webhook(webhook *Lsps5Webhook) error
 	GetLsps5Webhooks(clientNodeId string) ([]*Lsps5Webhook, error)
