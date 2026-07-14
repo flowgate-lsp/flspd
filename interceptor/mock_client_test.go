@@ -6,9 +6,45 @@ import (
 
 	"github.com/flokiorg/go-flokicoin/wire"
 	"github.com/flowgate-lsp/flspd/chain"
+	"github.com/flowgate-lsp/flspd/common"
 	"github.com/flowgate-lsp/flspd/lightning"
 	"github.com/stretchr/testify/mock"
 )
+
+// MockNotifier is a minimal testify mock of notifications.Notifier.
+type MockNotifier struct {
+	mock.Mock
+}
+
+func (m *MockNotifier) Notify(pubkey string, paymenthash string, nodePrivKey interface{}) (bool, error) {
+	args := m.Called(pubkey, paymenthash, nodePrivKey)
+	return args.Bool(0), args.Error(1)
+}
+
+func (m *MockNotifier) NotifyWebhookRegistered(pubkey string, webhook *common.Lsps5Webhook) bool {
+	args := m.Called(pubkey, webhook)
+	return args.Bool(0)
+}
+
+func (m *MockNotifier) NotifyOrderStateChanged(pubkey string, orderId string, state string, channelPoint string, errorMsg string) (bool, error) {
+	args := m.Called(pubkey, orderId, state, channelPoint, errorMsg)
+	return args.Bool(0), args.Error(1)
+}
+
+func (m *MockNotifier) NotifyExpirySoon(pubkey string, timeout int, nodePrivKey interface{}, paymentHash string) (bool, error) {
+	args := m.Called(pubkey, timeout, nodePrivKey, paymentHash)
+	return args.Bool(0), args.Error(1)
+}
+
+func (m *MockNotifier) NotifyLiquidityManagementRequest(pubkey string, nodePrivKey interface{}) (bool, error) {
+	args := m.Called(pubkey, nodePrivKey)
+	return args.Bool(0), args.Error(1)
+}
+
+func (m *MockNotifier) NotifyOnionMessageIncoming(pubkey string, nodePrivKey interface{}) (bool, error) {
+	args := m.Called(pubkey, nodePrivKey)
+	return args.Bool(0), args.Error(1)
+}
 
 // MockLightningClient is a minimal testify mock of the full lightning.Client
 // port, used to unit-test Interceptor methods (like openChannel) without a
