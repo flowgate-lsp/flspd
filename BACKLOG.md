@@ -37,8 +37,8 @@ number-soup and then get reorganized a second time.
 |---|---|---|---|
 | 0 | Contain live secret exposure | Untracked, purged, guarded | ✅ Done — confirmed test data, no rotation needed |
 | 1 | Green the build + safety net | `go test ./... -race` passes in CI | ◐ T1-1..T1-3 done; T1-4, T1-5 open |
-| 2 | Fix defects on current structure | All P2 items merged w/ regression test | ✅ F-1, F-2, C-1, C-2, C-3 done; F-5..F-8 (medium) remain |
-| 3 | Unit-test coverage buildout | Critical-four packages ≥70–80% | ◐ In progress: F-6 done; interceptor 12.2%, lsps 45.9%, postgresql 11.7%, notifications 23.2% |
+| 2 | Fix defects on current structure | All P2 items merged w/ regression test | ✅ F-1, F-2, C-1, C-2, C-3, F-9 done; F-5, F-7, F-8 (medium) remain |
+| 3 | Unit-test coverage buildout | Critical-four packages ≥70–80% | ◐ In progress: F-6, F-9 done; interceptor 12.2%, lsps 45.9%, postgresql 11.7%, notifications 23.2%, lnd 4.7%, common 36.0%, lightning 86.9% |
 | 4 | YAML-driven integration tests | Runner + 3 seed scenarios merged | ☐ Not started |
 | 5 | Config model + secrets-by-reference | New model shipped behind compat shim | ☐ Not started |
 | 6 | Repo structure / arbo migration | Tree matches target layout, build green throughout | ☐ Not started |
@@ -418,6 +418,39 @@ orders against actual on-chain/LND channel state, not just retry the open.
 **Acceptance criteria:** test simulating a DB write failure post-open,
 asserting the next recovery sweep reconciles the order to COMPLETED.
 
+### F-9: Outpoint byte-order bug — channel-sync path stored reversed txids
+**Severity:** High · **Location:** `lightning/outpoint.go` (`NewOutPointFromString`)
+
+**Scope of work:** `NewOutPointFromString` hex-decoded LND's display-order
+`ChannelPoint`/`FundingTxidStr` string straight into `chainhash.Hash.SetBytes`
+without reversing it — `chainhash.Hash.String()` byte-reverses for display,
+but `SetBytes` does not reverse on the way in, so the correct parse path is
+`chainhash.Decode`/`NewHashFromStr`, not raw `hex.DecodeString`. Practical
+effect: every outpoint reaching the DB via the channel-sync path
+(`lnd.ListChannels` → `history.ChannelUpdate` → `postgresql` `channels`
+table) was byte-reversed relative to outpoints built from raw
+`FundingTxidBytes` on the htlc/forwarding path (`lnd/client.go:320` →
+`open_channel_htlcs` table). Any `bytes.Compare`-based correlation between
+the two — notably `cmd/flspd_revenue_cli/revenue.go`'s forward↔htlc/channel
+matching — would silently fail to match rows for the *same* physical
+channel. `dashboard/service.go`'s `activeChannels` map keyed by
+`.String()` would also show the wrong (double-reversed) channel point to
+operators.
+
+**Status:** ✅ Fixed (commit `3f80c8b`). `NewOutPointFromString` now routes
+through `chainhash.Decode`. Added `TestOutPoint_StringAndBytesConstructorsAgree`
+proving the string- and bytes-based constructors now produce identical
+`wire.OutPoint` values for the same underlying txid.
+
+**Follow-up needed (flagging, not doing autonomously):** any *already
+persisted* `channels` table rows written before this fix have the old
+byte-reversed hash baked in and would need a backfill (re-derive from a
+fresh `ListChannels` sync, or reverse the stored bytes in place) to
+reconcile with `open_channel_htlcs`/revenue data written via the correct
+path. Per earlier confirmation that current DB contents are test data only,
+no live backfill is believed necessary right now — but confirm before
+relying on any existing `channels` table data for revenue reporting.
+
 ---
 
 ## Phase 3 — Unit-test coverage buildout
@@ -464,7 +497,12 @@ Pure mappers (`mapScidsFromChannel`, `extractChannelPoint`, invoice-state /
 failure-code conversions, `OpenChannelRequest` → `lnrpc`) are fake-free and
 high-value; test directly, no mocks needed.
 
-**Status:** ☐ Not started. `lnd` package: 0% coverage, no test files.
+**Status:** ✅ Done. `lnd/mappers_test.go`: `mapScidsFromChannel` (zero-conf vs
+standard, alias handling), `extractChannelPoint` (string vs bytes vs invalid
+txid), `convertInvoiceState` (all 4 states). The gRPC-calling methods
+(`ListChannels`, `OpenChannel`, etc.) remain untested — they need a fake LND
+gRPC server or the devnet (Phase 4), not pure unit tests. `lnd` coverage:
+0% → 4.7%.
 
 ### T3-5: notifications
 Backoff schedule, queue status transitions, the relay race (F-6), transport
@@ -481,6 +519,17 @@ path. `notifications` coverage: 0% → 23.2%.
 Promise sign/verify round-trip and tamper-rejection, `ValidateWebhookUrl`
 (private-IP/SSRF matrix), config floor/min-max validation, SCID string
 codec, NIP-98 valid/expired/tampered (F-7).
+
+**Status:** ◐ In progress (commits `aa586fa`, `3f80c8b`). Done: `common`
+(promise sign/verify round-trip + tamper/wrong-signer/malformed rejection,
+`paramsHash` determinism, `ValidateWebhookUrl`, `isPrivateIP` full SSRF
+matrix, `ParsePrivateKey`) — coverage 0% → 36.0%. Done: `lightning`
+(`ShortChannelID`/`OutPoint` round-trip + invalid-format tables,
+`SignLsps5Message`/`VerifyMessage` round trip, found and fixed F-9 along
+the way) — coverage 0% → 86.9%. Still open: `config` (floor/min-max
+validation on `Validate`/`ValidateLsps1`/`ValidateJit`), `auth` (NIP-98
+valid/expired/tampered/replayed — should fix F-7 alongside, same
+test-driven-fix pattern as F-6).
 
 ---
 
