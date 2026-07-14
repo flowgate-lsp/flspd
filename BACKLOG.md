@@ -40,7 +40,7 @@ number-soup and then get reorganized a second time.
 | 2 | Fix defects on current structure | All P2 items merged w/ regression test | ✅ F-1, F-2, C-1, C-2, C-3, F-7, F-9, F-10, F-11, F-12, F-13 done; F-5, F-8 (medium) remain |
 | 3 | Unit-test coverage buildout | Critical-four packages ≥70–80% | ◐ In progress: F-6, F-7, F-9, F-12, F-13 done, T3-2/T3-3/T3-4/T3-5/T3-6 done; interceptor 38.9%, lsps 49.0%, postgresql 69.1%, notifications 54.3%, lnd 4.7%, common 36.0%, config 89.3%, lightning 86.9%, auth 76.5% |
 | 4 | YAML-driven integration tests | Runner + 3 seed scenarios merged | ◐ Foundation built + proven (Devnet/FlspdProcess/LSPS2 client, 2 more real bugs found — F-10 additions); YAML schema/runner not started; scenario 1's Go-level proof blocked on a devnet gossip-propagation gap, see T4-1 |
-| 5 | Config model + secrets-by-reference | New model shipped behind compat shim | ☐ Not started |
+| 5 | Config model + secrets-by-reference | New model shipped behind compat shim | ◐ T5-1 done (secrets-by-reference); T5-2..T5-7 (unit model, CLI tooling, Settings.tsx re-skin) not started |
 | 6 | Repo structure / arbo migration | Tree matches target layout, build green throughout | ☐ Not started |
 | — | Performance backlog (parallel, non-blocking) | — | ☐ Not started |
 
@@ -910,6 +910,26 @@ Replace inline `flspdPrivateKey` / `macaroon` / `cert` values in
 resolvers. This is what makes C-1 fixable at the root, makes `nodes.yaml`
 safe to commit as a real example, and directly prevents a recurrence of
 SEC-1.
+
+**Status:** ✅ Done (commit `4b3263f`). Added `config.SecretRef`
+(`config/secretref.go`) — accepts a plain inline string (unchanged
+backward-compat form) or a `{from_env: VAR}`/`{from_file: /path}`
+reference, resolved on demand via `.Resolve()`, never in place. Not
+resolved at config-load time on purpose: `dashboard/service.go`'s
+`handleUpdateConfig` re-serializes the in-memory `NodeConfig` back to
+YAML on every dashboard save, including these fields, copied verbatim
+from server memory rather than the (secrets-stripped, C-1) browser
+payload — if `Resolve()` mutated the ref or `MarshalYAML` emitted the
+resolved value, the actual secret would get written to disk in place of
+the reference on the very next save. `from_file` hex-encodes raw file
+content automatically unless it's already hex text, so a ref can point
+directly at flnd's own `tls.cert`/`*.macaroon` files. `FlspdPrivateKey`
+and `LndConfig.Cert`/`Macaroon` now use it; every consumption call site
+(`cmd/flspd/run.go`, `lnd/client.go`) updated to `.Resolve()` instead of
+using the field as a plain string. `nodes.sample.yaml` now uses
+`from_env`/`from_file` for all three fields and is covered by a test
+that parses it and asserts none of them are inline. `config` coverage:
+89.3% → 91.2%.
 
 ### T5-2: One unit at the operator surface
 Amounts in `loki` everywhere at the config/API boundary (flspd's native
