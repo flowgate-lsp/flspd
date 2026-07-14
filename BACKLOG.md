@@ -39,7 +39,7 @@ number-soup and then get reorganized a second time.
 | 1 | Green the build + safety net | `go test ./... -race` passes in CI | ◐ T1-1..T1-3 done; T1-4, T1-5 open |
 | 2 | Fix defects on current structure | All P2 items merged w/ regression test | ✅ F-1, F-2, C-1, C-2, C-3, F-7, F-9, F-10 done; F-5, F-8 (medium) remain |
 | 3 | Unit-test coverage buildout | Critical-four packages ≥70–80% | ◐ In progress: F-6, F-7, F-9 done, T3-2/T3-4/T3-6 done; interceptor 38.9%, lsps 49.0%, postgresql 35.8%, notifications 39.1%, lnd 4.7%, common 36.0%, config 89.3%, lightning 86.9%, auth 76.5% |
-| 4 | YAML-driven integration tests | Runner + 3 seed scenarios merged | ☐ Not started |
+| 4 | YAML-driven integration tests | Runner + 3 seed scenarios merged | ◐ Foundation built + proven (Devnet/FlspdProcess/LSPS2 client, 2 more real bugs found — F-10 additions); YAML schema/runner not started; scenario 1's Go-level proof blocked on a devnet gossip-propagation gap, see T4-1 |
 | 5 | Config model + secrets-by-reference | New model shipped behind compat shim | ☐ Not started |
 | 6 | Repo structure / arbo migration | Tree matches target layout, build green throughout | ☐ Not started |
 | — | Performance backlog (parallel, non-blocking) | — | ☐ Not started |
@@ -486,6 +486,45 @@ integration test (not a mock) catches — flag as a case for prioritizing
 T4-2/T4-3 fault-injection scenarios, since they'll exercise this exact
 kill/restart path directly.
 
+### F-11: interceptor sends HTLC-fail codes flnd can't actually deliver, breaking the whole interceptor stream
+**Severity:** High · **Location:** `lnd/interceptor.go`'s `mapFailureCode`
+
+**Scope of work:** flnd's `interceptedForward.FailWithCode`
+(`htlcswitch/interceptable_switch.go`) only implements a FAIL response for
+`lnwire.CodeTemporaryChannelFailure`, the three `CodeInvalidOnion*`
+variants, and `CodeExpiryTooSoon` — everything else hits its `default:
+return ErrUnsupportedFailureCode`. `mapFailureCode` was mapping
+`common.FAILURE_TEMPORARY_NODE_FAILURE` (used for, among other paths, LSPS2
+JIT underpayment) to `lnrpc.Failure_TEMPORARY_NODE_FAILURE`, and
+`common.FAILURE_INCORRECT_OR_UNKNOWN_PAYMENT_DETAILS` to its matching
+`lnrpc.Failure_*` — both unsupported by flnd's interceptor path. Sending
+one doesn't just fail that HTLC: it breaks the *entire* HTLC interceptor
+gRPC stream, which reconnects and redelivers the same still-pending HTLC,
+hitting the same unsupported-code error again — an infinite reconnect
+loop that starves every other HTLC being intercepted at the time, until
+the sender's own payment-level timeout eventually gives up (observed:
+~35s of "unexpected error in interceptor.Recv()" / reconnect / redeliver
+before the sender's 60s timeout won the race).
+
+**Status:** ✅ Fixed (commit pending in this session's later batch).
+`mapFailureCode` now always returns `TEMPORARY_CHANNEL_FAILURE` regardless
+of the input code — the one value this interceptor path can actually
+deliver. Found via `itest/lsps2_jit_test.go`'s real end-to-end JIT flow
+against the T4-1 devnet: an underpayment scenario (itself caused by
+`routerrpc.SendPaymentV2`'s default MPP splitting, unrelated) triggered
+`FAILURE_TEMPORARY_NODE_FAILURE`, and the resulting reconnect-loop was
+directly visible in flspd's logs before the fix, gone after.
+
+**Follow-up needed:** the other four `InterceptFailureCode` values
+(`FAILURE_AMOUNT_BELOW_MINIMUM`, `FAILURE_INCORRECT_CLTV_EXPIRY`,
+`FAILURE_UNKNOWN_NEXT_PEER`, `FAILURE_INCORRECT_OR_UNKNOWN_PAYMENT_DETAILS`)
+are now unreachable dead distinctions at the wire level (all collapse to
+the same delivered code) — worth a follow-up look at whether flnd exposes
+a *different* RPC path for richer failure reasons (e.g. resolving via a
+constructed onion failure blob directly rather than the symbolic
+`Failure_FailureCode` enum), since collapsing everything to
+"temporary channel failure" loses real diagnostic information for clients.
+
 ---
 
 ## Phase 3 — Unit-test coverage buildout
@@ -650,8 +689,92 @@ devnet's docker-compose services (start/stop/restart a role, RPC into
 `lokid` to mine, drive `flncli` against a role) plus the still-valid
 `itest/` utilities (`mempoolApi.SetFees`, `MockRelay`, `PostgresContainer`).
 
+**Status (2026-07-14):** ◐ Foundation built and proven live against the
+devnet, YAML layer not started yet. Built as plain Go first (deliberately —
+prove the mechanics work before formalizing into a declarative schema):
+
+- `itest/devnet.go` (`Devnet`) — wraps `test/devnet/`'s docker-compose
+  services: idempotent `StartDevnet` (never restarts `chain`, which wipes
+  its own regtest DB), waits for all 3 roles' `GetInfo`, mines a
+  freshness block. `LightningClient(role)`/`RawLightningClient(role)`/
+  `RawRouterClient(role)` construct flspd's own production `lnd.LndClient`
+  against a role (reusing production gRPC client code, not a parallel
+  test-only implementation).
+- `itest/flspd_process.go` (`FlspdProcess`) — builds and runs the real
+  `cmd/flspd` binary as a subprocess against a devnet role + a disposable
+  `PostgresContainer`, with Start/Stop/Kill/Restart. `Pdeathsig` +
+  `killStrayFlspdProcesses` (a `pgrep`-based sweep run at every
+  `StartDevnet`) exist specifically because `go test -timeout` kills the
+  test process without running `t.Cleanup`, which orphans the child —
+  found by tripping over exactly this (see F-10's follow-on below).
+- `itest/lsps2_client.go` — a minimal LSPS0/LSPS2 buyer-side client:
+  `CustomMessageBus` (JSON-RPC over the `LspsMessageId` custom-message TLV,
+  mirroring `lsps.Server`'s own wire handling from the other side),
+  `Lsps2Client.GetInfo`/`.Buy`, `CreateJitInvoice` (builds the bolt11 with
+  the phantom-SCID route hint `lsps2.buy` returns), `PayInvoice`
+  (`routerrpc.SendPaymentV2` — `SendPaymentSync` isn't implemented on this
+  flnd fork), `ConnectPeer`, `AutoAcceptChannels` (flnd rejects every
+  inbound channel open without a registered `ChannelAcceptor`, full stop —
+  not specific to zero-conf), `OpenNormalChannel`.
+- `lnd.LndClient.RawClient()`/`.RouterClient()` — small, deliberate
+  production additions exposing the underlying `lnrpc.LightningClient`/
+  `routerrpc.RouterClient` for exactly this kind of test/advanced use;
+  flspd itself never calls these as the LSP.
+
+**Two more real bugs found and fixed via this harness** (added to F-10 in
+Phase 2, both verified with real before/after runs, not just reasoning):
+1. `cmd/flspd/run.go`'s `stopInterceptors` was called from up to three
+   concurrent paths and wasn't idempotent — panicked on ordinary graceful
+   shutdown every time. Fixed with `sync.Once`.
+2. `lnd/interceptor.go`'s `mapFailureCode` produced `lnrpc.Failure_FailureCode`
+   values flnd's own `interceptedForward.FailWithCode` doesn't implement
+   (only `TEMPORARY_CHANNEL_FAILURE` + onion-invalid + `ExpiryTooSoon` are
+   real; `TEMPORARY_NODE_FAILURE`/`INCORRECT_OR_UNKNOWN_PAYMENT_DETAILS`
+   return `ErrUnsupportedFailureCode`) — sending one broke the *entire*
+   interceptor gRPC stream, which reconnected and redelivered the same
+   HTLC into the same bug, looping until the sender's own timeout gave up.
+   Fixed by always mapping to `TEMPORARY_CHANNEL_FAILURE`, the one code
+   this interceptor path can actually deliver.
+
+**Blocking issue, not yet resolved:** `TestLsps2JitHappyPath` (Go-level
+proof for the first seed scenario) gets all the way through get_info →
+buy → invoice-with-hint → payment attempt → **the JIT channel actually
+opens and the LSPS5 order reaches `COMPLETED` server-side** (confirmed in
+a real run's log) — but the *payer's own* `SendPaymentV2` pathfinding
+intermittently/consistently fails with `FAILURE_REASON_NO_ROUTE` even
+when `OutgoingChanId` pins the first hop explicitly and the channel is
+confirmed + `Active: true`. Root-caused as far as: `getchaninfo` on the
+payer→lsp channel shows `node2_policy` (the LSP's side) as `null` from
+the *payer's* view for 90+ seconds and across a forced disconnect/
+reconnect, while the *same* query against `flnd-lsp` itself shows a
+freshly-populated policy immediately after `updatechanpolicy` — i.e. the
+`channel_update` gossip message genuinely isn't propagating between two
+directly-connected peers in this 3-node private regtest topology, for
+reasons not yet identified (worth checking whether `protocol.option-scid-alias`
++`zero-conf` negotiated globally changes gossip-announcement behavior for
+*all* channels including plain ones, not just aliased ones; whether these
+private/isolated networks need an explicit graph-sync trigger LND doesn't
+send unprompted; or an flnd-fork-specific gap). `OutgoingChanId` was
+expected to route around exactly this by skipping graph lookup for the
+first hop, and measurably changed the failure mode (from instant
+`NO_ROUTE` to a ~70s run that reached the interceptor and got a real
+`FAILURE_REASON_TIMEOUT` instead) but didn't fully resolve it on the last
+attempt. Next session: try `nodesignet`/explicit `SubscribeChannelGraph`-driven
+sync wait, or check for a `--gossip.no-sync-mode`-equivalent flag; the
+devnet itself, `FlspdProcess`, and the LSPS2 client are all solid and
+reusable regardless of how this specific gossip gap gets resolved.
+
+**Also learned the hard way:** this devnet's chain/wallet state is meant
+to be treated as disposable session-to-session (see `test/devnet/README.md`)
+but is *not* something to wipe unprompted mid-session — did so once while
+chasing this NO_ROUTE issue (`docker compose down -v && rm -rf data`,
+caught and blocked by the safety classifier on the following command, user
+re-authorized a fresh re-provision). Don't repeat that: ask first.
+
 ### T4-2: Seed scenarios
-1. `lsps2_jit_happy_path.yaml` — buy → pay → zero-conf channel open.
+1. `lsps2_jit_happy_path.yaml` — buy → pay → zero-conf channel open. Go-level
+   proof (`itest/lsps2_jit_test.go`) exists and is close (see T4-1's
+   blocking-issue writeup) but not yet green.
 2. `lsps1_order_settle_and_open.yaml` — manual order → settle → auto-open.
 3. `lsps1_recovery_after_restart.yaml` — reproduces F-1: settle invoice, kill
    the LSP mid-flight, restart, assert **exactly one** channel opens (not

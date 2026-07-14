@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/flokiorg/flnd/lnrpc"
+	"github.com/flokiorg/flnd/lnrpc/routerrpc"
 	"github.com/flowgate-lsp/flspd/config"
 	"github.com/flowgate-lsp/flspd/lightning"
 	"github.com/flowgate-lsp/flspd/lnd"
@@ -58,6 +60,8 @@ func StartDevnet(t *testing.T) *Devnet {
 	if _, err := exec.LookPath("docker"); err != nil {
 		t.Skip("docker not available, skipping devnet-backed test")
 	}
+
+	killStrayFlspdProcesses(t)
 
 	d := &Devnet{dir: dir}
 
@@ -145,6 +149,36 @@ func (d *Devnet) LightningClient(role string) (lightning.Client, error) {
 		return nil, err
 	}
 	return lnd.NewLndClient(conf)
+}
+
+// RawLightningClient returns the same connection as LightningClient but as
+// the underlying lnrpc.LightningClient, for scenario steps that need gRPC
+// methods (AddInvoice, ConnectPeer, custom messages) the lightning.Client
+// port doesn't expose.
+func (d *Devnet) RawLightningClient(role string) (lnrpc.LightningClient, error) {
+	client, err := d.LightningClient(role)
+	if err != nil {
+		return nil, err
+	}
+	lndClient, ok := client.(*lnd.LndClient)
+	if !ok {
+		return nil, fmt.Errorf("role %q client is not *lnd.LndClient", role)
+	}
+	return lndClient.RawClient(), nil
+}
+
+// RawRouterClient is RawLightningClient's counterpart for routerrpc, needed
+// to actually send a payment (SendPaymentV2) from a non-LSP role.
+func (d *Devnet) RawRouterClient(role string) (routerrpc.RouterClient, error) {
+	client, err := d.LightningClient(role)
+	if err != nil {
+		return nil, err
+	}
+	lndClient, ok := client.(*lnd.LndClient)
+	if !ok {
+		return nil, fmt.Errorf("role %q client is not *lnd.LndClient", role)
+	}
+	return lndClient.RouterClient(), nil
 }
 
 func (d *Devnet) waitForRole(t *testing.T, role string, timeout time.Duration) {

@@ -173,18 +173,27 @@ func (i *LndHtlcInterceptor) intercept() error {
 	}
 }
 
+// mapFailureCode translates flspd's own InterceptFailureCode into the
+// lnrpc.Failure_FailureCode flnd's ForwardHtlcInterceptResponse expects.
+//
+// flnd's htlcswitch (interceptable_switch.go's interceptedForward.FailWithCode)
+// only actually implements FailWithCode for a handful of lnwire codes —
+// CodeTemporaryChannelFailure, the three CodeInvalidOnion* variants, and
+// CodeExpiryTooSoon — and returns ErrUnsupportedFailureCode for anything
+// else. Sending an unsupported code doesn't just fail that one HTLC: it
+// breaks the entire interceptor gRPC stream (observed as "unexpected error
+// in interceptor.Recv()"), which reconnects and redelivers the same
+// still-pending HTLC, hitting the same error again — an infinite loop that
+// starves every other HTLC being intercepted at the time until the
+// sender's own payment timeout gives up. So every InterceptFailureCode
+// value maps to TEMPORARY_CHANNEL_FAILURE, the one code this interceptor
+// path can actually deliver, regardless of which flspd-level rejection
+// reason triggered it.
 func (i *LndHtlcInterceptor) mapFailureCode(original common.InterceptFailureCode) lnrpc.Failure_FailureCode {
-	switch original {
-	case common.FAILURE_TEMPORARY_CHANNEL_FAILURE:
-		return lnrpc.Failure_TEMPORARY_CHANNEL_FAILURE
-	case common.FAILURE_TEMPORARY_NODE_FAILURE:
-		return lnrpc.Failure_TEMPORARY_NODE_FAILURE
-	case common.FAILURE_INCORRECT_OR_UNKNOWN_PAYMENT_DETAILS:
-		return lnrpc.Failure_INCORRECT_OR_UNKNOWN_PAYMENT_DETAILS
-	default:
-		log.Warn().Msgf("LND: Unknown failure code %v, defaulting to temporary channel failure", original)
-		return lnrpc.Failure_TEMPORARY_CHANNEL_FAILURE
+	if original != common.FAILURE_TEMPORARY_CHANNEL_FAILURE {
+		log.Debug().Msgf("LND: failure code %v has no working flnd interceptor mapping, using temporary channel failure", original)
 	}
+	return lnrpc.Failure_TEMPORARY_CHANNEL_FAILURE
 }
 
 func (i *LndHtlcInterceptor) createOnionResponse(interceptResult common.InterceptResult, request *routerrpc.ForwardHtlcInterceptRequest) *routerrpc.ForwardHtlcInterceptResponse {

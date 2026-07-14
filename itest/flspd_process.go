@@ -7,6 +7,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"testing"
@@ -51,6 +53,39 @@ func buildFlspdBinary(t *testing.T) string {
 		t.Fatalf("building flspd binary: %v", flspdBinaryErr)
 	}
 	return flspdBinaryPath
+}
+
+// killStrayFlspdProcesses is a defensive sweep run before any devnet-backed
+// test starts. Pdeathsig (set in Start below) should make every flspd
+// subprocess die with its parent test process, but Go's runtime can migrate
+// goroutines across OS threads in ways that make Pdeathsig unreliable in
+// practice — and critically, go test's own -timeout watchdog kills the test
+// process without running t.Cleanup at all, so a hung test can orphan its
+// flspd child regardless. An orphan stays connected to the devnet's
+// flnd-lsp and keeps answering LSPS2 custom messages from every later test
+// run, corrupting them with an extra, independently-generated response
+// (observed firsthand: two get_info replies for one request, each with its
+// own promise/timestamp, one from the live process and one from a ~20
+// minute-old orphan). Since every flspd binary this package builds lives
+// under a uniquely-named /tmp/flspd-itest-bin-* directory, matching on that
+// path is specific enough to not risk killing an unrelated process.
+func killStrayFlspdProcesses(t *testing.T) {
+	t.Helper()
+	out, err := exec.Command("pgrep", "-f", "flspd-itest-bin-.*/flspd").Output()
+	if err != nil {
+		return // pgrep exits non-zero when there are no matches; nothing to do
+	}
+	for _, pidStr := range strings.Fields(string(out)) {
+		pid, err := strconv.Atoi(pidStr)
+		if err != nil {
+			continue
+		}
+		if proc, err := os.FindProcess(pid); err == nil {
+			if err := proc.Kill(); err == nil {
+				t.Logf("killed stray orphaned flspd process (pid %d) from an earlier test run", pid)
+			}
+		}
+	}
 }
 
 // FlspdProcessOptions configures the generated flspd NodeConfig. Zero
@@ -166,6 +201,14 @@ func (p *FlspdProcess) Start() error {
 
 	cmd := exec.Command(p.binaryPath)
 	cmd.Env = p.env
+	// If this test process is killed hard (notably go test's own -timeout
+	// watchdog, which os.Exits without running t.Cleanup), the flspd child
+	// would otherwise be orphaned and keep running indefinitely — it stays
+	// connected to the devnet's flnd-lsp and keeps answering LSPS2 requests
+	// from every *later* test run too, corrupting them with duplicate
+	// responses carrying stale promises. Pdeathsig makes the kernel SIGKILL
+	// it the moment this process dies, by any means.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGKILL}
 	logPath := p.configPath + ".log"
 	logFile, err := os.Create(logPath)
 	if err != nil {

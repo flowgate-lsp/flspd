@@ -105,6 +105,13 @@ func (c *LndClient) RawClient() lnrpc.LightningClient {
 	return c.client
 }
 
+// RouterClient exposes the underlying routerrpc.RouterClient for the same
+// reason as RawClient — e.g. SendPaymentV2, which the integration-test
+// scenario runner needs to actually pay an invoice from a non-LSP role.
+func (c *LndClient) RouterClient() routerrpc.RouterClient {
+	return c.routerClient
+}
+
 func (c *LndClient) Close() {
 	cancel := c.listenerCancel
 	if cancel != nil {
