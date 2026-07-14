@@ -277,3 +277,44 @@ func TestOpeningStore_Lsps2BuyRegistration_RoundTrip(t *testing.T) {
 	assert.Equal(t, reg.PeerId, got.PeerId)
 	assert.Equal(t, reg.ParamsMinFeeMloki, got.ParamsMinFeeMloki)
 }
+
+// TestOpeningStore_Lsps2BuyRegistration_HighBitScid is the actual
+// int64/uint64 SCID round-trip regression test: the `scid` column is
+// BIGINT (signed int64), and both RegisterLsps2Buy and
+// GetLsps2BuyRegistration cast via `int64(scid)`/`uint64(scidInt)`. A SCID
+// whose block-height component is >= 2^23 (8,388,608) sets bit 63 of the
+// uint64, so int64(scid) is negative — this only round-trips correctly if
+// Postgres preserves the exact bit pattern of a negative BIGINT rather than
+// e.g. clamping or erroring. The round-trip test above uses block height
+// 800,000, which is nowhere near that boundary and doesn't actually
+// exercise it.
+func TestOpeningStore_Lsps2BuyRegistration_HighBitScid(t *testing.T) {
+	store := NewPostgresOpeningStore(testPool)
+
+	const highBlockHeight = 9_000_000 // > 2^23; makes int64(scid) negative
+	scid := uint64(highBlockHeight)<<40 | uint64(1)<<16 | uint64(0)
+	require.Greater(t, scid, uint64(1)<<63, "fixture must actually set bit 63 to exercise the sign-flip cast")
+	require.Negative(t, int64(scid), "sanity: this SCID must be negative when reinterpreted as int64, same as the store does internally")
+
+	paymentSize := uint64(50_000_000)
+	reg := &common.Lsps2BuyRegistration{
+		Id:                         newOrderId(t),
+		LspId:                      "lsp-pubkey-highbit",
+		PeerId:                     "peer-pubkey-highbit",
+		Scid:                       scid,
+		Mode:                       0,
+		PaymentSizeMloki:           &paymentSize,
+		ParamsMinFeeMloki:          1000,
+		ParamsProportional:         4000,
+		ParamsValidUntil:           "2099-01-01T00:00:00.000Z",
+		ParamsMinLifetime:          43200,
+		ParamsMaxClientToSelfDelay: 4320,
+		ParamsPromise:              "deadbeef",
+		Token:                      "",
+	}
+	require.NoError(t, store.RegisterLsps2Buy(reg))
+
+	got, err := store.GetLsps2BuyRegistration(scid)
+	require.NoError(t, err)
+	assert.Equal(t, scid, got.Scid, "a SCID with bit 63 set must round-trip exactly, not get corrupted by the int64 cast")
+}

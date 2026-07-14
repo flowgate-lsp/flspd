@@ -73,3 +73,57 @@ func TestPaymentInfo_WithOpeningFeeParams(t *testing.T) {
 	assert.Equal(t, int64(2000), incoming)
 	assert.Equal(t, int64(1990), outgoing)
 }
+
+// TestInterceptStore_GetLsps2Order_RoundTrip covers GetLsps2Order, which
+// previously had zero test coverage. It reads the same lsps2.buy_registrations
+// table PostgresOpeningStore.RegisterLsps2Buy writes to, via the identical
+// int64(scid)/uint64(scidInt) cast — including a SCID with bit 63 set,
+// where int64(scid) is negative, to prove the cast round-trips correctly
+// from this read path too (see TestOpeningStore_Lsps2BuyRegistration_HighBitScid
+// for why that matters).
+func TestInterceptStore_GetLsps2Order_RoundTrip(t *testing.T) {
+	openingStore := NewPostgresOpeningStore(testPool)
+	interceptStore := NewPostgresInterceptStore(testPool)
+
+	const highBlockHeight = 9_500_000 // > 2^23; makes int64(scid) negative
+	scid := uint64(highBlockHeight)<<40 | uint64(2)<<16 | uint64(0)
+	require.Negative(t, int64(scid), "sanity: fixture must set bit 63")
+
+	paymentSize := uint64(25_000_000)
+	reg := &common.Lsps2BuyRegistration{
+		Id:                         newOrderId(t),
+		LspId:                      "lsp-pubkey-intercept",
+		PeerId:                     "peer-pubkey-intercept",
+		Scid:                       scid,
+		Mode:                       1,
+		PaymentSizeMloki:           &paymentSize,
+		ParamsMinFeeMloki:          2000,
+		ParamsProportional:         5000,
+		ParamsValidUntil:           "2099-01-01T00:00:00.000Z",
+		ParamsMinLifetime:          43200,
+		ParamsMaxClientToSelfDelay: 4320,
+		ParamsPromise:              "cafef00d",
+		Token:                      "order-token-xyz",
+	}
+	require.NoError(t, openingStore.RegisterLsps2Buy(reg))
+
+	got, err := interceptStore.GetLsps2Order(scid)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, scid, got.Scid, "GetLsps2Order must round-trip a bit-63-set SCID exactly")
+	assert.Equal(t, reg.LspId, got.LspId)
+	assert.Equal(t, reg.PeerId, got.PeerId)
+	assert.Equal(t, reg.Token, got.Token)
+	assert.Equal(t, reg.ParamsPromise, got.ParamsPromise)
+}
+
+// TestInterceptStore_GetLsps2Order_NotFound covers the no-such-SCID branch,
+// which must return (nil, nil) rather than an error (callers use a nil
+// result to mean "not a JIT-channel payment").
+func TestInterceptStore_GetLsps2Order_NotFound(t *testing.T) {
+	interceptStore := NewPostgresInterceptStore(testPool)
+
+	got, err := interceptStore.GetLsps2Order(uint64(1)<<62 | 0xdeadbeef)
+	assert.NoError(t, err)
+	assert.Nil(t, got)
+}
