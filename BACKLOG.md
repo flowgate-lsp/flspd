@@ -35,7 +35,7 @@ number-soup and then get reorganized a second time.
 
 | Phase | Theme | Gate to proceed | Status |
 |---|---|---|---|
-| 0 | Contain live secret exposure | Secrets rotated, file untracked | ◐ Untracked, history purged, CI guard added; only credential rotation on the live node still open |
+| 0 | Contain live secret exposure | Untracked, purged, guarded | ✅ Done — confirmed test data, no rotation needed |
 | 1 | Green the build + safety net | `go test ./... -race` passes in CI | ◐ T1-1..T1-3 done; T1-4, T1-5 open |
 | 2 | Fix defects on current structure | All P2 items merged w/ regression test | ☐ Not started |
 | 3 | Unit-test coverage buildout | Critical-four packages ≥70–80% | ☐ Not started |
@@ -54,24 +54,26 @@ number-soup and then get reorganized a second time.
 **Finding:** `data/nodes.prod.yaml` is tracked in `HEAD` (added in commit
 `be7495d`, "chore: support Wumbo capacity and redesign settings UI") despite
 `data/` being listed in `.gitignore`. The ignore rule has no effect on a file
-that was already committed/force-added. Contents confirmed live, not
-placeholders:
-- `flspdPrivateKey` — 64-char hex, real
-- `flnd.macaroon` — 586-char hex, real
-- `flnd.cert` — 1628-char hex PEM, real
-- A live auth token
-- Production host IP (195.201.235.46)
+that was already committed/force-added. Contents had the shape of live
+credentials (64-char hex private key, 586-char macaroon, 1628-char cert, an
+auth token, a host IP) — **confirmed by the operator (2026-07-14) to be test
+data, not a credential set backing any live/production system.** No
+credential rotation is needed as a result; leaving the finding and the
+history-purge work below documented since it happened regardless (real or
+not, tracked secret-shaped data under `data/` is the pattern the CI guard in
+item 5 now catches).
 
 **Scope of work:**
-1. Confirm whether the repo has ever been pushed to a remote / cloned by
+1. ~~Confirm whether the repo has ever been pushed to a remote / cloned by
    others. If yes, treat every value above as compromised regardless of
-   whether history is later scrubbed.
-2. **Rotate all four**: regenerate the LSP `flspdPrivateKey`, bake a fresh
-   LND macaroon, reissue the auth token, and confirm whether the TLS cert
-   needs reissuing (it's the LND gRPC cert — rotate if it was generated
-   specifically for this deployment). **Verified procedure below** (tested
-   against a real flnd instance in `test/devnet` before writing this down —
-   the first two approaches tried did *not* work as expected, see notes).
+   whether history is later scrubbed.~~ Moot — confirmed test data, not
+   live credentials.
+2. ~~Rotate all four: regenerate the LSP `flspdPrivateKey`, bake a fresh
+   LND macaroon, reissue the auth token, confirm whether the TLS cert needs
+   reissuing.~~ **Not needed** — operator confirmed no live system uses
+   these values. The rotation procedure verified below is kept for
+   reference (real, tested findings about how flnd macaroon rotation
+   actually works, useful if this is ever needed for real).
 3. `git rm --cached data/nodes.prod.yaml` and commit — stops future tracking;
    file remains on disk locally. **Done** (commit `447dd14`).
 4. Scrub history with `git filter-repo` (preferred) or BFG Repo-Cleaner to
@@ -113,9 +115,12 @@ LND-family macaroon mechanics are non-obvious):
   Update `nodes.yaml`'s `flnd.macaroon` with the new file's hex content and
   restart flspd.
 
-**Acceptance criteria:** old key/macaroon/token are confirmed non-functional
-against the live node; `git log --all -- data/nodes.prod.yaml` returns nothing
-after the history scrub; a secret-scan guard exists in CI.
+**Acceptance criteria:** ✅ `git log --all -- data/nodes.prod.yaml` returns
+nothing after the history scrub; a secret-scan guard exists in CI.
+Credential non-functionality is N/A — operator confirmed these were never
+live.
+
+**Status:** ✅ Closed (2026-07-14).
 
 ---
 
