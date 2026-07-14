@@ -16,7 +16,8 @@ import (
 // no-op stub so the fake satisfies the (large) interface without pulling in
 // a mocking framework for methods this package never calls.
 type fakeOpeningStore struct {
-	webhooks map[string][]*common.Lsps5Webhook
+	webhooks       map[string][]*common.Lsps5Webhook
+	getWebhooksErr error
 }
 
 func newFakeOpeningStore() *fakeOpeningStore {
@@ -24,6 +25,9 @@ func newFakeOpeningStore() *fakeOpeningStore {
 }
 
 func (f *fakeOpeningStore) GetLsps5Webhooks(clientNodeId string) ([]*common.Lsps5Webhook, error) {
+	if f.getWebhooksErr != nil {
+		return nil, f.getWebhooksErr
+	}
 	return f.webhooks[clientNodeId], nil
 }
 
@@ -37,8 +41,8 @@ func (f *fakeOpeningStore) RegisterLsps2Buy(*common.Lsps2BuyRegistration) error 
 func (f *fakeOpeningStore) GetLsps2BuyRegistration(uint64) (*common.Lsps2BuyRegistration, error) {
 	return nil, nil
 }
-func (f *fakeOpeningStore) RegisterLsps1Order(*common.Lsps1Order) error        { return nil }
-func (f *fakeOpeningStore) GetLsps1Order(string) (*common.Lsps1Order, error)   { return nil, nil }
+func (f *fakeOpeningStore) RegisterLsps1Order(*common.Lsps1Order) error      { return nil }
+func (f *fakeOpeningStore) GetLsps1Order(string) (*common.Lsps1Order, error) { return nil, nil }
 func (f *fakeOpeningStore) GetLsps1OrderByPaymentInvoice(string) (*common.Lsps1Order, error) {
 	return nil, nil
 }
@@ -46,7 +50,7 @@ func (f *fakeOpeningStore) GetPaidLsps1Order(string) (*common.Lsps1Order, error)
 func (f *fakeOpeningStore) GetPaidLsps1Orders(string) ([]*common.Lsps1Order, error) {
 	return nil, nil
 }
-func (f *fakeOpeningStore) GetAllPaidLsps1Orders() ([]*common.Lsps1Order, error)   { return nil, nil }
+func (f *fakeOpeningStore) GetAllPaidLsps1Orders() ([]*common.Lsps1Order, error) { return nil, nil }
 func (f *fakeOpeningStore) GetAllCreatedLsps1Orders() ([]*common.Lsps1Order, error) {
 	return nil, nil
 }
@@ -60,9 +64,9 @@ func (f *fakeOpeningStore) RemoveLsps5Webhook(string, string) error           { 
 func (f *fakeOpeningStore) CountLsps1Orders(string, string, *time.Time) (int, error) {
 	return 0, nil
 }
-func (f *fakeOpeningStore) CountLsps5Webhooks(string) (int, error)   { return 0, nil }
-func (f *fakeOpeningStore) GetReservedLiquidity() (uint64, error)    { return 0, nil }
-func (f *fakeOpeningStore) ExpireStaleOrders() (int64, error)        { return 0, nil }
+func (f *fakeOpeningStore) CountLsps5Webhooks(string) (int, error) { return 0, nil }
+func (f *fakeOpeningStore) GetReservedLiquidity() (uint64, error)  { return 0, nil }
+func (f *fakeOpeningStore) ExpireStaleOrders() (int64, error)      { return 0, nil }
 
 // fakeNotifStore implements Store in-memory, so processPending/Enqueue tests
 // don't need a real database.
@@ -80,8 +84,8 @@ func (f *fakeNotifStore) Register(context.Context, string, string, string) error
 func (f *fakeNotifStore) GetRegistrations(context.Context, string) ([]common.NotificationRegistration, error) {
 	return nil, nil
 }
-func (f *fakeNotifStore) Unsubscribe(context.Context, string, string) error   { return nil }
-func (f *fakeNotifStore) RemoveExpired(context.Context, time.Time) error     { return nil }
+func (f *fakeNotifStore) Unsubscribe(context.Context, string, string) error { return nil }
+func (f *fakeNotifStore) RemoveExpired(context.Context, time.Time) error    { return nil }
 
 func (f *fakeNotifStore) Enqueue(_ context.Context, pubkey, url, transport, method string, params interface{}) (int64, error) {
 	f.mu.Lock()
