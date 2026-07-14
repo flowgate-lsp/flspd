@@ -15,7 +15,6 @@ import (
 	dockerimage "github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/client"
 	"github.com/docker/go-connections/nat"
-	"github.com/flowgate-lsp/flspd/itest/lntest"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -36,7 +35,7 @@ func (p *PostgresContainer) Pool() *pgxpool.Pool {
 }
 
 func NewPostgresContainer(logfile string) (*PostgresContainer, error) {
-	port, err := lntest.GetPort()
+	port, err := getPort()
 	if err != nil {
 		return nil, fmt.Errorf("could not get port: %w", err)
 	}

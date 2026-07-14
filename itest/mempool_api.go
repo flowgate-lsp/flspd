@@ -5,8 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-
-	"github.com/flowgate-lsp/flspd/itest/lntest"
+	"testing"
 )
 
 type RecommendedFeesResponse struct {
@@ -19,20 +18,30 @@ type RecommendedFeesResponse struct {
 
 type mempoolApi struct {
 	addr string
-	h    *lntest.TestHarness
+	t    *testing.T
 	fees *RecommendedFeesResponse
 	lis  net.Listener
 }
 
-func NewMempoolApi(h *lntest.TestHarness) *mempoolApi {
-	port, err := lntest.GetPort()
+// getPort finds a free TCP port by briefly binding to port 0 and releasing it.
+func getPort() (uint32, error) {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		h.T.Fatalf("Failed to get port for mempool api: %v", err)
+		return 0, err
+	}
+	defer l.Close()
+	return uint32(l.Addr().(*net.TCPAddr).Port), nil
+}
+
+func NewMempoolApi(t *testing.T) *mempoolApi {
+	port, err := getPort()
+	if err != nil {
+		t.Fatalf("Failed to get port for mempool api: %v", err)
 	}
 
 	return &mempoolApi{
 		addr: fmt.Sprintf("127.0.0.1:%d", port),
-		h:    h,
+		t:    t,
 		fees: &RecommendedFeesResponse{
 			MinimumFee:  1,
 			EconomyFee:  1,
@@ -56,20 +65,20 @@ func (m *mempoolApi) Start() {
 	mux.HandleFunc("/api/v1/fees/recommended", func(w http.ResponseWriter, r *http.Request) {
 		j, err := json.Marshal(m.fees)
 		if err != nil {
-			m.h.T.Fatalf("Failed to marshal mempool fees: %v", err)
+			m.t.Fatalf("Failed to marshal mempool fees: %v", err)
 		}
 		_, err = w.Write(j)
 		if err != nil {
-			m.h.T.Fatalf("Failed to write mempool response: %v", err)
+			m.t.Fatalf("Failed to write mempool response: %v", err)
 		}
 	})
 	lis, err := net.Listen("tcp", m.addr)
 	if err != nil {
-		m.h.T.Fatalf("failed to start mempool api: %v", err)
+		m.t.Fatalf("failed to start mempool api: %v", err)
 	}
 
 	m.lis = lis
-	m.h.AddStoppable(m)
+	m.t.Cleanup(func() { m.Stop() })
 
 	go http.Serve(lis, mux)
 }
