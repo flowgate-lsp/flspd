@@ -1,7 +1,6 @@
 package lightning
 
 import (
-	"encoding/hex"
 	"fmt"
 	"log"
 	"strconv"
@@ -28,8 +27,14 @@ func NewOutPointFromString(outpoint string) (*wire.OutPoint, error) {
 		return nil, fmt.Errorf("invalid outpoint")
 	}
 
-	fundingTxId, err := hex.DecodeString(split[0])
-	if err != nil {
+	// chainhash.Decode reverses the byte-reversed display-order hex (the
+	// convention LND uses for FundingTxidStr / channel_point strings)
+	// back into wire order. A plain hex.DecodeString + SetBytes here
+	// would silently store the txid byte-reversed, breaking any
+	// comparison against outpoints built from raw wire-order bytes
+	// (e.g. FundingTxidBytes via NewOutPoint).
+	var h chainhash.Hash
+	if err := chainhash.Decode(&h, split[0]); err != nil {
 		return nil, fmt.Errorf("invalid outpoint")
 	}
 
@@ -38,5 +43,5 @@ func NewOutPointFromString(outpoint string) (*wire.OutPoint, error) {
 		return nil, fmt.Errorf("invalid outpoint")
 	}
 
-	return NewOutPoint(fundingTxId, uint32(outnum))
+	return wire.NewOutPoint(&h, uint32(outnum)), nil
 }
