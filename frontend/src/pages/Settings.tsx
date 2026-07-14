@@ -1,25 +1,48 @@
 import React, { useState, useEffect } from 'react';
 import { GlassCard } from '../components/GlassCard';
-import { 
-    Settings as SettingsIcon, Save, RefreshCw, Zap, Shield, Globe, 
+import { DualRangeSlider } from '../components/DualRangeSlider';
+import {
+    Settings as SettingsIcon, Save, RefreshCw, Zap, Shield, Globe,
     Loader2, AlertCircle, CheckCircle2, HelpCircle, ArrowRightLeft,
-    Network, Clock, DollarSign, Percent, Scale, Activity
+    Network, Clock, Percent, Scale, Activity, SlidersHorizontal, Sparkles
 } from 'lucide-react';
 import { useSettings } from '../hooks/useSettings';
 import { useUnit, type DisplayUnit } from '../contexts/UnitContext';
 import { formatAmount, formatInput, cn } from '../lib/utils';
+import { computeOpeningFeeLoki } from '../lib/feeCalc';
 import { motion, AnimatePresence } from 'framer-motion';
 import { CurrencyConverterModal } from '../components/CurrencyConverterModal';
 import { InfoModal } from '../components/InfoModal';
 
-type Tab = 'general' | 'jit' | 'lsps1';
+type Tab = 'connect' | 'business' | 'advanced';
+
+// Profile-controlled fields (config/tiered.go's applyProfile): switching
+// the profile dropdown must clear these back to their "unset" sentinel
+// (0 / null) client-side, or the backend's "only fill in fields still at
+// their zero value" precedence rule (an explicit value always wins) would
+// see the PREVIOUS profile's already-expanded values and never apply the
+// newly selected one.
+const PROFILE_CONTROLLED_FIELDS: Record<string, any> = {
+  targetConf: 0,
+  minConfs: null,
+  timeLockDelta: 0,
+  maxInactiveDuration: 0,
+  lsps1OrderExpirySeconds: null,
+  jitValidUntilSeconds: 0,
+};
+
+const PROFILE_OPTIONS: { id: string; label: string; blurb: string }[] = [
+  { id: 'conservative', label: 'Conservative', blurb: 'More confirmations, longer safety margins, shorter-lived offers.' },
+  { id: 'balanced', label: 'Balanced', blurb: 'A reasonable default for most deployments.' },
+  { id: 'aggressive', label: 'Aggressive', blurb: 'Prioritizes speed/UX — allows 0-conf, shorter CLTV delta.' },
+];
 
 // Enhanced FinancialInput for modern look and long numbers
-const FinancialInput: React.FC<{ 
+const FinancialInput: React.FC<{
     field: string;
-    label: string; 
-    explanation: string; 
-    value: any; 
+    label: string;
+    explanation: string;
+    value: any;
     source: 'LOKI' | 'MLOKI';
     onEdit: (field: string, source: 'LOKI' | 'MLOKI', value: number, label: string, explanation: string) => void;
     onInfo: (label: string, explanation: string) => void;
@@ -34,16 +57,16 @@ const FinancialInput: React.FC<{
             <HelpCircle className="w-4 h-4" />
         </button>
       </div>
-      <button 
-        type="button" 
-        onClick={() => onEdit(field, source, value, label, explanation)} 
+      <button
+        type="button"
+        onClick={() => onEdit(field, source, value, label, explanation)}
         className="text-[9px] text-primary hover:text-white transition-all font-mono uppercase tracking-[0.15em] font-black flex items-center gap-1.5 bg-primary/5 hover:bg-primary/20 px-2.5 py-1 rounded-lg border border-primary/20"
       >
         <ArrowRightLeft className="w-3 h-3" />
         Convert
       </button>
     </div>
-    
+
     <div className="relative overflow-hidden group/input">
         <div className="w-full bg-surface-container-lowest/80 border border-white/5 rounded-2xl p-4 flex flex-col gap-2 group-focus-within/input:border-primary/40 group-focus-within/input:ring-4 group-focus-within/input:ring-primary/5 transition-all duration-500">
             <div className="flex items-baseline justify-between gap-4">
@@ -54,7 +77,7 @@ const FinancialInput: React.FC<{
                     {source}
                 </span>
             </div>
-            
+
             <div className="flex items-center gap-2.5 pt-2 border-t border-white/5">
                 <div className="w-1.5 h-1.5 rounded-full bg-secondary shadow-[0_0_8px_rgba(0,253,135,0.4)]" />
                 <span className="text-[11px] font-mono text-secondary font-bold tracking-tight">
@@ -68,17 +91,17 @@ const FinancialInput: React.FC<{
   </div>
 );
 
-const Input: React.FC<{ 
-    label: string; 
-    explanation: string; 
-    value: any; 
-    onChange: (v: any) => void; 
-    type?: string; 
-    placeholder?: string; 
-    step?: string; 
+const Input: React.FC<{
+    label: string;
+    explanation: string;
+    value: any;
+    onChange: (v: any) => void;
+    type?: string;
+    placeholder?: string;
+    step?: string;
     icon?: any;
-    onInfo: (label: string, explanation: string) => void 
-}> = ({ 
+    onInfo: (label: string, explanation: string) => void
+}> = ({
   label, explanation, value, onChange, type = 'text', placeholder, step, icon: Icon, onInfo
 }) => (
   <div className="space-y-3 group">
@@ -92,7 +115,7 @@ const Input: React.FC<{
     </div>
     <div className="relative">
         {Icon && <Icon className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-on-surface-variant/40 group-focus-within:text-primary transition-colors" />}
-        <input 
+        <input
           type={type}
           step={step}
           value={value ?? ''}
@@ -120,7 +143,7 @@ const SectionHeader: React.FC<{ title: string; subtitle: string; icon: any }> = 
 );
 
 const Switch: React.FC<{ checked: boolean; onChange: (v: boolean) => void }> = ({ checked, onChange }) => (
-  <button 
+  <button
     type="button"
     onClick={() => onChange(!checked)}
     className={cn(
@@ -137,18 +160,47 @@ const Switch: React.FC<{ checked: boolean; onChange: (v: boolean) => void }> = (
   </button>
 );
 
+// derives the tiered blocks (opening_fee, routing_fee, channel_size) from
+// whatever flat fields are currently present, so a deployment that hasn't
+// touched the new schema yet still sees its actual current settings the
+// first time it opens the Business tab, rather than blank/default values.
+function withTieredDefaults(cfg: any): any {
+  const next = { ...cfg };
+  if (!next.opening_fee) {
+    next.opening_fee = {
+      rate_percent: (next.channelFeePermyriad ?? 0) / 100,
+      min_loki: Math.floor((next.channelMinimumFeeMloki ?? 0) / 1000),
+    };
+  }
+  if (!next.routing_fee) {
+    next.routing_fee = {
+      ppm: Math.round((next.feeRate ?? 0) * 1_000_000),
+      base_loki: Math.floor((next.baseFeeMloki ?? 0) / 1000),
+    };
+  }
+  if (!next.channel_size) {
+    next.channel_size = {
+      min_loki: next.minChannelCapacityLoki ?? 20000,
+      max_loki: next.lsps1MaxChannelBalanceLoki ?? 100_000_000,
+      padding_loki: next.additionalChannelCapacity ?? 0,
+    };
+  }
+  return next;
+}
+
 export const Settings: React.FC = () => {
   const { config, loading, saving, error, refreshConfig, updateConfig } = useSettings();
   const { unit, setUnit } = useUnit();
-  const [activeTab, setActiveTab] = useState<Tab>((localStorage.getItem('settings_tab') as Tab) || 'general');
+  const [activeTab, setActiveTab] = useState<Tab>((localStorage.getItem('settings_tab') as Tab) || 'connect');
   const [formData, setFormData] = useState<any>(null);
   const [showSuccess, setShowSuccess] = useState(false);
   const [editingField, setEditingField] = useState<{ field: string; source: 'LOKI' | 'MLOKI'; value: number; label: string; explanation: string } | null>(null);
   const [infoModal, setInfoModal] = useState<{ label: string; explanation: string } | null>(null);
+  const [previewPaymentLoki, setPreviewPaymentLoki] = useState(1_000_000);
 
   useEffect(() => {
     if (config) {
-      setFormData({ ...config });
+      setFormData(withTieredDefaults(config));
     }
   }, [config]);
 
@@ -163,6 +215,14 @@ export const Settings: React.FC = () => {
       current[keys[keys.length - 1]] = value;
       return next;
     });
+  };
+
+  const handleProfileChange = (newProfile: string) => {
+    setFormData((prev: any) => ({
+      ...prev,
+      profile: newProfile,
+      ...PROFILE_CONTROLLED_FIELDS,
+    }));
   };
 
   const handleSave = async () => {
@@ -183,17 +243,22 @@ export const Settings: React.FC = () => {
   }
 
   const tabs: { id: Tab; label: string; icon: any }[] = [
-    { id: 'general', label: 'Identity', icon: Globe },
-    { id: 'jit', label: 'LSPS2 / JIT', icon: Zap },
-    { id: 'lsps1', label: 'LSPS1 Protocol', icon: Shield },
+    { id: 'connect', label: 'Connect', icon: Globe },
+    { id: 'business', label: 'Business Policy', icon: Sparkles },
+    { id: 'advanced', label: 'Advanced', icon: SlidersHorizontal },
   ];
+
+  const openingFee = formData?.opening_fee ?? { rate_percent: 0, min_loki: 0 };
+  const channelSize = formData?.channel_size ?? { min_loki: 20000, max_loki: 100_000_000, padding_loki: 0 };
+  const previewFeeLoki = computeOpeningFeeLoki(previewPaymentLoki, openingFee.rate_percent ?? 0, openingFee.min_loki ?? 0);
+  const feeExampleSizes = [100_000, 1_000_000, 10_000_000];
 
   return (
     <div className="p-4 md:p-10 max-w-6xl mx-auto space-y-8 md:space-y-12 animate-in fade-in duration-1000 pb-40">
       {/* Header Section */}
       <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-8 bg-surface-variant/20 p-6 md:p-8 rounded-[2rem] border border-white/5 backdrop-blur-md relative overflow-hidden group">
         <div className="absolute -right-20 -top-20 w-64 h-64 bg-primary/5 blur-[100px] rounded-full" />
-        
+
         <div className="space-y-3 relative z-10">
           <div className="flex items-center gap-3">
             <div className="p-2.5 bg-primary/10 rounded-xl border border-primary/20">
@@ -209,14 +274,14 @@ export const Settings: React.FC = () => {
         </div>
 
         <div className="flex gap-4 w-full md:w-auto relative z-10">
-          <button 
+          <button
             onClick={refreshConfig}
             className="group/refresh p-4 rounded-2xl bg-white/5 border border-white/10 text-white hover:bg-white/10 transition-all active:scale-95 flex items-center justify-center"
             title="Reload configuration"
           >
             <RefreshCw className={cn("w-5 h-5 transition-transform duration-700 group-hover/refresh:rotate-180", loading && "animate-spin")} />
           </button>
-          <button 
+          <button
             onClick={handleSave}
             disabled={saving}
             className="flex-1 md:flex-none flex items-center justify-center gap-3 px-10 py-4 rounded-2xl bg-primary text-black font-black uppercase tracking-[0.15em] text-xs hover:shadow-[0_8px_32px_rgba(0,186,255,0.3)] hover:brightness-110 transition-all active:scale-95 disabled:opacity-50"
@@ -230,7 +295,7 @@ export const Settings: React.FC = () => {
       {/* Messaging Area */}
       <AnimatePresence>
           {error && (
-            <motion.div 
+            <motion.div
                 initial={{ opacity: 0, y: -20 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.95 }}
@@ -242,7 +307,7 @@ export const Settings: React.FC = () => {
           )}
 
           {showSuccess && (
-            <motion.div 
+            <motion.div
                 initial={{ opacity: 0, y: -20 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.95 }}
@@ -266,8 +331,8 @@ export const Settings: React.FC = () => {
                 }}
                 className={cn(
                   "flex-shrink-0 whitespace-nowrap flex items-center gap-3 px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] transition-all duration-500",
-                  activeTab === tab.id 
-                    ? "bg-white text-black shadow-xl scale-105 z-10" 
+                  activeTab === tab.id
+                    ? "bg-white text-black shadow-xl scale-105 z-10"
                     : "text-on-surface-variant hover:text-white hover:bg-white/5"
                 )}
               >
@@ -308,7 +373,7 @@ export const Settings: React.FC = () => {
             transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
             className="space-y-8"
           >
-            {activeTab === 'general' && (
+            {activeTab === 'connect' && (
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                 <GlassCard className="lg:col-span-2">
                   <SectionHeader title="Node Identity" subtitle="General connection and branding parameters" icon={Globe} />
@@ -318,22 +383,14 @@ export const Settings: React.FC = () => {
                   </div>
                 </GlassCard>
 
-                <GlassCard>
-                   <SectionHeader title="Funding Policy" subtitle="Blockchain confirmation strategy" icon={Clock} />
+                <GlassCard className="lg:col-span-2">
+                   <SectionHeader title="Infrastructure" subtitle="flnd Backend Connectivity" icon={Network} />
                    <div className="grid grid-cols-1 gap-10">
-                    <Input label="Target Confirmations" icon={Scale} explanation="Target number of blocks for channel funding confirmation." type="number" value={formData?.targetConf} onChange={(v) => handleInputChange('targetConf', parseInt(v))} onInfo={(l, e) => setInfoModal({ label: l, explanation: e })} />
-                    <Input label="Min Confirmations" icon={Shield} explanation="Minimum confirmations for inputs used in channel opening." type="number" value={formData?.minConfs} onChange={(v) => handleInputChange('minConfs', parseInt(v))} onInfo={(l, e) => setInfoModal({ label: l, explanation: e })} />
-                   </div>
-                </GlassCard>
-
-                <GlassCard>
-                   <SectionHeader title="Infrastructure" subtitle="LND Backend Connectivity" icon={Network} />
-                   <div className="grid grid-cols-1 gap-10">
-                        <Input label="LND Address" icon={Globe} explanation="gRPC address of your underlying LND node." value={formData?.flnd?.address} onChange={(v) => handleInputChange('flnd.address', v)} onInfo={(l, e) => setInfoModal({ label: l, explanation: e })} />
+                        <Input label="flnd Address" icon={Globe} explanation="gRPC address of your underlying flnd node." value={formData?.flnd?.address} onChange={(v) => handleInputChange('flnd.address', v)} onInfo={(l, e) => setInfoModal({ label: l, explanation: e })} />
                         <div className="p-4 bg-primary/5 border border-primary/20 rounded-2xl flex items-center gap-4">
                             <Shield className="w-8 h-8 text-primary/40" />
                             <p className="text-[10px] font-mono text-on-surface-variant uppercase tracking-widest leading-relaxed">
-                                Macaroons and Certs are managed via <span className="text-primary font-black">environment variables</span> for enhanced security.
+                                The LSP private key, TLS cert, and macaroon are configured via <span className="text-primary font-black">from_env / from_file references</span> in nodes.yaml, not through this dashboard — see SecretRef in config/secretref.go.
                             </p>
                         </div>
                    </div>
@@ -341,52 +398,227 @@ export const Settings: React.FC = () => {
               </div>
             )}
 
-            {activeTab === 'jit' && (
+            {activeTab === 'business' && (
               <div className="space-y-8">
-                <GlassCard className="!p-0 overflow-hidden">
-                    <div className="p-8 md:p-10 bg-gradient-to-r from-primary/10 to-transparent flex flex-col md:flex-row items-start md:items-center justify-between gap-6 border-b border-white/5">
-                        <div className="flex items-center gap-5">
-                            <div className="w-14 h-14 rounded-[1.5rem] bg-primary text-black flex items-center justify-center shadow-[0_8px_32px_rgba(0,186,255,0.4)]">
-                                <Zap className="w-7 h-7 fill-current" />
-                            </div>
-                            <div>
-                                <h3 className="text-xl font-black text-white uppercase italic tracking-tighter">LSPS2 JIT Service</h3>
-                                <p className="text-[10px] font-mono text-on-surface-variant uppercase tracking-[0.2em] mt-1">On-demand channel creation for incoming HTLCs</p>
-                            </div>
+                {/* Risk profile */}
+                <GlassCard>
+                  <SectionHeader title="Risk Profile" subtitle="Confirmation / timelock / expiry bundle" icon={Shield} />
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    {PROFILE_OPTIONS.map((p) => (
+                      <button
+                        key={p.id}
+                        type="button"
+                        onClick={() => handleProfileChange(p.id)}
+                        className={cn(
+                          "text-left p-5 rounded-2xl border transition-all duration-300 space-y-2",
+                          formData?.profile === p.id
+                            ? "bg-primary/10 border-primary/40 ring-4 ring-primary/5"
+                            : "bg-surface-container-lowest/60 border-white/5 hover:border-white/20"
+                        )}
+                      >
+                        <p className="text-sm font-black text-white uppercase tracking-tight">{p.label}</p>
+                        <p className="text-[10px] font-mono text-on-surface-variant leading-relaxed">{p.blurb}</p>
+                      </button>
+                    ))}
+                  </div>
+                  {formData?.profile && (
+                    <div className="mt-6 p-5 bg-black/30 rounded-2xl border border-white/5 grid grid-cols-2 md:grid-cols-3 gap-4">
+                      {[
+                        ['Target Conf', formData?.targetConf],
+                        ['Min Conf', formData?.minConfs],
+                        ['CLTV Delta', formData?.timeLockDelta],
+                        ['Max Inactive (s)', formData?.maxInactiveDuration],
+                        ['LSPS1 Order TTL (s)', formData?.lsps1OrderExpirySeconds],
+                        ['JIT Valid Until (s)', formData?.jitValidUntilSeconds],
+                      ].map(([label, value]) => (
+                        <div key={label as string}>
+                          <p className="text-[9px] font-black text-on-surface-variant uppercase tracking-widest">{label}</p>
+                          <p className="text-sm font-mono text-secondary font-bold">{value ?? '—'}</p>
                         </div>
-                        <div className="flex items-center gap-4 bg-black/40 px-6 py-4 rounded-[2rem] border border-white/10">
-                            <span className="text-[10px] font-black text-white uppercase tracking-widest">Protocol Active</span>
-                            <Switch checked={formData?.jitEnabled} onChange={(v) => handleInputChange('jitEnabled', v)} />
-                        </div>
+                      ))}
+                      <p className="col-span-2 md:col-span-3 text-[9px] font-mono text-on-surface-variant/60 uppercase tracking-wider pt-2 border-t border-white/5">
+                        Read-only expansion of the selected profile's effective values, as currently loaded. Save and reload to preview a newly selected profile.
+                      </p>
                     </div>
-                    
-                    <div className="p-8 md:p-10 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-12 gap-y-12">
-                      <FinancialInput field="minPaymentSizeMloki" label="Min Payment Threshold" explanation="Minimum payment that triggers a JIT channel." value={formData?.minPaymentSizeMloki} source="MLOKI" onEdit={(f, s, v, l, e) => setEditingField({ field: f, source: s, value: v, label: l, explanation: e })} onInfo={(l, e) => setInfoModal({ label: l, explanation: e })} />
-                      <FinancialInput field="jitMaxPaymentSizeMloki" label="Max Liquidity Limit" explanation="Maximum payment supported for JIT creation." value={formData?.jitMaxPaymentSizeMloki} source="MLOKI" onEdit={(f, s, v, l, e) => setEditingField({ field: f, source: s, value: v, label: l, explanation: e })} onInfo={(l, e) => setInfoModal({ label: l, explanation: e })} />
-                      <FinancialInput field="baseFeeMloki" label="Routing Base Fee" explanation="Fixed cost per HTLC routed." value={formData?.baseFeeMloki} source="MLOKI" onEdit={(f, s, v, l, e) => setEditingField({ field: f, source: s, value: v, label: l, explanation: e })} onInfo={(l, e) => setInfoModal({ label: l, explanation: e })} />
-                      <Input label="PPM Fee Rate" icon={Percent} explanation="Proportional fee in parts-per-million." type="number" step="0.0001" value={formData?.feeRate} onChange={(v) => handleInputChange('feeRate', parseFloat(v))} onInfo={(l, e) => setInfoModal({ label: l, explanation: e })} />
-                      <Input label="Permyriad Fee" icon={DollarSign} explanation="Fee charged per myriad for operations." type="number" value={formData?.channelFeePermyriad} onChange={(v) => handleInputChange('channelFeePermyriad', parseInt(v))} onInfo={(l, e) => setInfoModal({ label: l, explanation: e })} />
-                      <FinancialInput field="minChannelCapacityLoki" label="Floor Capacity" explanation="Absolute minimum size for any new channel." value={formData?.minChannelCapacityLoki} source="LOKI" onEdit={(f, s, v, l, e) => setEditingField({ field: f, source: s, value: v, label: l, explanation: e })} onInfo={(l, e) => setInfoModal({ label: l, explanation: e })} />
+                  )}
+                </GlassCard>
+
+                {/* Opening fee */}
+                <GlassCard>
+                  <SectionHeader title="Channel Opening Fee" subtitle="What clients pay for a new/JIT channel" icon={Percent} />
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-10">
+                    <Input
+                      label="Rate" icon={Percent}
+                      explanation="Proportional fee, as a percentage of the payment size."
+                      type="number" step="0.01"
+                      value={openingFee.rate_percent}
+                      onChange={(v) => handleInputChange('opening_fee.rate_percent', parseFloat(v) || 0)}
+                      onInfo={(l, e) => setInfoModal({ label: l, explanation: e })}
+                    />
+                    <Input
+                      label="Floor (loki)" icon={Scale}
+                      explanation="Minimum fee charged, regardless of the proportional rate."
+                      type="number"
+                      value={openingFee.min_loki}
+                      onChange={(v) => handleInputChange('opening_fee.min_loki', parseInt(v) || 0)}
+                      onInfo={(l, e) => setInfoModal({ label: l, explanation: e })}
+                    />
+                  </div>
+
+                  <div className="mt-8 p-6 bg-primary/5 border border-primary/20 rounded-2xl space-y-4">
+                    <div className="flex items-center gap-3">
+                      <Input
+                        label="Preview payment size (loki)" icon={Activity}
+                        explanation="A hypothetical payment size, to see what fee it would incur."
+                        type="number"
+                        value={previewPaymentLoki}
+                        onChange={(v) => setPreviewPaymentLoki(parseInt(v) || 0)}
+                        onInfo={(l, e) => setInfoModal({ label: l, explanation: e })}
+                      />
                     </div>
+                    <p className="text-sm font-mono text-white leading-relaxed">
+                      For a payment of <span className="text-secondary font-bold">{previewPaymentLoki.toLocaleString()} loki</span>, the opening fee would be{' '}
+                      <span className="text-primary font-black">{previewFeeLoki.toLocaleString()} loki</span>{' '}
+                      ({(openingFee.rate_percent ?? 0)}% proportional, {(openingFee.min_loki ?? 0).toLocaleString()} loki floor).
+                    </p>
+                    <table className="w-full text-[11px] font-mono">
+                      <thead>
+                        <tr className="text-on-surface-variant uppercase tracking-widest text-[9px]">
+                          <th className="text-left py-1">Payment (loki)</th>
+                          <th className="text-right py-1">Fee (loki)</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {feeExampleSizes.map((size) => (
+                          <tr key={size} className="border-t border-white/5">
+                            <td className="py-2 text-white">{size.toLocaleString()}</td>
+                            <td className="py-2 text-right text-secondary font-bold">
+                              {computeOpeningFeeLoki(size, openingFee.rate_percent ?? 0, openingFee.min_loki ?? 0).toLocaleString()}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </GlassCard>
+
+                {/* Channel size */}
+                <GlassCard>
+                  <SectionHeader title="Channel Size" subtitle="Bounds applied to LSPS1 and JIT channels" icon={Scale} />
+                  <DualRangeSlider
+                    min={20_000}
+                    max={1_000_000_000}
+                    step={1000}
+                    valueMin={channelSize.min_loki ?? 20000}
+                    valueMax={channelSize.max_loki ?? 100_000_000}
+                    onChangeMin={(v) => handleInputChange('channel_size.min_loki', v)}
+                    onChangeMax={(v) => handleInputChange('channel_size.max_loki', v)}
+                    formatValue={(v) => `${v.toLocaleString()} loki`}
+                  />
+                  <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-10">
+                    <Input
+                      label="Min Capacity (loki)" icon={Scale}
+                      explanation="Absolute minimum size for any new channel."
+                      type="number"
+                      value={channelSize.min_loki}
+                      onChange={(v) => handleInputChange('channel_size.min_loki', parseInt(v) || 0)}
+                      onInfo={(l, e) => setInfoModal({ label: l, explanation: e })}
+                    />
+                    <Input
+                      label="Max Capacity (loki)" icon={Scale}
+                      explanation="Largest channel capacity this LSP will offer."
+                      type="number"
+                      value={channelSize.max_loki}
+                      onChange={(v) => handleInputChange('channel_size.max_loki', parseInt(v) || 0)}
+                      onInfo={(l, e) => setInfoModal({ label: l, explanation: e })}
+                    />
+                    <Input
+                      label="JIT Padding (loki)" icon={Zap}
+                      explanation="Headroom added on top of the incoming payment when opening a JIT channel."
+                      type="number"
+                      value={channelSize.padding_loki}
+                      onChange={(v) => handleInputChange('channel_size.padding_loki', parseInt(v) || 0)}
+                      onInfo={(l, e) => setInfoModal({ label: l, explanation: e })}
+                    />
+                  </div>
+                </GlassCard>
+
+                {/* Product toggles */}
+                <GlassCard>
+                  <SectionHeader title="Products" subtitle="Which protocols this LSP offers" icon={Zap} />
+                  <div className="space-y-6">
+                    <div className="flex items-center justify-between p-5 bg-surface-container-lowest/60 rounded-2xl border border-white/5">
+                      <div>
+                        <p className="text-sm font-black text-white uppercase tracking-tight">LSPS2 / JIT Channels</p>
+                        <p className="text-[10px] font-mono text-on-surface-variant mt-1">On-demand channel creation for incoming HTLCs.</p>
+                      </div>
+                      <Switch checked={!!formData?.jitEnabled} onChange={(v) => handleInputChange('jitEnabled', v)} />
+                    </div>
+                    <div className="flex items-center justify-between p-5 bg-surface-container-lowest/60 rounded-2xl border border-white/5">
+                      <div>
+                        <p className="text-sm font-black text-white uppercase tracking-tight">LSPS1 Zero Channel Reserve</p>
+                        <p className="text-[10px] font-mono text-on-surface-variant mt-1">Offer channels without requiring a client-side reserve.</p>
+                      </div>
+                      <Switch checked={!!formData?.lsps1SupportsZeroChannelReserve} onChange={(v) => handleInputChange('lsps1SupportsZeroChannelReserve', v)} />
+                    </div>
+                  </div>
                 </GlassCard>
               </div>
             )}
 
-            {activeTab === 'lsps1' && (
+            {activeTab === 'advanced' && (
               <div className="space-y-8">
+                <GlassCard className="!p-6 bg-tertiary/5 border-tertiary/20">
+                  <p className="text-[10px] font-mono text-on-surface-variant leading-relaxed">
+                    <span className="text-tertiary font-black uppercase">Note:</span> every field below is still fully
+                    supported for backward compatibility. If a Business Policy block above (opening fee, channel size,
+                    or a risk profile) is also configured, that block takes precedence over the corresponding
+                    individual field here — see BACKLOG.md's T5-2..T5-5 for the exact mapping.
+                  </p>
+                </GlassCard>
+
                 <GlassCard>
-                  <SectionHeader title="Manual Orders" subtitle="Pro-active liquidity purchasing protocol" icon={Shield} />
+                  <SectionHeader title="Funding Policy" subtitle="Blockchain confirmation strategy" icon={Clock} />
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-10">
+                    <Input label="Target Confirmations" icon={Scale} explanation="Target number of blocks for channel funding confirmation." type="number" value={formData?.targetConf} onChange={(v) => handleInputChange('targetConf', parseInt(v))} onInfo={(l, e) => setInfoModal({ label: l, explanation: e })} />
+                    <Input label="Min Confirmations" icon={Shield} explanation="Minimum confirmations for inputs used in channel opening." type="number" value={formData?.minConfs} onChange={(v) => handleInputChange('minConfs', parseInt(v))} onInfo={(l, e) => setInfoModal({ label: l, explanation: e })} />
+                    <Input label="Timelock Delta" icon={Clock} explanation="Minimum timelock delta required for the opened channel." type="number" value={formData?.timeLockDelta} onChange={(v) => handleInputChange('timeLockDelta', parseInt(v))} onInfo={(l, e) => setInfoModal({ label: l, explanation: e })} />
+                    <Input label="Max Inactive Duration (s)" icon={Activity} explanation="Duration in seconds used to calculate the MinLifetime block height." type="number" value={formData?.maxInactiveDuration} onChange={(v) => handleInputChange('maxInactiveDuration', parseInt(v))} onInfo={(l, e) => setInfoModal({ label: l, explanation: e })} />
+                  </div>
+                </GlassCard>
+
+                <GlassCard>
+                    <SectionHeader title="LSPS2 / JIT" subtitle="On-demand channel creation for incoming HTLCs" icon={Zap} />
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-12 gap-y-12">
+                      <FinancialInput field="minPaymentSizeMloki" label="Min Payment Threshold" explanation="Minimum payment that triggers a JIT channel." value={formData?.minPaymentSizeMloki} source="MLOKI" onEdit={(f, s, v, l, e) => setEditingField({ field: f, source: s, value: v, label: l, explanation: e })} onInfo={(l, e) => setInfoModal({ label: l, explanation: e })} />
+                      <FinancialInput field="jitMaxPaymentSizeMloki" label="Max Liquidity Limit" explanation="Maximum payment supported for JIT creation." value={formData?.jitMaxPaymentSizeMloki} source="MLOKI" onEdit={(f, s, v, l, e) => setEditingField({ field: f, source: s, value: v, label: l, explanation: e })} onInfo={(l, e) => setInfoModal({ label: l, explanation: e })} />
+                      <FinancialInput field="baseFeeMloki" label="Routing Base Fee" explanation="Fixed cost per HTLC routed." value={formData?.baseFeeMloki} source="MLOKI" onEdit={(f, s, v, l, e) => setEditingField({ field: f, source: s, value: v, label: l, explanation: e })} onInfo={(l, e) => setInfoModal({ label: l, explanation: e })} />
+                      <Input label="PPM Fee Rate" icon={Percent} explanation="Proportional routing fee, as a bare fraction (0.000001 = 1ppm)." type="number" step="0.0001" value={formData?.feeRate} onChange={(v) => handleInputChange('feeRate', parseFloat(v))} onInfo={(l, e) => setInfoModal({ label: l, explanation: e })} />
+                      <Input label="Permyriad Fee" icon={Percent} explanation="Opening fee rate, per 10,000 loki (permyriad)." type="number" value={formData?.channelFeePermyriad} onChange={(v) => handleInputChange('channelFeePermyriad', parseInt(v))} onInfo={(l, e) => setInfoModal({ label: l, explanation: e })} />
+                      <FinancialInput field="channelMinimumFeeMloki" label="Opening Fee Floor" explanation="Minimum fee for opening a zero-conf channel." value={formData?.channelMinimumFeeMloki} source="MLOKI" onEdit={(f, s, v, l, e) => setEditingField({ field: f, source: s, value: v, label: l, explanation: e })} onInfo={(l, e) => setInfoModal({ label: l, explanation: e })} />
+                      <FinancialInput field="minChannelCapacityLoki" label="Floor Capacity" explanation="Absolute minimum size for any new channel." value={formData?.minChannelCapacityLoki} source="LOKI" onEdit={(f, s, v, l, e) => setEditingField({ field: f, source: s, value: v, label: l, explanation: e })} onInfo={(l, e) => setInfoModal({ label: l, explanation: e })} />
+                      <FinancialInput field="additionalChannelCapacity" label="JIT Padding" explanation="Channel capacity added on top of the incoming payment when opening a new zero-conf channel." value={formData?.additionalChannelCapacity} source="LOKI" onEdit={(f, s, v, l, e) => setEditingField({ field: f, source: s, value: v, label: l, explanation: e })} onInfo={(l, e) => setInfoModal({ label: l, explanation: e })} />
+                      <FinancialInput field="jitMinChannelBalanceLoki" label="JIT Min Channel Balance" explanation="Minimum channel balance (capacity) in loki for JIT channels." value={formData?.jitMinChannelBalanceLoki} source="LOKI" onEdit={(f, s, v, l, e) => setEditingField({ field: f, source: s, value: v, label: l, explanation: e })} onInfo={(l, e) => setInfoModal({ label: l, explanation: e })} />
+                      <Input label="Max Client-to-Self Delay" icon={Clock} explanation="Maximum ClientToSelfDelay for JIT channel opening fee params." type="number" value={formData?.jitMaxClientToSelfDelay} onChange={(v) => handleInputChange('jitMaxClientToSelfDelay', parseInt(v))} onInfo={(l, e) => setInfoModal({ label: l, explanation: e })} />
+                      <Input label="Fee Params Validity (s)" icon={Activity} explanation="Validity duration in seconds for the JIT fee parameters." type="number" value={formData?.jitValidUntilSeconds} onChange={(v) => handleInputChange('jitValidUntilSeconds', parseInt(v))} onInfo={(l, e) => setInfoModal({ label: l, explanation: e })} />
+                    </div>
+                </GlassCard>
+
+                <GlassCard>
+                  <SectionHeader title="LSPS1 Manual Orders" subtitle="Pro-active liquidity purchasing protocol" icon={Shield} />
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-12 gap-y-12">
-                    <Input label="Funding Confirms" icon={Clock} explanation="Confirmations required for manual LSPS1 orders." type="number" value={formData?.lsps1MinRequiredChannelConfirmations} onChange={(v) => handleInputChange('lsps1MinRequiredChannelConfirmations', parseInt(v))} onInfo={(l, e) => setInfoModal({ label: l, explanation: e })} />
+                    <Input label="Required Channel Confirmations" icon={Clock} explanation="Minimum required channel confirmations for LSPS1 orders." type="number" value={formData?.lsps1MinRequiredChannelConfirmations} onChange={(v) => handleInputChange('lsps1MinRequiredChannelConfirmations', parseInt(v))} onInfo={(l, e) => setInfoModal({ label: l, explanation: e })} />
+                    <Input label="Min Funding Confirms Within (blocks)" icon={Clock} explanation="Minimum funding confirms within blocks for LSPS1 orders." type="number" value={formData?.lsps1MinFundingConfirmsWithinBlocks} onChange={(v) => handleInputChange('lsps1MinFundingConfirmsWithinBlocks', parseInt(v))} onInfo={(l, e) => setInfoModal({ label: l, explanation: e })} />
                     <Input label="Max Expiry (Blocks)" icon={Scale} explanation="Maximum allowed channel lifespan in blocks." type="number" value={formData?.lsps1MaxChannelExpiryBlocks} onChange={(v) => handleInputChange('lsps1MaxChannelExpiryBlocks', parseInt(v))} onInfo={(l, e) => setInfoModal({ label: l, explanation: e })} />
                     <Input label="Order TTL (Seconds)" icon={Activity} explanation="Time before a pending order is cancelled." type="number" value={formData?.lsps1OrderExpirySeconds} onChange={(v) => handleInputChange('lsps1OrderExpirySeconds', parseInt(v))} onInfo={(l, e) => setInfoModal({ label: l, explanation: e })} />
-                    
+
                     <div className="lg:col-span-3 pt-6 border-t border-white/5" />
-                    
+
                     <FinancialInput field="lsps1MinInitialClientBalanceLoki" label="Min Client Stake" explanation="Minimum balance client must fund initially." value={formData?.lsps1MinInitialClientBalanceLoki} source="LOKI" onEdit={(f, s, v, l, e) => setEditingField({ field: f, source: s, value: v, label: l, explanation: e })} onInfo={(l, e) => setInfoModal({ label: l, explanation: e })} />
                     <FinancialInput field="lsps1MaxInitialClientBalanceLoki" label="Max Client Stake" explanation="Maximum balance allowed for client stake." value={formData?.lsps1MaxInitialClientBalanceLoki} source="LOKI" onEdit={(f, s, v, l, e) => setEditingField({ field: f, source: s, value: v, label: l, explanation: e })} onInfo={(l, e) => setInfoModal({ label: l, explanation: e })} />
                     <FinancialInput field="lsps1MinInitialLspBalanceLoki" label="Min LSP Liquidity" explanation="Minimum capacity LSP must provide." value={formData?.lsps1MinInitialLspBalanceLoki} source="LOKI" onEdit={(f, s, v, l, e) => setEditingField({ field: f, source: s, value: v, label: l, explanation: e })} onInfo={(l, e) => setInfoModal({ label: l, explanation: e })} />
                     <FinancialInput field="lsps1MaxInitialLspBalanceLoki" label="Max LSP Liquidity" explanation="Maximum capacity LSP will provide." value={formData?.lsps1MaxInitialLspBalanceLoki} source="LOKI" onEdit={(f, s, v, l, e) => setEditingField({ field: f, source: s, value: v, label: l, explanation: e })} onInfo={(l, e) => setInfoModal({ label: l, explanation: e })} />
+                    <FinancialInput field="lsps1MinChannelBalanceLoki" label="Min Channel Capacity" explanation="Minimum channel balance (capacity) in loki for LSPS1 orders." value={formData?.lsps1MinChannelBalanceLoki} source="LOKI" onEdit={(f, s, v, l, e) => setEditingField({ field: f, source: s, value: v, label: l, explanation: e })} onInfo={(l, e) => setInfoModal({ label: l, explanation: e })} />
                     <FinancialInput field="lsps1MaxChannelBalanceLoki" label="Absolute Max Cap" explanation="Largest possible channel capacity for LSPS1." value={formData?.lsps1MaxChannelBalanceLoki} source="LOKI" onEdit={(f, s, v, l, e) => setEditingField({ field: f, source: s, value: v, label: l, explanation: e })} onInfo={(l, e) => setInfoModal({ label: l, explanation: e })} />
                   </div>
                 </GlassCard>
@@ -394,16 +626,16 @@ export const Settings: React.FC = () => {
             )}
           </motion.div>
         </AnimatePresence>
-        
-        <InfoModal 
+
+        <InfoModal
             isOpen={!!infoModal}
             onClose={() => setInfoModal(null)}
             label={infoModal?.label || ''}
             explanation={infoModal?.explanation || ''}
         />
-        
+
         {editingField && (
-            <CurrencyConverterModal 
+            <CurrencyConverterModal
                 isOpen={!!editingField}
                 onClose={() => setEditingField(null)}
                 onConfirm={(v) => {

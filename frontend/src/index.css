@@ -87,3 +87,39 @@
 ::-webkit-scrollbar-thumb {
   @apply bg-surface-container-high rounded-full hover:bg-primary/30 transition-colors;
 }
+
+/* DualRangeSlider (frontend/src/components/DualRangeSlider.tsx): the
+   track itself ignores pointer events (the two <input>s overlap), only
+   the thumb is interactive, so each handle can be dragged independently
+   without fighting over clicks in the middle of the range. */
+.range-thumb {
+  height: 1.5rem;
+}
+.range-thumb::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  pointer-events: auto;
+  width: 18px;
+  height: 18px;
+  border-radius: 9999px;
+  background: var(--color-primary);
+  box-shadow: 0 0 12px rgba(0, 186, 255, 0.5);
+  cursor: pointer;
+  border: 2px solid var(--color-background);
+}
+.range-thumb::-moz-range-thumb {
+  pointer-events: auto;
+  width: 18px;
+  height: 18px;
+  border-radius: 9999px;
+  background: var(--color-primary);
+  box-shadow: 0 0 12px rgba(0, 186, 255, 0.5);
+  cursor: pointer;
+  border: 2px solid var(--color-background);
+}
+.range-thumb::-webkit-slider-runnable-track {
+  -webkit-appearance: none;
+  background: transparent;
+}
+.range-thumb::-moz-range-track {
+  background: transparent;
+}
