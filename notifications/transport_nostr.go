@@ -9,6 +9,7 @@ import (
 	nostrlsps5 "github.com/flowgate-lsp/nostr-lsps5"
 	"github.com/nbd-wtf/go-nostr"
 	"github.com/rs/zerolog/log"
+	"golang.org/x/sync/singleflight"
 )
 
 // NostrTransport implements NotificationTransport for Nostr encrypted LSPS5 delivery.
@@ -142,6 +143,11 @@ func (t *NostrTransport) Send(ctx context.Context, targetUri string, method stri
 // RelayPool manages persistent connections to relays
 type RelayPool struct {
 	relays sync.Map // map[string]*nostr.Relay
+	// group serializes GetOrConnect per URL (F-6): without it, two
+	// concurrent notifications to the same relay can both miss the cache,
+	// both dial, and both Store — the second Store silently overwrites
+	// the first, leaking a live connection that's never closed.
+	group singleflight.Group
 }
 
 func NewRelayPool() *RelayPool {
@@ -149,26 +155,31 @@ func NewRelayPool() *RelayPool {
 }
 
 func (rp *RelayPool) GetOrConnect(ctx context.Context, url string) (*nostr.Relay, error) {
-	// Connect timeout
-	connectCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-
-	if val, ok := rp.relays.Load(url); ok {
-		relay := val.(*nostr.Relay)
-		if relay.IsConnected() {
-			return relay, nil
+	v, err, _ := rp.group.Do(url, func() (interface{}, error) {
+		if val, ok := rp.relays.Load(url); ok {
+			relay := val.(*nostr.Relay)
+			if relay.IsConnected() {
+				return relay, nil
+			}
+			// relay.Connect() cannot revive a closed relay — the internal connectionContext
+			// is permanently cancelled once close() is called. Create a fresh relay object.
+			log.Info().Str("relay", url).Msg("NostrRelay: connection lost, reconnecting")
+		} else {
+			log.Info().Str("relay", url).Msg("NostrRelay: connecting")
 		}
-		// relay.Connect() cannot revive a closed relay — the internal connectionContext
-		// is permanently cancelled once close() is called. Create a fresh relay object.
-		log.Info().Str("relay", url).Msg("NostrRelay: connection lost, reconnecting")
-	} else {
-		log.Info().Str("relay", url).Msg("NostrRelay: connecting")
-	}
 
-	relay, err := nostr.RelayConnect(connectCtx, url)
+		connectCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+
+		relay, err := nostr.RelayConnect(connectCtx, url)
+		if err != nil {
+			return nil, fmt.Errorf("failed to reconnect to relay: %w", err)
+		}
+		rp.relays.Store(url, relay)
+		return relay, nil
+	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to reconnect to relay: %w", err)
+		return nil, err
 	}
-	rp.relays.Store(url, relay)
-	return relay, nil
+	return v.(*nostr.Relay), nil
 }
