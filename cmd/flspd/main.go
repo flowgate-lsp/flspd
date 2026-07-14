@@ -18,6 +18,7 @@ func main() {
 	app.Commands = []cli.Command{
 		genKeyCommand,
 		migrateCommand,
+		configCommand,
 	}
 	if err := app.Run(os.Args); err != nil {
 		log.Fatal().Msgf("Failed to run app: %v", err)

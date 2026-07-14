@@ -17,7 +17,6 @@ import (
 	"github.com/flokiorg/flnd/funding"
 	"github.com/nbd-wtf/go-nostr"
 	"github.com/rs/zerolog/log"
-	"gopkg.in/yaml.v3"
 
 	ecies "github.com/ecies/go/v2"
 	btcec "github.com/flokiorg/go-flokicoin/crypto"
@@ -69,32 +68,10 @@ func runLspd(cliCtx *cli.Context) error {
 	}
 	common.InitLogger()
 	log.Info().Msgf(`Starting flspd, tag='%s', revision='%s'`, build.GetTag(), build.GetRevision())
-	// Load nodes configuration
-	var nodesContent []byte
-	var err error
 
-	if nodesJson := os.Getenv("NODES_JSON"); nodesJson != "" {
-		nodesContent = []byte(nodesJson)
-	} else {
-		nodesConfigPath := os.Getenv("NODES_CONFIG_PATH")
-		if nodesConfigPath == "" {
-			return fmt.Errorf("NODES_CONFIG_PATH environment variable is not set")
-		}
-
-		nodesContent, err = os.ReadFile(nodesConfigPath)
-		if err != nil {
-			return fmt.Errorf("failed to read nodes config file: %w", err)
-		}
-	}
-
-	var nodeConfigs []*config.NodeConfig
-	err = yaml.Unmarshal(nodesContent, &nodeConfigs)
+	nodeConfigs, err := loadNodeConfigs()
 	if err != nil {
-		log.Fatal().Msgf("failed to unmarshal nodes config from file: %v", err)
-	}
-
-	if len(nodeConfigs) == 0 {
-		log.Fatal().Msgf("need at least one node configured in nodes config file.")
+		log.Fatal().Msgf("failed to load nodes config: %v", err)
 	}
 
 	nodes, err := initializeNodes(nodeConfigs)

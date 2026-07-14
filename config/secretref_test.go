@@ -167,6 +167,20 @@ func TestSecretRef_MarshalYAML_RoundTripsOriginalForm(t *testing.T) {
 			assert.Equal(t, r, roundTripped, "marshaling then unmarshaling must reproduce the exact same ref, not a resolved literal")
 
 			assert.NotContains(t, string(out), "resolved-value-should-not-leak")
+
+			// The struct-equality check above doesn't catch a marshaled
+			// document that includes the OTHER (unset) key with an empty
+			// value — UnmarshalYAML treats an empty string as "not set"
+			// either way, so re-parsing silently absorbs the noise. But a
+			// human reading `flspd config show`'s output would see it, so
+			// check the raw text too: a from_env ref must never mention
+			// from_file, and vice versa.
+			switch tc.name {
+			case "from_env":
+				assert.NotContains(t, string(out), "from_file")
+			case "from_file":
+				assert.NotContains(t, string(out), "from_env")
+			}
 		})
 	}
 }

@@ -43,8 +43,8 @@ func InlineSecret(value string) SecretRef {
 }
 
 type secretRefYAML struct {
-	FromEnv  string `yaml:"from_env"`
-	FromFile string `yaml:"from_file"`
+	FromEnv  string `yaml:"from_env,omitempty"`
+	FromFile string `yaml:"from_file,omitempty"`
 }
 
 // UnmarshalYAML accepts either a plain scalar string (today's flat
