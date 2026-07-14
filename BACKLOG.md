@@ -35,7 +35,7 @@ number-soup and then get reorganized a second time.
 
 | Phase | Theme | Gate to proceed | Status |
 |---|---|---|---|
-| 0 | Contain live secret exposure | Secrets rotated, file untracked | ◐ Untracked + history purged (local + remote); credential rotation on the live node still open |
+| 0 | Contain live secret exposure | Secrets rotated, file untracked | ◐ Untracked, history purged, CI guard added; only credential rotation on the live node still open |
 | 1 | Green the build + safety net | `go test ./... -race` passes in CI | ◐ T1-1..T1-3 done; T1-4, T1-5 open |
 | 2 | Fix defects on current structure | All P2 items merged w/ regression test | ☐ Not started |
 | 3 | Unit-test coverage buildout | Critical-four packages ≥70–80% | ☐ Not started |
@@ -89,7 +89,8 @@ placeholders:
 5. Add a pre-commit or CI check that fails the build if any file under
    `data/` (or any path matching common secret patterns) is staged for commit,
    so this class of mistake can't silently recur before Phase 5 lands the
-   structural fix.
+   structural fix. **Done** (commit `194dbdc`) — a `secret-scan` CI job now
+   fails on any tracked file under `data/`, plus a general gitleaks pass.
 
 **Verified LND-macaroon rotation procedure** (tested on a disposable devnet
 `flnd` node, not assumed from docs — flnd is an LND fork and some
