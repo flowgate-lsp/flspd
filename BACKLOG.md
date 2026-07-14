@@ -37,8 +37,8 @@ number-soup and then get reorganized a second time.
 |---|---|---|---|
 | 0 | Contain live secret exposure | Untracked, purged, guarded | ✅ Done — confirmed test data, no rotation needed |
 | 1 | Green the build + safety net | `go test ./... -race` passes in CI | ◐ T1-1..T1-3 done; T1-4, T1-5 open |
-| 2 | Fix defects on current structure | All P2 items merged w/ regression test | ✅ F-1, F-2, C-1, C-2, C-3, F-9 done; F-5, F-7, F-8 (medium) remain |
-| 3 | Unit-test coverage buildout | Critical-four packages ≥70–80% | ◐ In progress: F-6, F-9 done; interceptor 12.2%, lsps 45.9%, postgresql 11.7%, notifications 23.2%, lnd 4.7%, common 36.0%, lightning 86.9% |
+| 2 | Fix defects on current structure | All P2 items merged w/ regression test | ✅ F-1, F-2, C-1, C-2, C-3, F-7, F-9 done; F-5, F-8 (medium) remain |
+| 3 | Unit-test coverage buildout | Critical-four packages ≥70–80% | ◐ In progress: F-6, F-7, F-9 done, T3-6 done; interceptor 12.2%, lsps 45.9%, postgresql 11.7%, notifications 23.2%, lnd 4.7%, common 36.0%, config 89.3%, lightning 86.9%, auth 76.5% |
 | 4 | YAML-driven integration tests | Runner + 3 seed scenarios merged | ☐ Not started |
 | 5 | Config model + secrets-by-reference | New model shipped behind compat shim | ☐ Not started |
 | 6 | Repo structure / arbo migration | Tree matches target layout, build green throughout | ☐ Not started |
@@ -406,6 +406,17 @@ reject replays inside the validity window.
 **Acceptance criteria:** table test covering valid / expired / tampered-body
 / replayed events.
 
+**Status:** ✅ Done (commit `7d0ce90`). Payload-hash now enforced for any
+method carrying a body (matched against `ComputePayloadHash`); added a
+short-lived (180s) in-memory replay cache keyed on `event.GetID()`
+(recomputed from content, not the unverified client-supplied `ID` field —
+go-nostr's `CheckSignature` doesn't check that field, so trusting it would
+have made the replay cache itself spoofable). Table tests cover valid /
+expired / future-timestamp / tampered-signature / wrong-kind / URL-mismatch
+/ method-mismatch / missing-payload-hash / wrong-payload-hash / replayed /
+query-param-fallback. Each of the two new checks confirmed to fail its
+targeted tests when temporarily no-op'd, and pass with the fix restored.
+
 ### F-8: Settlement error paths fail silently, leaving orders stuck
 **Severity:** Medium · **Location:** `lsps/settlement_service.go:146,274`
 
@@ -520,16 +531,17 @@ Promise sign/verify round-trip and tamper-rejection, `ValidateWebhookUrl`
 (private-IP/SSRF matrix), config floor/min-max validation, SCID string
 codec, NIP-98 valid/expired/tampered (F-7).
 
-**Status:** ◐ In progress (commits `aa586fa`, `3f80c8b`). Done: `common`
-(promise sign/verify round-trip + tamper/wrong-signer/malformed rejection,
-`paramsHash` determinism, `ValidateWebhookUrl`, `isPrivateIP` full SSRF
-matrix, `ParsePrivateKey`) — coverage 0% → 36.0%. Done: `lightning`
+**Status:** ✅ Done (commits `aa586fa`, `3f80c8b`, `86175cb`, `7d0ce90`).
+`common` (promise sign/verify round-trip + tamper/wrong-signer/malformed
+rejection, `paramsHash` determinism, `ValidateWebhookUrl`, `isPrivateIP`
+full SSRF matrix, `ParsePrivateKey`) — coverage 0% → 36.0%. `lightning`
 (`ShortChannelID`/`OutPoint` round-trip + invalid-format tables,
 `SignLsps5Message`/`VerifyMessage` round trip, found and fixed F-9 along
-the way) — coverage 0% → 86.9%. Still open: `config` (floor/min-max
-validation on `Validate`/`ValidateLsps1`/`ValidateJit`), `auth` (NIP-98
-valid/expired/tampered/replayed — should fix F-7 alongside, same
-test-driven-fix pattern as F-6).
+the way) — coverage 0% → 86.9%. `config` (floor/min-max validation on
+`Validate`/`ValidateLsps1`/`ValidateJit`, network-floor vs business-floor
+relationships) — coverage 0% → 89.3%. `auth` (NIP-98
+valid/expired/tampered/replayed table tests, fixed F-7 alongside) —
+coverage 0% → 76.5%.
 
 ---
 
