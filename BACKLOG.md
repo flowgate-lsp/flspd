@@ -38,7 +38,7 @@ number-soup and then get reorganized a second time.
 | 0 | Contain live secret exposure | Untracked, purged, guarded | ✅ Done — confirmed test data, no rotation needed |
 | 1 | Green the build + safety net | `go test ./... -race` passes in CI | ◐ T1-1..T1-3 done; T1-4, T1-5 open |
 | 2 | Fix defects on current structure | All P2 items merged w/ regression test | ✅ F-1, F-2, C-1, C-2, C-3, F-7, F-9, F-10, F-11, F-12 done; F-5, F-8 (medium) remain |
-| 3 | Unit-test coverage buildout | Critical-four packages ≥70–80% | ◐ In progress: F-6, F-7, F-9, F-12 done, T3-2/T3-4/T3-5/T3-6 done; interceptor 38.9%, lsps 49.0%, postgresql 35.8%, notifications 54.3%, lnd 4.7%, common 36.0%, config 89.3%, lightning 86.9%, auth 76.5% |
+| 3 | Unit-test coverage buildout | Critical-four packages ≥70–80% | ◐ In progress: F-6, F-7, F-9, F-12 done, T3-2/T3-4/T3-5/T3-6 done; interceptor 38.9%, lsps 49.0%, postgresql 54.6%, notifications 54.3%, lnd 4.7%, common 36.0%, config 89.3%, lightning 86.9%, auth 76.5% |
 | 4 | YAML-driven integration tests | Runner + 3 seed scenarios merged | ◐ Foundation built + proven (Devnet/FlspdProcess/LSPS2 client, 2 more real bugs found — F-10 additions); YAML schema/runner not started; scenario 1's Go-level proof blocked on a devnet gossip-propagation gap, see T4-1 |
 | 5 | Config model + secrets-by-reference | New model shipped behind compat shim | ☐ Not started |
 | 6 | Repo structure / arbo migration | Tree matches target layout, build green throughout | ☐ Not started |
@@ -602,21 +602,30 @@ Introduce a container-backed store test harness (reuse itest's
 (F-2), SCID int64/uint64 round-trips, `ExpireStaleOrders`, reserved-liquidity
 SQL.
 
-**Status:** ◐ In progress (commits `b4ff434`, `589235a`, `6dbcbf2`). Own
-harness landed (`TestMain` + disposable postgres container, not itest's —
-keeps postgresql/ independently testable without an itest dependency).
-Done: `PaymentInfo` null-params (F-2), CAS atomicity at the SQL level (F-1,
-20 concurrent goroutines on one real row), `GetReservedLiquidity`,
-`ExpireStaleOrders`, `PostgresOpeningStore`'s LSPS1 order registry
-(register/get/list/count incl. client+state+expiry-cutoff filters), LSPS5
-webhook upsert, LSPS2 buy registration round-trip, fee-params settings
-(incl. the two global default rows the initial migration seeds), and
-`NotificationsStore` in full (register/upsert/unsubscribe/expire,
-enqueue+JSONB round-trip, pending/backoff transitions). Still open: SCID
-int64/uint64 round-trips, `revenue_cli_store.go`, `history_store.go`
-(CopyFrom-based batch inserts — more involved, `channels`/`open_channel_htlcs`
-tables are also where F-9's fix should be re-verified end-to-end once
-Phase 4's devnet-backed itests exist). `postgresql` coverage: 11.7% → 35.8%.
+**Status:** ◐ In progress (commits `b4ff434`, `589235a`, `6dbcbf2`,
+`4100095`, `ded3998`). Own harness landed (`TestMain` + disposable
+postgres container, not itest's — keeps postgresql/ independently
+testable without an itest dependency). Done: `PaymentInfo` null-params
+(F-2), CAS atomicity at the SQL level (F-1, 20 concurrent goroutines on
+one real row), `GetReservedLiquidity`, `ExpireStaleOrders`,
+`PostgresOpeningStore`'s LSPS1 order registry (register/get/list/count
+incl. client+state+expiry-cutoff filters), LSPS5 webhook upsert, LSPS2
+buy registration round-trip, fee-params settings (incl. the two global
+default rows the initial migration seeds), `NotificationsStore` in full
+(register/upsert/unsubscribe/expire, enqueue+JSONB round-trip,
+pending/backoff transitions), the SCID int64/uint64 sign-flip round-trip
+(a bit-63-set SCID through both the LSPS2 buy-registration write path and
+`InterceptStore.GetLsps2Order`'s previously-uncovered read path — the
+existing round-trip test's own comment claimed to cover this but used a
+fixture value that never actually set the sign bit), and `history_store.go`'s
+CopyFrom-based write paths in full (`UpdateChannels` insert-then-upsert
+incl. nil-scid and first_seen-preserved-on-upsert, `InsertForwards`
+DO-NOTHING vs `UpdateForwards` DO-UPDATE on conflict, `FetchLndForwardOffset`,
+`AddOpenChannelHtlc`) — this is also where F-9's outpoint-byte-order fix
+lives, now with direct coverage instead of only pure-function tests.
+Only remaining gap: `revenue_cli_store.go` (the revenue-export CLI's
+reads — complex multi-table JOIN SQL, no bugs suspected, lower urgency
+than the write-path coverage above). `postgresql` coverage: 11.7% → 54.6%.
 
 ### T3-4: lnd adapter mapping tests
 Pure mappers (`mapScidsFromChannel`, `extractChannelPoint`, invoice-state /
