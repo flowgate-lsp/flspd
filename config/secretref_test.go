@@ -29,6 +29,8 @@ func TestNodesSampleYaml_ParsesAndIsSecretFree(t *testing.T) {
 	require.NotNil(t, cfg.Lnd)
 	assert.False(t, cfg.Lnd.Cert.isInline(), "sample flnd.cert must be a reference, not inline")
 	assert.False(t, cfg.Lnd.Macaroon.isInline(), "sample flnd.macaroon must be a reference, not inline")
+
+	assert.NoError(t, cfg.Validate(), "the committed sample must be a fully valid config, tiered blocks included, not just syntactically parseable YAML")
 }
 
 func unmarshalSecretRef(t *testing.T, doc string) SecretRef {
