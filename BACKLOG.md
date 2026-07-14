@@ -37,10 +37,10 @@ number-soup and then get reorganized a second time.
 |---|---|---|---|
 | 0 | Contain live secret exposure | Untracked, purged, guarded | ✅ Done — confirmed test data, no rotation needed |
 | 1 | Green the build + safety net | `go test ./... -race` passes in CI | ◐ T1-1..T1-3 done; T1-4, T1-5 open |
-| 2 | Fix defects on current structure | All P2 items merged w/ regression test | ✅ F-1, F-2, C-1, C-2, C-3, F-7, F-9, F-10, F-11, F-12, F-13 done; F-5, F-8 (medium) remain |
-| 3 | Unit-test coverage buildout | Critical-four packages ≥70–80% | ◐ In progress: F-6, F-7, F-9, F-12, F-13 done, T3-2/T3-3/T3-4/T3-5/T3-6 done; interceptor 38.9%, lsps 49.0%, postgresql 69.1%, notifications 54.3%, lnd 4.7%, common 36.0%, config 89.3%, lightning 86.9%, auth 76.5% |
+| 2 | Fix defects on current structure | All P2 items merged w/ regression test | ✅ F-1, F-2, C-1, C-2, C-3, F-5, F-7, F-9, F-10, F-11, F-12, F-13 done; F-8 (medium) remains |
+| 3 | Unit-test coverage buildout | Critical-four packages ≥70–80% | ◐ In progress: F-5, F-6, F-7, F-9, F-12, F-13 done, T3-2/T3-3/T3-4/T3-5/T3-6 done; interceptor 38.9%, lsps 49.4%, postgresql 69.1%, notifications 54.3%, lnd 4.7%, common 36.0%, config 93.4%, lightning 86.9%, auth 76.5% |
 | 4 | YAML-driven integration tests | Runner + 3 seed scenarios merged | ◐ Foundation built + proven (Devnet/FlspdProcess/LSPS2 client, 2 more real bugs found — F-10 additions); YAML schema/runner not started; scenario 1's Go-level proof blocked on a devnet gossip-propagation gap, see T4-1 |
-| 5 | Config model + secrets-by-reference | New model shipped behind compat shim | ◐ T5-1 done (secrets-by-reference); T5-2..T5-7 (unit model, CLI tooling, Settings.tsx re-skin) not started |
+| 5 | Config model + secrets-by-reference | New model shipped behind compat shim | ◐ T5-1..T5-5 done (secrets-by-reference, unit/fee/channel-size model, profiles); T5-6 (CLI tooling), T5-7 (Settings.tsx re-skin) not started |
 | 6 | Repo structure / arbo migration | Tree matches target layout, build green throughout | ☐ Not started |
 | — | Performance backlog (parallel, non-blocking) | — | ☐ Not started |
 
@@ -377,6 +377,24 @@ the broader config redesign, removes risk from that later phase.)
 **Acceptance criteria:** one fee function, fuzz-tested for overflow and
 rounding; all three call sites use it; F-3's characterization test still
 passes with the unified result.
+
+**Status:** ✅ Done (commit `60bdf29`, during T5-3). Was never actually
+finished despite this entry existing since Phase 2 — `handler_lsps1.go`
+still had its own hand-rolled `floor(max(proportional, min))` calculation,
+diverging from `computeOpeningFee`'s ceiling-rounded result for the same
+inputs. Fixed by routing LSPS1 through the same function (now exported as
+`ComputeOpeningFee`, so T5-6's `flspd config explain fees` can reuse it
+too). Confirmed via revert-and-verify with a fixture landing on a
+capacity/proportional product just past a 1000-mloki boundary (old: 2
+loki, new: 3 loki). Added the fuzz test this entry's own acceptance
+criteria called for (`FuzzComputeOpeningFee`, 600k+ generated cases
+clean). The interceptor's `computeJitOutgoingAmount` (T1-1) is
+deliberately NOT merged into the same function — it solves the inverse
+problem (given a gross payment, what outgoing amount + fee results,
+needed for the JIT gross-up) rather than "fee given a target payment
+size," so forcing them into one function would mean restructuring
+correct, working, HTLC-money-path-critical logic without a real
+correctness gain. `lsps` coverage: 49.0% → 49.4%.
 
 ### F-6: Nostr relay connection race leaks sockets
 **Severity:** Medium · **Location:** `notifications/transport_nostr.go:151` (`RelayPool.GetOrConnect`)
@@ -940,20 +958,54 @@ from anything a human edits directly. **flspd is Flokicoin, not Bitcoin —
 never introduce `sats`/`BTC` naming here or anywhere else in the config,
 docs, or code; the unit names are `loki` and `FLC`.**
 
+**Status:** ✅ Done (commit `6722bf0`). Added `config/tiered.go`:
+`opening_fee: {rate_percent, min_loki}`, `routing_fee: {ppm, base_loki}`,
+and `channel_size: {min_loki, max_loki, padding_loki}`, each expanding
+into the existing flat fields at `Validate()` time so every downstream
+consumer (interceptor, lsps, cmd/flspd) is unchanged — see the
+commit message for the exact field mapping and the compat-shim
+precedence rule (block-level: a new block, when present, always
+overwrites the flat field(s) it maps to). `nodes.sample.yaml` rewritten
+to use all three. `permyriad`/bare-fraction fields remain supported
+(not removed) for one-release backward compat, per this phase's stated
+goal — just no longer what the sample file demonstrates.
+
 ### T5-3: One shared fee model
 Confirm F-5's unified fee function (landed in Phase 2) is the single
 implementation referenced by the new `opening_fee: {rate_percent, min_loki}`
 config block — no parallel fee math anywhere.
+
+**Status:** ✅ Done (commit `60bdf29`). F-5 was never actually finished —
+see its BACKLOG entry — `handler_lsps1.go` still had its own hand-rolled
+fee calculation, diverging from LSPS2's. Fixed it here rather than leaving
+a stale "confirmed" note that wasn't true; the new `opening_fee` block
+(T5-2) and both LSPS1/LSPS2 handlers now share one function,
+`ComputeOpeningFee`, fuzz-tested (`FuzzComputeOpeningFee`).
 
 ### T5-4: Derived channel-size bounds
 Replace the six independent LSPS1/JIT min/max balance fields with one
 `channel_size: {min_loki, max_loki, padding_loki}` block; derive the
 protocol-specific bounds from it with validated defaults.
 
+**Status:** ✅ Done (commit `6722bf0`, alongside T5-2/T5-5 — see T5-2's
+entry for the shared implementation notes).
+
 ### T5-5: Risk profile presets
 Add `profile: conservative|balanced|aggressive` that expands to the
 confirmation/CLTV-delta/expiry/zero-conf bundle; any single value stays
 overridable under an `advanced:` block.
+
+**Status:** ✅ Done (commit `6722bf0`). Three presets in
+`config/tiered.go`'s `profilePresets` — `balanced` matches this repo's
+own `nodes.sample.yaml` baseline (targetConf 6, minConfs 3, timeLockDelta
+400); `conservative` and `aggressive` scale confirmations/CLTV-delta/
+expiry windows around it, `aggressive` allowing 0-conf (`minConfs: 0`).
+No separate `advanced:` block was needed to make fields individually
+overridable — every field a profile touches is only filled in if still
+at its zero/nil value after normal YAML unmarshaling, so setting it
+directly in the document (at any nesting level flat fields already
+support) overrides the preset. Presets are risk-tolerance defaults, not
+protocol minimums/maximums, documented as such in `tiered.go`.
 
 ### T5-6: Operator visibility tooling
 Add `flspd config check` (validate, human-readable errors), `flspd config
