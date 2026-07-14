@@ -37,8 +37,8 @@ number-soup and then get reorganized a second time.
 |---|---|---|---|
 | 0 | Contain live secret exposure | Untracked, purged, guarded | ✅ Done — confirmed test data, no rotation needed |
 | 1 | Green the build + safety net | `go test ./... -race` passes in CI | ◐ T1-1..T1-3 done; T1-4, T1-5 open |
-| 2 | Fix defects on current structure | All P2 items merged w/ regression test | ✅ F-1, F-2, C-1, C-2, C-3, F-7, F-9, F-10 done; F-5, F-8 (medium) remain |
-| 3 | Unit-test coverage buildout | Critical-four packages ≥70–80% | ◐ In progress: F-6, F-7, F-9 done, T3-2/T3-4/T3-6 done; interceptor 38.9%, lsps 49.0%, postgresql 35.8%, notifications 39.1%, lnd 4.7%, common 36.0%, config 89.3%, lightning 86.9%, auth 76.5% |
+| 2 | Fix defects on current structure | All P2 items merged w/ regression test | ✅ F-1, F-2, C-1, C-2, C-3, F-7, F-9, F-10, F-11, F-12 done; F-5, F-8 (medium) remain |
+| 3 | Unit-test coverage buildout | Critical-four packages ≥70–80% | ◐ In progress: F-6, F-7, F-9, F-12 done, T3-2/T3-4/T3-6 done; interceptor 38.9%, lsps 49.0%, postgresql 35.8%, notifications 45.6%, lnd 4.7%, common 36.0%, config 89.3%, lightning 86.9%, auth 76.5% |
 | 4 | YAML-driven integration tests | Runner + 3 seed scenarios merged | ◐ Foundation built + proven (Devnet/FlspdProcess/LSPS2 client, 2 more real bugs found — F-10 additions); YAML schema/runner not started; scenario 1's Go-level proof blocked on a devnet gossip-propagation gap, see T4-1 |
 | 5 | Config model + secrets-by-reference | New model shipped behind compat shim | ☐ Not started |
 | 6 | Repo structure / arbo migration | Tree matches target layout, build green throughout | ☐ Not started |
@@ -527,6 +527,37 @@ constructed onion failure blob directly rather than the symbolic
 
 ---
 
+### F-12: ExpiryWatcher never escalates past the 144-block milestone
+**Severity:** Medium · **Location:** `notifications/expiry_watcher.go`'s
+`checkExpiries`
+
+**Scope of work:** `expiryMilestones` is `[144, 72, 24]` (descending,
+warning → urgent → critical), and the per-HTLC loop is supposed to notify
+every milestone crossed since the last check. It had an unconditional
+`break` at the end of the loop body — after handling the *first* threshold
+considered, regardless of whether it was newly notified or already seen,
+the loop always exited. Since `blocksToExpiry` only decreases over time
+and thresholds are checked in descending order, threshold 144 is always
+evaluated first; once it's been notified once, every later check sees
+`already=true` for 144 and breaks immediately — so 72 ("urgent") and 24
+("critical") could never fire for any HTLC that had already crossed 144,
+silently losing the escalation behavior the milestone list was designed
+for.
+
+**Status:** ✅ Fixed (commit `6c9c773`). Removed the trailing unconditional
+`break`, keeping only the early-exit `break` (`blocksToExpiry > threshold`),
+so a single check walks through and notifies every crossed-but-not-yet-
+notified milestone instead of stopping after the first one considered.
+Found while writing unit-test coverage for the `notifications` package
+(Phase 3), not via itest — no live system was ever exposed to this, but
+any expiry-critical webhook/notification consumer relying on the 72/24
+escalation would have silently never received it. Added
+`notifications/expiry_watcher_test.go` (7 cases); confirmed via
+revert-and-verify that 4 of the 7 fail against the original
+unconditional-`break` code.
+
+---
+
 ## Phase 3 — Unit-test coverage buildout
 
 Ordered by blast radius, per the original audit. Target: **70–80% on the
@@ -603,19 +634,22 @@ gRPC server or the devnet (Phase 4), not pure unit tests. `lnd` coverage:
 Backoff schedule, queue status transitions, the relay race (F-6), transport
 selection, HTTPS non-200 handling. Fake `Store` + an `httptest` server.
 
-**Status:** ◐ In progress (commits `d6cc9e5`, `a28c8e6`, `f0f638d`). Done:
-F-6 fixed + proven, `HTTPSTransport.Send` (signing verified
-cryptographically, non-200 handling, invalid-key rejection), `Notify`
-dispatch + dedup window, `processPending` success/backoff transitions,
-and all 5 `Notify*` LSPS5 dispatch wrappers (`NotifyWebhookRegistered`,
-`NotifyExpirySoon`, `NotifyLiquidityManagementRequest`,
-`NotifyOrderStateChanged`, `NotifyOnionMessageIncoming` — fan-out dispatch,
-store-error propagation, and `NotifyOrderStateChanged`'s params shape).
-Still open: `expiry_watcher.go`, `cleanup.go` (both ticker-driven
-services, need a fake store + short interval), `server.go`'s gRPC
-handlers (need grpc stream mocking, lower value — thin protocol glue),
-`transport_nostr.go`'s `Send`/event-creation path. `notifications`
-coverage: 0% → 39.1%.
+**Status:** ◐ In progress (commits `d6cc9e5`, `a28c8e6`, `f0f638d`,
+`6c9c773`). Done: F-6 fixed + proven, `HTTPSTransport.Send` (signing
+verified cryptographically, non-200 handling, invalid-key rejection),
+`Notify` dispatch + dedup window, `processPending` success/backoff
+transitions, and all 5 `Notify*` LSPS5 dispatch wrappers
+(`NotifyWebhookRegistered`, `NotifyExpirySoon`,
+`NotifyLiquidityManagementRequest`, `NotifyOrderStateChanged`,
+`NotifyOnionMessageIncoming` — fan-out dispatch, store-error propagation,
+and `NotifyOrderStateChanged`'s params shape). `expiry_watcher.go`: 7
+cases covering first-milestone, all-milestones-in-one-check, multi-check
+escalation, no-re-notify, already-expired skip, outgoing-HTLC skip, and
+settled-HTLC milestone eviction — found and fixed F-12 in the process.
+Still open: `cleanup.go` (same ticker-driven-service pattern, needs a
+fake store + short interval), `server.go`'s gRPC handlers (need grpc
+stream mocking, lower value — thin protocol glue), `transport_nostr.go`'s
+`Send`/event-creation path. `notifications` coverage: 0% → 45.6%.
 
 ### T3-6: common + config + lightning + auth
 Promise sign/verify round-trip and tamper-rejection, `ValidateWebhookUrl`
