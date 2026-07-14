@@ -1,12 +1,15 @@
 package auth
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/nbd-wtf/go-nostr"
@@ -14,7 +17,43 @@ import (
 
 const (
 	KindHttpAuth = 27235
+
+	// authValidityWindowSeconds must match the +/-60s "Verify Timestamp"
+	// check below. replayCacheTTLSeconds is kept longer than double that
+	// window so a seen event can never expire from the cache while its
+	// timestamp would still otherwise be accepted.
+	authValidityWindowSeconds = 60
+	replayCacheTTLSeconds     = 3 * authValidityWindowSeconds
 )
+
+// seenEvents is a short-lived replay cache: NIP-98 auth events are only
+// valid for a narrow timestamp window, so remembering event IDs a bit
+// longer than that window is enough to reject replays without unbounded
+// growth. Keyed by the event's recomputed canonical ID (event.GetID()),
+// never the client-supplied ID field — go-nostr's CheckSignature does not
+// itself validate that field against the signed content, so trusting it
+// here would let an attacker dodge the replay cache by mutating it.
+var (
+	seenEventsMu sync.Mutex
+	seenEvents   = make(map[string]int64)
+)
+
+func checkAndRecordReplay(eventID string, nowUnix int64) error {
+	seenEventsMu.Lock()
+	defer seenEventsMu.Unlock()
+
+	for id, seenAt := range seenEvents {
+		if nowUnix-seenAt > replayCacheTTLSeconds {
+			delete(seenEvents, id)
+		}
+	}
+
+	if _, exists := seenEvents[eventID]; exists {
+		return fmt.Errorf("event already used (replay)")
+	}
+	seenEvents[eventID] = nowUnix
+	return nil
+}
 
 // NostrAuth represents the authenticated session
 type NostrAuth struct {
@@ -82,8 +121,16 @@ func VerifyNostrAuth(r *http.Request) (*NostrAuth, error) {
 
 	// 3. Verify Timestamp (+/- 60s)
 	now := time.Now().Unix()
-	if int64(event.CreatedAt) < now-60 || int64(event.CreatedAt) > now+60 {
+	if int64(event.CreatedAt) < now-authValidityWindowSeconds || int64(event.CreatedAt) > now+authValidityWindowSeconds {
 		return nil, fmt.Errorf("event timestamp expired or too far in future")
+	}
+
+	// 3b. Verify this exact event hasn't been used before (replay
+	// protection). Must come after signature verification so the ID we
+	// dedup on is backed by a valid signature, but GetID() recomputes it
+	// from content regardless, so it can't be spoofed by the client.
+	if err := checkAndRecordReplay(event.GetID(), now); err != nil {
+		return nil, err
 	}
 
 	// 4. Verify URL and Method
@@ -124,11 +171,25 @@ func VerifyNostrAuth(r *http.Request) (*NostrAuth, error) {
 		return nil, fmt.Errorf("event 'm' tag mismatch: expected %s", r.Method)
 	}
 
-	// 5. Verify Payload Hash (if body exists)
-	// Skip for now to support simple GETs, but should be enforced for POST
-	// if r.Method == http.MethodPost {
-	//    ... check hash ...
-	// }
+	// 5. Verify Payload Hash for methods that carry a body. Without this, a
+	// validly signed auth event for one request body could be replayed
+	// (within the timestamp window, and before the same event ID was seen)
+	// against a different body on the same URL/method.
+	if r.Body != nil && r.Method != http.MethodGet && r.Method != http.MethodHead {
+		bodyBytes, err := io.ReadAll(r.Body)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read request body: %v", err)
+		}
+		r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+
+		if len(bodyBytes) > 0 {
+			expectedHash := ComputePayloadHash(bodyBytes)
+			payloadTag := event.Tags.Find("payload")
+			if len(payloadTag) < 2 || payloadTag[1] != expectedHash {
+				return nil, fmt.Errorf("event 'payload' tag mismatch or missing")
+			}
+		}
+	}
 
 	return &NostrAuth{
 		PubKey: event.PubKey,
