@@ -135,7 +135,7 @@ func NewFlspdProcess(t *testing.T, d *Devnet, pg *PostgresContainer, opts FlspdP
 	minConfs := uint32(1)
 	nodeConf := &config.NodeConfig{
 		Name:                      "itest-lsp",
-		FlspdPrivateKey:           fmt.Sprintf("%x", priv.Serialize()),
+		FlspdPrivateKey:           config.InlineSecret(fmt.Sprintf("%x", priv.Serialize())),
 		Tokens:                    []string{"itest-token"},
 		Host:                      lndConf.Address,
 		TargetConf:                1,

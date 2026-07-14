@@ -419,7 +419,12 @@ func initializeNodes(configs []*config.NodeConfig) ([]*common.Node, error) {
 	// Named cfg, not config, so the config package import stays reachable
 	// inside the loop body (needed below to construct the NodeConfigRef).
 	for _, cfg := range configs {
-		hexKey, err := common.ParsePrivateKey(cfg.FlspdPrivateKey)
+		flspdPrivateKey, err := cfg.FlspdPrivateKey.Resolve()
+		if err != nil {
+			return nil, fmt.Errorf("resolving config.flspdPrivateKey: %w", err)
+		}
+
+		hexKey, err := common.ParsePrivateKey(flspdPrivateKey)
 		if err != nil {
 			return nil, fmt.Errorf("ParsePrivateKey(config.flspdPrivateKey) error: %v", err)
 		}

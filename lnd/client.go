@@ -39,15 +39,23 @@ type LndClient struct {
 }
 
 func NewLndClient(conf *config.LndConfig) (*LndClient, error) {
-	_, err := hex.DecodeString(conf.Macaroon)
+	macaroon, err := conf.Macaroon.Resolve()
+	if err != nil {
+		return nil, fmt.Errorf("resolving flnd.macaroon: %w", err)
+	}
+	_, err = hex.DecodeString(macaroon)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode macaroon: %w", err)
 	}
 
+	cert, err := conf.Cert.Resolve()
+	if err != nil {
+		return nil, fmt.Errorf("resolving flnd.cert: %w", err)
+	}
 	// Creds file to connect to LND gRPC
 	// User requested specific format: Hex-encoded PEM string.
 	// We hex decode the string, then parse it as a PEM certificate.
-	certBytes, err := hex.DecodeString(conf.Cert)
+	certBytes, err := hex.DecodeString(cert)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode certificate (expecting hex-encoded PEM): %w", err)
 	}
@@ -71,7 +79,7 @@ func NewLndClient(conf *config.LndConfig) (*LndClient, error) {
 	} else {
 		creds = credentials.NewClientTLSFromCert(cp, "")
 	}
-	macCred := NewMacaroonCredential(conf.Macaroon)
+	macCred := NewMacaroonCredential(macaroon)
 
 	// Address of an LND instance
 	conn, err := grpc.Dial(

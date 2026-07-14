@@ -12,8 +12,9 @@ type NodeConfig struct {
 	NodePubkey string `json:"nodePubkey,omitempty" yaml:"nodePubkey,omitempty"`
 
 	// Hex encoded private key of the LSP. This is used to decrypt traffic from
-	// clients. Note this is not the private key of the node.
-	FlspdPrivateKey string `json:"flspdPrivateKey" yaml:"flspdPrivateKey"`
+	// clients. Note this is not the private key of the node. Provide it
+	// inline, or as {from_env: VAR} / {from_file: /path} — see SecretRef.
+	FlspdPrivateKey SecretRef `json:"flspdPrivateKey" yaml:"flspdPrivateKey"`
 
 	// Tokens used to authenticate to flspd. These tokens must be unique for each
 	// configured node, so it's obvious which node an rpc call is meant for.
@@ -141,11 +142,15 @@ type LndConfig struct {
 	// Address to the grpc api.
 	Address string `json:"address" yaml:"address"`
 
-	// tls cert for the grpc api.
-	Cert string `json:"cert" yaml:"cert"`
+	// tls cert for the grpc api. Provide it inline (hex-encoded PEM), or as
+	// {from_env: VAR} / {from_file: /path} — see SecretRef. A from_file ref
+	// can point directly at flnd's own tls.cert.
+	Cert SecretRef `json:"cert" yaml:"cert"`
 
-	// macaroon to use.
-	Macaroon string `json:"macaroon" yaml:"macaroon"`
+	// macaroon to use. Provide it inline (hex-encoded), or as
+	// {from_env: VAR} / {from_file: /path} — see SecretRef. A from_file ref
+	// can point directly at flnd's own *.macaroon file.
+	Macaroon SecretRef `json:"macaroon" yaml:"macaroon"`
 
 	// DisableTls disables TLS verification for the LND connection.
 	// This is useful for testing or internal networks (e.g. docker).

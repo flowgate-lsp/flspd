@@ -127,8 +127,8 @@ func (d *Devnet) lndConfigFor(role string) (*config.LndConfig, error) {
 
 	return &config.LndConfig{
 		Address:  fmt.Sprintf("127.0.0.1:%d", d.rolePort(role)),
-		Cert:     hex.EncodeToString(certBytes),
-		Macaroon: hex.EncodeToString(macBytes),
+		Cert:     config.InlineSecret(hex.EncodeToString(certBytes)),
+		Macaroon: config.InlineSecret(hex.EncodeToString(macBytes)),
 	}, nil
 }
 

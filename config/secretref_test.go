@@ -1,0 +1,241 @@
+package config
+
+import (
+	"encoding/hex"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
+)
+
+// TestNodesSampleYaml_ParsesAndIsSecretFree parses the repo's committed
+// nodes.sample.yaml the same way flspd's own loader does (cmd/flspd/run.go)
+// and checks it uses from_env/from_file refs, not inline secret material,
+// for the three fields SecretRef exists to protect — this is what makes
+// the sample file safe to commit verbatim (T5-1/T5-4's stated goal).
+func TestNodesSampleYaml_ParsesAndIsSecretFree(t *testing.T) {
+	data, err := os.ReadFile("../nodes.sample.yaml")
+	require.NoError(t, err)
+
+	var configs []*NodeConfig
+	require.NoError(t, yaml.Unmarshal(data, &configs))
+	require.Len(t, configs, 1)
+
+	cfg := configs[0]
+	assert.False(t, cfg.FlspdPrivateKey.isInline(), "sample flspdPrivateKey must be a reference (from_env/from_file), not an inline value, to stay safe to commit")
+	require.NotNil(t, cfg.Lnd)
+	assert.False(t, cfg.Lnd.Cert.isInline(), "sample flnd.cert must be a reference, not inline")
+	assert.False(t, cfg.Lnd.Macaroon.isInline(), "sample flnd.macaroon must be a reference, not inline")
+}
+
+func unmarshalSecretRef(t *testing.T, doc string) SecretRef {
+	t.Helper()
+	var r SecretRef
+	require.NoError(t, yaml.Unmarshal([]byte(doc), &r))
+	return r
+}
+
+func TestSecretRef_InlineScalar_ResolvesToItself(t *testing.T) {
+	r := unmarshalSecretRef(t, `"deadbeef"`)
+	assert.True(t, r.IsSet())
+	v, err := r.Resolve()
+	require.NoError(t, err)
+	assert.Equal(t, "deadbeef", v)
+}
+
+func TestSecretRef_ZeroValue_ResolvesEmpty(t *testing.T) {
+	var r SecretRef
+	assert.False(t, r.IsSet())
+	v, err := r.Resolve()
+	require.NoError(t, err)
+	assert.Equal(t, "", v)
+}
+
+func TestSecretRef_FromEnv_Resolves(t *testing.T) {
+	t.Setenv("FLSPD_TEST_SECRET", "cafebabe")
+	r := unmarshalSecretRef(t, `from_env: FLSPD_TEST_SECRET`)
+	v, err := r.Resolve()
+	require.NoError(t, err)
+	assert.Equal(t, "cafebabe", v)
+}
+
+func TestSecretRef_FromEnv_MissingVarErrors(t *testing.T) {
+	os.Unsetenv("FLSPD_TEST_SECRET_NOT_SET")
+	r := unmarshalSecretRef(t, `from_env: FLSPD_TEST_SECRET_NOT_SET`)
+	_, err := r.Resolve()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "FLSPD_TEST_SECRET_NOT_SET")
+}
+
+func TestSecretRef_FromFile_HexTextContent_UsedVerbatim(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "secret.hex")
+	require.NoError(t, os.WriteFile(path, []byte("deadbeef\n"), 0o600))
+
+	r := unmarshalSecretRef(t, "from_file: "+path)
+	v, err := r.Resolve()
+	require.NoError(t, err)
+	assert.Equal(t, "deadbeef", v, "trailing whitespace must be trimmed, and already-hex content used as-is rather than double-hex-encoded")
+}
+
+func TestSecretRef_FromFile_RawBinaryContent_GetsHexEncoded(t *testing.T) {
+	raw := []byte{0x00, 0x01, 0xff, 0xfe, 'n', 'o', 't', ' ', 'h', 'e', 'x'}
+	path := filepath.Join(t.TempDir(), "tls.cert")
+	require.NoError(t, os.WriteFile(path, raw, 0o600))
+
+	r := unmarshalSecretRef(t, "from_file: "+path)
+	v, err := r.Resolve()
+	require.NoError(t, err)
+	assert.Equal(t, hex.EncodeToString(raw), v, "non-hex file content (e.g. a real tls.cert/*.macaroon file) must be hex-encoded automatically")
+}
+
+func TestSecretRef_FromFile_MissingFileErrors(t *testing.T) {
+	r := unmarshalSecretRef(t, "from_file: /nonexistent/path/for/sure")
+	_, err := r.Resolve()
+	require.Error(t, err)
+}
+
+func TestSecretRef_FromFile_HexEncodingUsesUntrimmedBytes(t *testing.T) {
+	// A binary secret that happens to end in a byte equal to a whitespace
+	// character must not have that byte silently dropped before
+	// hex-encoding — only the *detection* of "is this already hex text"
+	// trims, never the fallback encoding path itself.
+	raw := []byte{0xaa, 0xbb, 0x20} // trailing 0x20 = ' '
+	path := filepath.Join(t.TempDir(), "macaroon.bin")
+	require.NoError(t, os.WriteFile(path, raw, 0o600))
+
+	r := unmarshalSecretRef(t, "from_file: "+path)
+	v, err := r.Resolve()
+	require.NoError(t, err)
+	assert.Equal(t, hex.EncodeToString(raw), v)
+	assert.NotEqual(t, hex.EncodeToString(raw[:len(raw)-1]), v, "the trailing byte must survive hex-encoding, not get trimmed away")
+}
+
+func TestSecretRef_UnmarshalYAML_RejectsBothFromEnvAndFromFile(t *testing.T) {
+	var r SecretRef
+	err := yaml.Unmarshal([]byte("from_env: A\nfrom_file: /b"), &r)
+	require.Error(t, err)
+}
+
+func TestSecretRef_UnmarshalYAML_RejectsEmptyMapping(t *testing.T) {
+	var r SecretRef
+	err := yaml.Unmarshal([]byte("{}"), &r)
+	require.Error(t, err)
+}
+
+func TestSecretRef_UnmarshalYAML_RejectsUnknownShape(t *testing.T) {
+	var r SecretRef
+	err := yaml.Unmarshal([]byte("- a\n- b"), &r)
+	require.Error(t, err)
+}
+
+// TestSecretRef_MarshalYAML_RoundTripsOriginalForm is the core regression
+// test for why SecretRef isn't resolved in place: the dashboard's
+// config-update handler re-serializes a NodeConfig back to YAML on every
+// save (dashboard/service.go's handleUpdateConfig), including fields it
+// merely copied from the current in-memory config rather than touched.
+// If Resolve() mutated the ref, or if MarshalYAML emitted the resolved
+// value, a from_env/from_file reference would get silently replaced by
+// the literal secret on the very next save.
+func TestSecretRef_MarshalYAML_RoundTripsOriginalForm(t *testing.T) {
+	cases := []struct {
+		name string
+		doc  string
+	}{
+		{"inline", `"deadbeef"`},
+		{"from_env", "from_env: SOME_VAR"},
+		{"from_file", "from_file: /some/path"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := unmarshalSecretRef(t, tc.doc)
+
+			// Simulate resolving it (as e.g. lnd.NewLndClient does) —
+			// must not mutate the ref.
+			t.Setenv("SOME_VAR", "resolved-value-should-not-leak")
+			_, _ = r.Resolve()
+
+			out, err := yaml.Marshal(r)
+			require.NoError(t, err)
+
+			var roundTripped SecretRef
+			require.NoError(t, yaml.Unmarshal(out, &roundTripped))
+			assert.Equal(t, r, roundTripped, "marshaling then unmarshaling must reproduce the exact same ref, not a resolved literal")
+
+			assert.NotContains(t, string(out), "resolved-value-should-not-leak")
+		})
+	}
+}
+
+// TestSecretRef_CopyByValue_PreservesForm exercises the exact mechanism
+// dashboard/service.go's handleUpdateConfig relies on: assigning one
+// NodeConfig's SecretRef field to another's is a plain Go value copy, and
+// must preserve whichever original form (inline/from_env/from_file) it
+// held, not collapse to a resolved string.
+func TestSecretRef_CopyByValue_PreservesForm(t *testing.T) {
+	original := unmarshalSecretRef(t, "from_env: PRESERVE_ME")
+	copied := original // plain assignment, as handleUpdateConfig does
+
+	out, err := yaml.Marshal(copied)
+	require.NoError(t, err)
+	assert.Contains(t, string(out), "PRESERVE_ME")
+	assert.Contains(t, string(out), "from_env")
+}
+
+func TestSecretRef_InlineSecret_Constructor(t *testing.T) {
+	r := InlineSecret("abc123")
+	assert.True(t, r.IsSet())
+	v, err := r.Resolve()
+	require.NoError(t, err)
+	assert.Equal(t, "abc123", v)
+}
+
+// TestNodeConfig_SecretFields_YAMLIntegration confirms SecretRef behaves
+// correctly embedded in the real NodeConfig/LndConfig structs, not just in
+// isolation.
+func TestNodeConfig_SecretFields_YAMLIntegration(t *testing.T) {
+	doc := `
+flspdPrivateKey:
+  from_env: FLSPD_PK
+tokens: ["t1"]
+host: "127.0.0.1:5521"
+targetConf: 6
+minHtlcMloki: 600
+baseFeeMloki: 1000
+feeRate: 0.000001
+timeLockDelta: 40
+channelFeePermyriad: 40
+channelMinimumFeeMloki: 1000
+additionalChannelCapacity: 21000
+maxInactiveDuration: 3888000
+notificationTimeout: "1m"
+flnd:
+  address: "flnd:10005"
+  cert:
+    from_file: /etc/flspd/tls.cert
+  macaroon: "0102030405"
+`
+	var cfg NodeConfig
+	require.NoError(t, yaml.Unmarshal([]byte(doc), &cfg))
+
+	t.Setenv("FLSPD_PK", "deadbeef")
+	pk, err := cfg.FlspdPrivateKey.Resolve()
+	require.NoError(t, err)
+	assert.Equal(t, "deadbeef", pk)
+
+	require.NotNil(t, cfg.Lnd)
+	assert.True(t, cfg.Lnd.Cert.IsSet())
+	mac, err := cfg.Lnd.Macaroon.Resolve()
+	require.NoError(t, err)
+	assert.Equal(t, "0102030405", mac)
+
+	out, err := yaml.Marshal(&cfg)
+	require.NoError(t, err)
+	assert.Contains(t, string(out), "from_env")
+	assert.Contains(t, string(out), "FLSPD_PK")
+	assert.Contains(t, string(out), "from_file")
+	assert.Contains(t, string(out), "/etc/flspd/tls.cert")
+	assert.NotContains(t, string(out), "deadbeef", "resolved secret must never appear in re-marshaled YAML")
+}

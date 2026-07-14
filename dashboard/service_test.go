@@ -434,12 +434,12 @@ func TestHandleGetConfig_StripsSecrets(t *testing.T) {
 		NodeConfig: config.NewNodeConfigRef(&config.NodeConfig{
 			Name:            "Secret Node",
 			NodePubkey:      "02abc...",
-			FlspdPrivateKey: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+			FlspdPrivateKey: config.InlineSecret("deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"),
 			Tokens:          []string{"super-secret-client-token"},
 			Lnd: &config.LndConfig{
 				Address:  "flnd:10005",
-				Macaroon: "0102030405",
-				Cert:     "-----BEGIN CERTIFICATE-----",
+				Macaroon: config.InlineSecret("0102030405"),
+				Cert:     config.InlineSecret("-----BEGIN CERTIFICATE-----"),
 			},
 		}),
 	}
