@@ -38,7 +38,7 @@ number-soup and then get reorganized a second time.
 | 0 | Contain live secret exposure | Untracked, purged, guarded | ✅ Done — confirmed test data, no rotation needed |
 | 1 | Green the build + safety net | `go test ./... -race` passes in CI | ◐ T1-1..T1-3 done; T1-4, T1-5 open |
 | 2 | Fix defects on current structure | All P2 items merged w/ regression test | ✅ F-1, F-2, C-1, C-2, C-3, F-7, F-9, F-10, F-11, F-12 done; F-5, F-8 (medium) remain |
-| 3 | Unit-test coverage buildout | Critical-four packages ≥70–80% | ◐ In progress: F-6, F-7, F-9, F-12 done, T3-2/T3-4/T3-6 done; interceptor 38.9%, lsps 49.0%, postgresql 35.8%, notifications 47.3%, lnd 4.7%, common 36.0%, config 89.3%, lightning 86.9%, auth 76.5% |
+| 3 | Unit-test coverage buildout | Critical-four packages ≥70–80% | ◐ In progress: F-6, F-7, F-9, F-12 done, T3-2/T3-4/T3-5/T3-6 done; interceptor 38.9%, lsps 49.0%, postgresql 35.8%, notifications 54.3%, lnd 4.7%, common 36.0%, config 89.3%, lightning 86.9%, auth 76.5% |
 | 4 | YAML-driven integration tests | Runner + 3 seed scenarios merged | ◐ Foundation built + proven (Devnet/FlspdProcess/LSPS2 client, 2 more real bugs found — F-10 additions); YAML schema/runner not started; scenario 1's Go-level proof blocked on a devnet gossip-propagation gap, see T4-1 |
 | 5 | Config model + secrets-by-reference | New model shipped behind compat shim | ☐ Not started |
 | 6 | Repo structure / arbo migration | Tree matches target layout, build green throughout | ☐ Not started |
@@ -635,11 +635,11 @@ Backoff schedule, queue status transitions, the relay race (F-6), transport
 selection, HTTPS non-200 handling. Fake `Store` + an `httptest` server.
 
 **Status:** ◐ In progress (commits `d6cc9e5`, `a28c8e6`, `f0f638d`,
-`6c9c773`, `ef27b55`). Done: F-6 fixed + proven, `HTTPSTransport.Send`
-(signing verified cryptographically, non-200 handling, invalid-key
-rejection), `Notify` dispatch + dedup window, `processPending`
-success/backoff transitions, and all 5 `Notify*` LSPS5 dispatch wrappers
-(`NotifyWebhookRegistered`, `NotifyExpirySoon`,
+`6c9c773`, `ef27b55`, `bbea486`). Done: F-6 fixed + proven,
+`HTTPSTransport.Send` (signing verified cryptographically, non-200
+handling, invalid-key rejection), `Notify` dispatch + dedup window,
+`processPending` success/backoff transitions, and all 5 `Notify*` LSPS5
+dispatch wrappers (`NotifyWebhookRegistered`, `NotifyExpirySoon`,
 `NotifyLiquidityManagementRequest`, `NotifyOrderStateChanged`,
 `NotifyOnionMessageIncoming` — fan-out dispatch, store-error propagation,
 and `NotifyOrderStateChanged`'s params shape). `expiry_watcher.go`: 7
@@ -649,10 +649,14 @@ settled-HTLC milestone eviction — found and fixed F-12 in the process.
 `cleanup.go`: 5 cases covering the immediate on-start run, the
 now-ExpiryDuration cutoff passed to `RemoveExpired`, periodic re-runs,
 prompt shutdown on context cancellation, and that a store error on one
-tick doesn't kill the loop. Still open: `server.go`'s gRPC handlers (need
-grpc stream mocking, lower value — thin protocol glue),
-`transport_nostr.go`'s `Send`/event-creation path. `notifications`
-coverage: 0% → 47.3%.
+tick doesn't kill the loop. `transport_nostr.go`'s `Send`: validation
+error paths (missing privkey, invalid URI, no relays, event-creation
+failure) plus two real end-to-end cases against an in-process fake relay
+that speaks just enough of the Nostr wire protocol to ACK/NACK a
+publish — success-on-ACK and failed-to-publish-on-all-NACK. Only
+remaining gap: `server.go`'s gRPC handlers (need grpc stream mocking,
+lower value — thin protocol glue over already-tested logic). `notifications`
+coverage: 0% → 54.3%.
 
 ### T3-6: common + config + lightning + auth
 Promise sign/verify round-trip and tamper-rejection, `ValidateWebhookUrl`
