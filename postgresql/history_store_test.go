@@ -115,7 +115,12 @@ func TestHistoryStore_InsertForwards_DoesNotOverwriteOnConflict(t *testing.T) {
 	nodeId := randBytes(t, 33)
 	identifier := randIdentifier(t)
 
-	resolvedTime := time.Unix(0, time.Now().UnixNano()).Truncate(time.Second)
+	// A fixed past date, not time.Now(): InChannel/OutChannel here (1, 2)
+	// don't correspond to any row in `channels`, and sanityCheck's query in
+	// revenue_cli_store.go has no nodeid filter — a "now"-timed orphaned
+	// forward here would spuriously fail every revenue_cli_store_test.go
+	// test using an overlapping "now"-based time window in the same run.
+	resolvedTime := time.Date(2019, 6, 1, 0, 0, 0, 0, time.UTC)
 	require.NoError(t, store.InsertForwards(ctx, []*history.Forward{{
 		Identifier:   identifier,
 		InChannel:    lightning.ShortChannelID(1),
@@ -153,7 +158,9 @@ func TestHistoryStore_UpdateForwards_OverwritesOnConflict(t *testing.T) {
 	ctx := context.Background()
 	nodeId := randBytes(t, 33)
 	identifier := randIdentifier(t)
-	resolvedTime := time.Unix(0, time.Now().UnixNano()).Truncate(time.Second)
+	// Fixed past date — see the comment in
+	// TestHistoryStore_InsertForwards_DoesNotOverwriteOnConflict for why.
+	resolvedTime := time.Date(2019, 6, 2, 0, 0, 0, 0, time.UTC)
 
 	require.NoError(t, store.InsertForwards(ctx, []*history.Forward{{
 		Identifier:   identifier,
@@ -199,8 +206,10 @@ func TestHistoryStore_FetchLndForwardOffset_ReturnsMostRecent(t *testing.T) {
 	ctx := context.Background()
 	nodeId := randBytes(t, 33)
 
-	older := time.Unix(0, time.Now().Add(-time.Hour).UnixNano())
-	newer := time.Unix(0, time.Now().UnixNano())
+	// Fixed past dates — see the comment in
+	// TestHistoryStore_InsertForwards_DoesNotOverwriteOnConflict for why.
+	older := time.Date(2019, 6, 3, 0, 0, 0, 0, time.UTC)
+	newer := time.Date(2019, 6, 3, 1, 0, 0, 0, time.UTC)
 	require.NoError(t, store.InsertForwards(ctx, []*history.Forward{
 		{Identifier: randIdentifier(t), InChannel: 1, OutChannel: 2, InMloki: 1, OutMloki: 1, ResolvedTime: older},
 		{Identifier: randIdentifier(t), InChannel: 1, OutChannel: 2, InMloki: 1, OutMloki: 1, ResolvedTime: newer},

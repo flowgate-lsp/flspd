@@ -90,7 +90,7 @@ func (s *RevenueCliStore) ExportTokenForwardsForExternalNode(
 			    ON h.nodeid = c_in.nodeid 
 					AND (h.chanid_in = c_in.confirmed_scid OR h.chanid_in = c_in.alias_scid)
 			WHERE h.nodeid = $1 AND c_in.peerid = $2 AND h.resolved_time >= $3 AND h.resolved_time < $4
-		)
+		) combined
 		ORDER BY resolved_time DESC
 		`,
 		node,
@@ -191,7 +191,7 @@ func (s *RevenueCliStore) GetOpenChannelHtlcs(
 		,      htlc.funding_tx_outnum
 		FROM open_channel_htlcs htlc
 		INNER JOIN (
-			SELECT DISTINCT h.nodeid, h.peerid, c.funding_tx_id, c.funding_tx_outnum
+			SELECT DISTINCT h.nodeid, c.peerid, c.funding_tx_id, c.funding_tx_outnum
 			FROM forwarding_history h
 			INNER JOIN channels c
 				ON h.nodeid = c.nodeid AND (h.chanid_out = c.confirmed_scid OR h.chanid_out = c.alias_scid)
@@ -266,8 +266,8 @@ func (s *RevenueCliStore) GetForwards(
 	ourForwards, err := s.pool.Query(ctxc, tokenChannelsCte+`
 		SELECT h.identifier
 		,      h.nodeid
-		,      h.peerid_in
-		,      h.peerid_out
+		,      c_in.peerid AS peerid_in
+		,      c_out.peerid AS peerid_out
 		,      h.amt_mloki_in
 		,      h.amt_mloki_out
 		,      h.resolved_time
@@ -287,7 +287,7 @@ func (s *RevenueCliStore) GetForwards(
 		LEFT JOIN token_channels tc_out
 			ON c_out.nodeid = tc_out.nodeid AND c_out.funding_tx_id = tc_out.funding_tx_id AND c_out.funding_tx_outnum = tc_out.funding_tx_outnum
 		WHERE h.resolved_time >= $1 AND h.resolved_time < $2
-		ORDER BY h.nodeid, h.peerid_in, h.amt_mloki_in, h.resolved_time
+		ORDER BY h.nodeid, c_in.peerid, h.amt_mloki_in, h.resolved_time
 	`, startNs, endNs)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query our forwards: %w", err)
