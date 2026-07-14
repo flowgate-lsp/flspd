@@ -37,7 +37,7 @@ number-soup and then get reorganized a second time.
 |---|---|---|---|
 | 0 | Contain live secret exposure | Untracked, purged, guarded | ✅ Done — confirmed test data, no rotation needed |
 | 1 | Green the build + safety net | `go test ./... -race` passes in CI | ◐ T1-1..T1-3 done; T1-4, T1-5 open |
-| 2 | Fix defects on current structure | All P2 items merged w/ regression test | ✅ F-1, F-2, C-1, C-2, C-3, F-7, F-9 done; F-5, F-8 (medium) remain |
+| 2 | Fix defects on current structure | All P2 items merged w/ regression test | ✅ F-1, F-2, C-1, C-2, C-3, F-7, F-9, F-10 done; F-5, F-8 (medium) remain |
 | 3 | Unit-test coverage buildout | Critical-four packages ≥70–80% | ◐ In progress: F-6, F-7, F-9 done, T3-2/T3-4/T3-6 done; interceptor 38.9%, lsps 49.0%, postgresql 35.8%, notifications 39.1%, lnd 4.7%, common 36.0%, config 89.3%, lightning 86.9%, auth 76.5% |
 | 4 | YAML-driven integration tests | Runner + 3 seed scenarios merged | ☐ Not started |
 | 5 | Config model + secrets-by-reference | New model shipped behind compat shim | ☐ Not started |
@@ -461,6 +461,30 @@ reconcile with `open_channel_htlcs`/revenue data written via the correct
 path. Per earlier confirmation that current DB contents are test data only,
 no live backfill is believed necessary right now — but confirm before
 relying on any existing `channels` table data for revenue reporting.
+
+### F-10: flspd panics on ordinary graceful shutdown (double-Stop race)
+**Severity:** High · **Location:** `cmd/flspd/run.go`'s `stopInterceptors`
+closure, `lsps/order_cleanup_service.go`'s `Stop()`
+
+**Scope of work:** `stopInterceptors()` is invoked concurrently from three
+independent paths: each interceptor's own goroutine when it stops, the
+gRPC server's goroutine when it stops, and the SIGTERM/SIGINT handler.
+Under completely ordinary shutdown, the SIGTERM handler stopping the gRPC
+server is itself what makes the server's own goroutine observe a stop and
+call `stopInterceptors()` a second time. `OrderCleanupService.Stop()` does
+an unprotected `close(s.stopCh)`, so the second call panics
+(`close of closed channel`) instead of the process exiting cleanly —
+every graceful stop crash-loops.
+
+**Status:** ✅ Fixed (commit `b0a5c82`). Gated `stopInterceptors`'s body
+behind `sync.Once`. Found by literally running the built binary against
+the T4-1 devnet as part of building `itest/FlspdProcess` — the crash
+showed up in the process log on every single stop before the fix, and is
+gone after it (verified via `TestFlspdProcessSmoke`, which stops/restarts
+a real subprocess). This is exactly the kind of defect only a real
+integration test (not a mock) catches — flag as a case for prioritizing
+T4-2/T4-3 fault-injection scenarios, since they'll exercise this exact
+kill/restart path directly.
 
 ---
 
