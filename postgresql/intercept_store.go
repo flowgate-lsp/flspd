@@ -50,13 +50,20 @@ func (s *PostgresInterceptStore) PaymentInfo(htlcPaymentHash []byte) (string, st
 		}
 	}
 
+	// opening_fee_params is nullable: a payment row with no fee params
+	// attached (e.g. a plain forward, not a channel-open payment) has
+	// p == nil. Returning here with zero-value token/orderId/params
+	// mirrors the "not found" shape above rather than dereferencing a nil
+	// extParams.
+	if p == nil {
+		return "", "", nil, paymentHash, paymentSecret, destination, incomingAmountMloki, outgoingAmountMloki, cp, tag, nil
+	}
+
 	var extParams *extendedParams
-	if p != nil {
-		err = json.Unmarshal([]byte(*p), &extParams)
-		if err != nil {
-			log.Error().Msgf("Failed to unmarshal OpeningFeeParams '%s': %v", *p, err)
-			return "", "", nil, nil, nil, nil, 0, 0, nil, nil, err
-		}
+	err = json.Unmarshal([]byte(*p), &extParams)
+	if err != nil {
+		log.Error().Msgf("Failed to unmarshal OpeningFeeParams '%s': %v", *p, err)
+		return "", "", nil, nil, nil, nil, 0, 0, nil, nil, err
 	}
 	return extParams.Token, extParams.OrderId, &extParams.Params, paymentHash, paymentSecret, destination, incomingAmountMloki, outgoingAmountMloki, cp, tag, nil
 }
