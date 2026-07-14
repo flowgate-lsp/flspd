@@ -579,20 +579,52 @@ coverage 0% → 76.5%.
 `test/devnet/` — a persistent, inspectable, native-Flokicoin regtest
 network (`lokid` + three named `flnd` roles: lsp/client/payer, connected
 via neutrino — no bitcoin-core anywhere) for interactive testing and for
-backing the scenario runner below. Distinct from `itest/lntest`'s own
-ephemeral subprocess-based regtest miner (which uses literal `bitcoind`
-and is fine for CI, but isn't the native chain and isn't left running
-between test runs). See `test/devnet/README.md`. Verified working
-end-to-end: all three roles connect, sync, and can be funded via
+backing the scenario runner below. See `test/devnet/README.md`. Verified
+working end-to-end: all three roles connect, sync, and can be funded via
 `./collect-addresses.sh` + `./generate.sh`.
 
-### T4-1: Generic scenario runner
+**Correction (2026-07-14):** the note this item originally had — that
+`itest/lntest`'s own miner "uses literal bitcoind and is fine for CI" —
+was wrong and is struck through below in favor of the finding actually
+written up under T4-1.
+
+### T4-1: Generic scenario runner — **not just a wrapper, `itest/lntest` can't be reused as-is**
+**Finding (2026-07-14):** `itest/lntest`'s existing harness (`miner.go`,
+`lnd_node.go`, `test_common.go`) isn't merely "using bitcoind for the
+miner" — it configures every `flnd` node with `--bitcoin.node=bitcoind`
+plus `--bitcoind.rpchost/rpcuser/rpcpass/zmqpubrawblock/zmqpubrawtx`
+(`itest/lntest/lnd_node.go:93-99`), i.e. the *entire* chain-backend wiring
+assumes a bitcoind-RPC-dialect daemon. `lokid` (`go-flokicoin`) is a
+`btcd` fork, not a bitcoind-RPC-compatible daemon, and `flnd`'s
+`--bitcoin.node` flag only accepts `btcd`/`bitcoind`/`neutrino`/
+`nochainbackend` (`flnd/lncfg/chain.go:16`) — there is no `lokid` mode.
+This is why every `itest/*_test.go` currently fails with `exec: no
+command` in this environment (no bitcoind binary at all) — it's not a
+missing-binary inconvenience, the harness was never adapted for
+Flokicoin and can't be made to work by just installing/renaming a
+binary. This is almost certainly *why* T1-4 was deferred with "same
+scaffolding gap" — that gap is this.
+
+**Decision:** do not attempt to retrofit `itest/lntest` to speak
+btcd-RPC against `lokid` (subprocess-based, bitcoind-shaped wiring throughout,
+high effort for uncertain payoff). Build the YAML scenario runner fresh
+against `test/devnet/`'s docker-compose infrastructure instead (already
+verified working, already neutrino-mode against `lokid`, already what the
+user asked for when this repo's own devnet was provisioned). Treat
+`itest/lntest` + the ~15 existing `itest/*_test.go` files as orphaned
+legacy scaffolding — flag for eventual removal/archival in Phase 6, not a
+dependency of Phase 4. Reusable non-chain utilities from `itest/` (
+`mempool_api.go`'s fee-fixture API, `nostr_relay.go`'s mock relay,
+`postgres.go`'s container harness) remain valid and should still be
+reused — only the bitcoind-coupled node-lifecycle code is out.
+
 Add `itest/scenarios/` + `itest/runner_test.go` that globs
 `scenarios/*.yaml`, decodes into a typed `Scenario` struct (unknown keys are
 a hard error), and runs each as a named subtest. Step/assertion verbs are a
-registry (`map[string]StepFn` / `map[string]AssertFn`) wrapping today's
-harness calls (`mempoolApi.SetFees`, `MockRelay`, `PostgresContainer`, LND
-node control).
+registry (`map[string]StepFn` / `map[string]AssertFn`) driving the
+devnet's docker-compose services (start/stop/restart a role, RPC into
+`lokid` to mine, drive `flncli` against a role) plus the still-valid
+`itest/` utilities (`mempoolApi.SetFees`, `MockRelay`, `PostgresContainer`).
 
 ### T4-2: Seed scenarios
 1. `lsps2_jit_happy_path.yaml` — buy → pay → zero-conf channel open.
