@@ -35,7 +35,7 @@ number-soup and then get reorganized a second time.
 
 | Phase | Theme | Gate to proceed | Status |
 |---|---|---|---|
-| 0 | Contain live secret exposure | Secrets rotated, file untracked | ◐ Untracked; rotation + history purge still open |
+| 0 | Contain live secret exposure | Secrets rotated, file untracked | ◐ Untracked + history purged (local + remote); credential rotation on the live node still open |
 | 1 | Green the build + safety net | `go test ./... -race` passes in CI | ◐ T1-1..T1-3 done; T1-4, T1-5 open |
 | 2 | Fix defects on current structure | All P2 items merged w/ regression test | ☐ Not started |
 | 3 | Unit-test coverage buildout | Critical-four packages ≥70–80% | ☐ Not started |
@@ -75,19 +75,17 @@ placeholders:
 3. `git rm --cached data/nodes.prod.yaml` and commit — stops future tracking;
    file remains on disk locally. **Done** (commit `447dd14`).
 4. Scrub history with `git filter-repo` (preferred) or BFG Repo-Cleaner to
-   remove the file from all past commits. Coordinate force-push with anyone
-   else who has a clone (their clones will need to be re-fetched/rebased).
-   **Blocked pending explicit operator sign-off** — this rewrites all commit
-   hashes and requires a force-push to a shared GitHub remote
-   (`flowgate-lsp/flspd`); the harness's own safety classifier refused to
-   run `git filter-repo` on a general "proceed with everything" instruction,
-   correctly treating history rewrites as needing their own explicit
-   approval separate from other work. `git-filter-repo` is installed and
-   ready; the command is `git filter-repo --path data/nodes.prod.yaml
-   --invert-paths --force` (run from a fresh clone, or with `--force` on the
-   existing one — take a `git bundle create backup.bundle --all` first
-   regardless). Re-add `origin` afterward (filter-repo strips remotes by
-   design) before force-pushing.
+   remove the file from all past commits, then force-push. **Done.** Ran
+   `git filter-repo --path data/nodes.prod.yaml --invert-paths --force`
+   locally (backup bundle taken first), verified the file and the literal
+   string `flspdPrivateKey` are absent from every blob across all refs,
+   then the operator force-pushed to `origin main` themselves. `origin/main`
+   now matches the rewritten local history exactly. Anyone else with an
+   existing clone or fork of this repo needs to re-clone or `git fetch &&
+   git reset --hard origin/main` — their old clones still contain the
+   pre-purge history until they do. If this repo has any forks, those
+   still contain the secret in their own history independently and are
+   not affected by this purge.
 5. Add a pre-commit or CI check that fails the build if any file under
    `data/` (or any path matching common secret patterns) is staged for commit,
    so this class of mistake can't silently recur before Phase 5 lands the
