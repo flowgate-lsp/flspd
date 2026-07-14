@@ -120,17 +120,17 @@ func (cfg *NodeConfig) ValidateJit() error {
 
 	// 2. Check Min Payment Size vs Floors
 	padding := uint64(cfg.AdditionalChannelCapacity)
-	minPaymentSat := cfg.MinPaymentSizeMloki / 1000
+	minPaymentLoki := cfg.MinPaymentSizeMloki / 1000
 
 	// Check against Physical Network Floor
-	if minPaymentSat+padding < cfg.MinChannelCapacityLoki {
-		return fmt.Errorf("JIT incompatibility: minPaymentSizeMloki (%d loki) + padding (%d) < network floor (%d)", minPaymentSat, padding, cfg.MinChannelCapacityLoki)
+	if minPaymentLoki+padding < cfg.MinChannelCapacityLoki {
+		return fmt.Errorf("JIT incompatibility: minPaymentSizeMloki (%d loki) + padding (%d) < network floor (%d)", minPaymentLoki, padding, cfg.MinChannelCapacityLoki)
 	}
 
 	// Check against Business Floor
 	if cfg.JitMinChannelBalanceLoki != nil {
-		if minPaymentSat+padding < *cfg.JitMinChannelBalanceLoki {
-			return fmt.Errorf("JIT business violation: minPaymentSizeMloki (%d loki) + padding (%d) < jitMinChannelBalanceLoki (%d)", minPaymentSat, padding, *cfg.JitMinChannelBalanceLoki)
+		if minPaymentLoki+padding < *cfg.JitMinChannelBalanceLoki {
+			return fmt.Errorf("JIT business violation: minPaymentSizeMloki (%d loki) + padding (%d) < jitMinChannelBalanceLoki (%d)", minPaymentLoki, padding, *cfg.JitMinChannelBalanceLoki)
 		}
 
 		// Check that Business Floor is at least Physical Network Floor
