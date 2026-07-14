@@ -40,7 +40,7 @@ number-soup and then get reorganized a second time.
 | 2 | Fix defects on current structure | All P2 items merged w/ regression test | ✅ F-1, F-2, C-1, C-2, C-3, F-5, F-7, F-9, F-10, F-11, F-12, F-13 done; F-8 (medium) remains |
 | 3 | Unit-test coverage buildout | Critical-four packages ≥70–80% | ◐ In progress: F-5, F-6, F-7, F-9, F-12, F-13 done, T3-2/T3-3/T3-4/T3-5/T3-6 done; interceptor 38.9%, lsps 49.4%, postgresql 69.1%, notifications 54.3%, lnd 4.7%, common 36.0%, config 93.4%, lightning 86.9%, auth 76.5% |
 | 4 | YAML-driven integration tests | Runner + 3 seed scenarios merged | ◐ Foundation built + proven (Devnet/FlspdProcess/LSPS2 client, 2 more real bugs found — F-10 additions); YAML schema/runner not started; scenario 1's Go-level proof blocked on a devnet gossip-propagation gap, see T4-1 |
-| 5 | Config model + secrets-by-reference | New model shipped behind compat shim | ◐ T5-1..T5-6 done (secrets-by-reference, unit/fee/channel-size model, profiles, CLI tooling); T5-7 (Settings.tsx re-skin) not started |
+| 5 | Config model + secrets-by-reference | New model shipped behind compat shim | ✅ T5-1..T5-7 done (secrets-by-reference, unit/fee/channel-size model, profiles, CLI tooling, Settings.tsx re-skin — frontend not browser-verified, no automation tooling available) |
 | 6 | Repo structure / arbo migration | Tree matches target layout, build green throughout | ☐ Not started |
 | — | Performance backlog (parallel, non-blocking) | — | ☐ Not started |
 
@@ -1042,6 +1042,28 @@ slider; product toggles; profile dropdown with read-only expansion.
 touching ≤10 fields; every previously-supported field is still settable
 under `advanced:`; `nodes.sample.yaml` is rewritten to the new shape and is
 safe to commit verbatim (no secrets).
+
+**Status:** ✅ Done (commit `1a11ff6`). Three tabs: Connect (name, host,
+flnd address — the ≤10-field happy path), Business Policy (profile
+picker w/ read-only expansion, opening-fee rate+floor w/ a live sentence
++ example table via a new `feeCalc.ts` — clearly commented as a
+client-side mirror of `ComputeOpeningFee`/`config/tiered.go` for instant
+preview only, not a second source of truth — channel size as a new
+dependency-free `DualRangeSlider`, JIT/LSPS1 toggles), and Advanced
+(every flat field from the old UI, still fully editable, with a banner
+explaining the precedence rule from T5-2). Handles an interaction the
+naive design would've gotten wrong: switching the profile dropdown
+explicitly clears the profile-controlled flat fields back to their unset
+sentinel first, since the backend's `applyProfile` only fills in
+still-unset fields — without that, the dropdown would visibly change
+but silently not take effect on save. A config that hasn't touched the
+tiered blocks yet gets them derived from its current flat values on
+first load, so existing deployments see real settings, not blanks.
+`nodes.sample.yaml` was already rewritten as part of T5-2..T5-5.
+Verified: `tsc --noEmit` clean, production build clean, `feeCalc`'s own
+vitest suite passes. **Not verified in an actual browser** — no browser
+automation tooling was available in this environment; a manual
+click-through is recommended before shipping.
 
 ---
 
