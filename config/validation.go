@@ -9,6 +9,15 @@ const AbsoluteMinChannelCapacityLoki = 20000
 
 // Validate performs a full validation of the NodeConfig.
 func (cfg *NodeConfig) Validate() error {
+	// 0. Expand any tiered-model blocks (opening_fee, routing_fee,
+	// channel_size, profile) into the flat fields the checks below and
+	// every downstream consumer already read. Must run first so those
+	// checks see fully-resolved values regardless of which style (flat or
+	// tiered) the operator used.
+	if err := cfg.applyTieredConfig(); err != nil {
+		return err
+	}
+
 	// 1. Basic Capacity Checks
 	if cfg.MinChannelCapacityLoki > 0 && cfg.MinChannelCapacityLoki < AbsoluteMinChannelCapacityLoki {
 		return fmt.Errorf("minChannelCapacityLoki must be >= %d (LSP Limit), got %d", AbsoluteMinChannelCapacityLoki, cfg.MinChannelCapacityLoki)

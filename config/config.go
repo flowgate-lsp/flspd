@@ -134,6 +134,28 @@ type NodeConfig struct {
 	// Maximum channel balance in Loki for LSPS1 orders.
 	Lsps1MaxChannelBalanceLoki *uint64 `json:"lsps1MaxChannelBalanceLoki,string,omitempty" yaml:"lsps1MaxChannelBalanceLoki,omitempty"`
 
+	// --- Tiered config model (T5-2..T5-5) ---
+	// These are newer, unit-consistent alternatives to several of the
+	// fields above. When present, each overwrites the flat field(s) it
+	// corresponds to — see tiered.go's applyTieredConfig for the exact
+	// mapping and precedence rules. Optional; every field above remains
+	// fully supported.
+
+	// Risk-tolerance preset (conservative|balanced|aggressive) expanding
+	// to confirmation/CLTV-delta/expiry defaults. See tiered.go.
+	Profile string `json:"profile,omitempty" yaml:"profile,omitempty"`
+
+	// Unified channel-opening fee, replacing channelFeePermyriad +
+	// channelMinimumFeeMloki.
+	OpeningFee *OpeningFeeConfig `json:"opening_fee,omitempty" yaml:"opening_fee,omitempty"`
+
+	// Advertised routing fee, replacing feeRate + baseFeeMloki.
+	RoutingFee *RoutingFeeConfig `json:"routing_fee,omitempty" yaml:"routing_fee,omitempty"`
+
+	// Unified channel-size bounds, replacing minChannelCapacityLoki,
+	// additionalChannelCapacity, and the LSPS1/JIT min/max balance fields.
+	ChannelSize *ChannelSizeConfig `json:"channel_size,omitempty" yaml:"channel_size,omitempty"`
+
 	// Set this field to connect to an LND node.
 	Lnd *LndConfig `json:"flnd,omitempty" yaml:"flnd,omitempty"`
 }
