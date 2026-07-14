@@ -27,3 +27,30 @@ jobs:
 
       - name: Test (race detector)
         run: go test -race -count=1 $(go list ./... | grep -v '/itest')
+
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # data/ is gitignored specifically because it holds per-deployment
+      # secrets (node keys, macaroons, certs) — see SEC-1 in BACKLOG.md,
+      # where a force-added file under data/ leaked a real production
+      # macaroon and private key into history. .gitignore only stops
+      # *new* files from being added; it does nothing once a file is
+      # force-added, so this check exists specifically to catch that.
+      - name: Fail if anything under data/ is tracked
+        run: |
+          tracked=$(git ls-files data/)
+          if [ -n "$tracked" ]; then
+            echo "::error::Tracked file(s) found under data/, which is gitignored for a reason — see SEC-1 in BACKLOG.md:"
+            echo "$tracked"
+            exit 1
+          fi
+
+      - name: Scan for secrets (gitleaks)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
