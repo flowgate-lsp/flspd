@@ -38,7 +38,7 @@ number-soup and then get reorganized a second time.
 | 0 | Contain live secret exposure | Untracked, purged, guarded | ✅ Done — confirmed test data, no rotation needed |
 | 1 | Green the build + safety net | `go test ./... -race` passes in CI | ◐ T1-1..T1-3 done; T1-4, T1-5 open |
 | 2 | Fix defects on current structure | All P2 items merged w/ regression test | ✅ F-1, F-2, C-1, C-2, C-3 done; F-5..F-8 (medium) remain |
-| 3 | Unit-test coverage buildout | Critical-four packages ≥70–80% | ☐ Not started |
+| 3 | Unit-test coverage buildout | Critical-four packages ≥70–80% | ◐ In progress: F-6 done; interceptor 12.2%, lsps 45.9%, postgresql 11.7%, notifications 23.2% |
 | 4 | YAML-driven integration tests | Runner + 3 seed scenarios merged | ☐ Not started |
 | 5 | Config model + secrets-by-reference | New model shipped behind compat shim | ☐ Not started |
 | 6 | Repo structure / arbo migration | Tree matches target layout, build green throughout | ☐ Not started |
@@ -389,6 +389,11 @@ mutex.
 **Acceptance criteria:** `-race` test with N goroutines hitting one relay URL
 concurrently shows a single connection created.
 
+**Status:** ✅ Done (commit `d6cc9e5`). Wrapped in `singleflight.Group` keyed
+by URL. Confirmed against the original code first: 20 concurrent calls for
+one URL produced 20 real connections, every run (5/5) — reliably
+reproducible, not a rare flake.
+
 ### F-7: NIP-98 dashboard auth skips payload-hash verification
 **Severity:** Medium · **Location:** `auth/nostr.go:127` (commented-out block)
 
@@ -427,9 +432,18 @@ not-found, probe detection) and the fee/capacity math in `openChannel`
 (reuse the pure function from T1-1/F-5). Fake `InterceptStore` +
 `lightning.Client`; assert `InterceptResult` actions and failure codes.
 
+**Status:** ◐ In progress. `resolvePayment` well covered by T1-1's table
+tests; `Interceptor.Intercept()` itself still untested (same scaffolding
+gap as T1-4). `interceptor` package coverage: 12.2%.
+
 ### T3-2: lsps settlement — lift from 44.6%
 Cover `recoverStuckOrders`, `recoverSettledCreatedOrders`, and the F-1
 concurrency case with two racing processors against a CAS-aware fake store.
+
+**Status:** ✅ F-1 concurrency case done (commit `e13656c`,
+`TestF1_ConcurrentSettlementAndRecoveryOpenExactlyOneChannel`).
+`recoverStuckOrders`/`recoverSettledCreatedOrders` still need direct
+coverage. `lsps` package coverage: 45.9%.
 
 ### T3-3: postgresql store tests
 Introduce a container-backed store test harness (reuse itest's
@@ -437,14 +451,31 @@ Introduce a container-backed store test harness (reuse itest's
 (F-2), SCID int64/uint64 round-trips, `ExpireStaleOrders`, reserved-liquidity
 SQL.
 
+**Status:** ◐ In progress (commits `b4ff434`, `589235a`). Own harness landed
+(`TestMain` + disposable postgres container, not itest's — keeps postgresql/
+independently testable without an itest dependency). Done: `PaymentInfo`
+null-params (F-2), CAS atomicity at the SQL level (F-1, 20 concurrent
+goroutines on one real row), `GetReservedLiquidity`, `ExpireStaleOrders`.
+Still open: SCID int64/uint64 round-trips, `notifications_store.go`,
+`revenue_cli_store.go`, `history_store.go`. `postgresql` coverage: 11.7%.
+
 ### T3-4: lnd adapter mapping tests
 Pure mappers (`mapScidsFromChannel`, `extractChannelPoint`, invoice-state /
 failure-code conversions, `OpenChannelRequest` → `lnrpc`) are fake-free and
 high-value; test directly, no mocks needed.
 
+**Status:** ☐ Not started. `lnd` package: 0% coverage, no test files.
+
 ### T3-5: notifications
 Backoff schedule, queue status transitions, the relay race (F-6), transport
 selection, HTTPS non-200 handling. Fake `Store` + an `httptest` server.
+
+**Status:** ◐ In progress (commits `d6cc9e5`, `a28c8e6`). Done: F-6 fixed +
+proven, `HTTPSTransport.Send` (signing verified cryptographically, non-200
+handling, invalid-key rejection), `Notify` dispatch + dedup window,
+`processPending` success/backoff transitions. Still open: `expiry_watcher.go`,
+`cleanup.go`, `server.go`'s gRPC handlers, Nostr transport's event-creation
+path. `notifications` coverage: 0% → 23.2%.
 
 ### T3-6: common + config + lightning + auth
 Promise sign/verify round-trip and tamper-rejection, `ValidateWebhookUrl`
