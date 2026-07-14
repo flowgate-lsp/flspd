@@ -37,7 +37,7 @@ number-soup and then get reorganized a second time.
 |---|---|---|---|
 | 0 | Contain live secret exposure | Untracked, purged, guarded | ✅ Done — confirmed test data, no rotation needed |
 | 1 | Green the build + safety net | `go test ./... -race` passes in CI | ◐ T1-1..T1-3 done; T1-4, T1-5 open |
-| 2 | Fix defects on current structure | All P2 items merged w/ regression test | ☐ Not started |
+| 2 | Fix defects on current structure | All P2 items merged w/ regression test | ✅ F-1, F-2, C-1, C-2, C-3 done; F-5..F-8 (medium) remain |
 | 3 | Unit-test coverage buildout | Critical-four packages ≥70–80% | ☐ Not started |
 | 4 | YAML-driven integration tests | Runner + 3 seed scenarios merged | ☐ Not started |
 | 5 | Config model + secrets-by-reference | New model shipped behind compat shim | ☐ Not started |
@@ -291,6 +291,11 @@ order_state='CREATED'`, and only proceed to `openChannelForOrder` when
 a concurrent `SubscribeInvoices` event for the same order asserts exactly one
 channel-open call.
 
+**Status:** ✅ Done (commit `e13656c`). `UpdateLsps1OrderState` is now a CAS
+(added `expectedCurrentState`, returns `updated bool`); all four call sites
+check the result. Regression test races the two real code paths against a
+mutex-protected fake store 10x under `-race`.
+
 ### F-2: Nil-pointer dereference on payments with null fee params
 **Severity:** High · **Location:** `postgresql/intercept_store.go:53-61`
 
@@ -302,6 +307,11 @@ make the column `NOT NULL` with a sensible default and add a migration).
 
 **Acceptance criteria:** a store test inserts a `payments` row with
 `opening_fee_params IS NULL` and asserts `PaymentInfo` returns without panic.
+
+**Status:** ✅ Done (commit `b4ff434`). Also stood up `postgresql/`'s first
+real test harness (`TestMain` spins up a disposable postgres container) —
+seeds Phase 3's postgresql coverage work. Confirmed the regression test
+reproduces the exact original panic when the fix is reverted.
 
 ### C-1: Dashboard `get_config` leaks node secrets to the browser
 **Severity:** Critical · **Location:** `dashboard/service.go:659` (`handleGetConfig`)
@@ -315,6 +325,10 @@ but should not wait for Phase 5 — patch it now with a manual field allowlist.
 **Acceptance criteria:** a test asserts the JSON returned by `get_config`
 contains none of the secret field names/values.
 
+**Status:** ✅ Done (commit `1058b7c`). `stripConfigSecrets` strips
+`flspdPrivateKey`/`tokens`/`flnd` via a JSON marshal-delete-remarshal round
+trip rather than a hand-maintained DTO struct. `TestHandleGetConfig_StripsSecrets`.
+
 ### C-2: Dashboard `update_config` deletes other nodes on save
 **Severity:** High · **Location:** `dashboard/service.go:689` (`handleUpdateConfig`)
 
@@ -326,6 +340,9 @@ matching node by identity (pubkey or index), marshal the full list back.
 
 **Acceptance criteria:** a test with a 2+ node config asserts both nodes are
 present in the file after updating one.
+
+**Status:** ✅ Done (commit `1058b7c`). Builds the full config list from
+live in-memory nodes, replaces only the edited one. `TestHandleUpdateConfig_PreservesOtherNodes`.
 
 ### C-3: Config hot-swapped without synchronization under HTLC readers
 **Severity:** High · **Location:** `dashboard/service.go:715` (`*nodes[0].NodeConfig = params.Config`)
@@ -339,6 +356,14 @@ always see one consistent snapshot.
 
 **Acceptance criteria:** `go test -race` covering a concurrent
 read-while-write scenario passes clean.
+
+**Status:** ✅ Done (commit `1058b7c`). Introduced `config.NodeConfigRef`
+(an `atomic.Pointer[NodeConfig]` wrapper) — the structural fix behind the
+bulk of that commit's diff, since every long-lived holder of `NodeConfig`
+(interceptor, settlement service, lnd, cmd/flspd wiring, and their tests)
+now goes through it, `Load()`-ing once per logical operation instead of
+caching a raw pointer. `TestNodeConfig_ConcurrentReadWriteNoRace` passes
+clean under `-race`.
 
 ### F-5: Three different fee-rounding rules for one concept
 **Severity:** Medium · **Location:** `lsps/server.go:300` (`computeOpeningFee`, ceil) vs `lsps/handler_lsps1.go:312` (floor) vs interceptor's gross-up (T1-1)
