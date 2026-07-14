@@ -96,6 +96,15 @@ func NewLndClient(conf *config.LndConfig) (*LndClient, error) {
 	}, nil
 }
 
+// RawClient exposes the underlying lnrpc.LightningClient for callers that
+// need gRPC methods the lightning.Client port deliberately doesn't
+// abstract (e.g. AddInvoice, ConnectPeer, custom messages) — flspd itself
+// never calls these as the LSP, but the integration-test scenario runner
+// needs them to drive the client/payer roles it isn't the LSP for.
+func (c *LndClient) RawClient() lnrpc.LightningClient {
+	return c.client
+}
+
 func (c *LndClient) Close() {
 	cancel := c.listenerCancel
 	if cancel != nil {

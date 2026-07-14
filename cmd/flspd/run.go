@@ -331,22 +331,34 @@ func runLspd(cliCtx *cli.Context) error {
 	var wg sync.WaitGroup
 	wg.Add(len(interceptors) + 1)
 
+	// stopInterceptors is invoked concurrently from up to three independent
+	// paths: each interceptor's own goroutine when it stops, the gRPC
+	// server's goroutine when it stops, and the SIGTERM/SIGINT handler.
+	// Any two of those racing (e.g. the SIGTERM handler stopping the gRPC
+	// server, which its own goroutine then observes and reacts to) means
+	// this runs more than once — services like OrderCleanupService aren't
+	// safe to Stop() twice (double-close panics), so gate the whole thing
+	// behind sync.Once to make shutdown idempotent regardless of which
+	// path gets there first.
+	var stopOnce sync.Once
 	stopInterceptors := func() {
-		for _, interceptor := range interceptors {
-			interceptor.Stop()
-		}
+		stopOnce.Do(func() {
+			for _, interceptor := range interceptors {
+				interceptor.Stop()
+			}
 
-		for _, lspsServer := range lspsServers {
-			lspsServer.Stop()
-		}
+			for _, lspsServer := range lspsServers {
+				lspsServer.Stop()
+			}
 
-		for _, settlementSvc := range settlementServices {
-			settlementSvc.Stop()
-		}
+			for _, settlementSvc := range settlementServices {
+				settlementSvc.Stop()
+			}
 
-		orderCleanupService.Stop()
+			orderCleanupService.Stop()
 
-		cancel()
+			cancel()
+		})
 	}
 
 	for _, interceptor := range interceptors {
