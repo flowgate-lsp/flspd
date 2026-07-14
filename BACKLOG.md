@@ -38,7 +38,7 @@ number-soup and then get reorganized a second time.
 | 0 | Contain live secret exposure | Untracked, purged, guarded | ✅ Done — confirmed test data, no rotation needed |
 | 1 | Green the build + safety net | `go test ./... -race` passes in CI | ◐ T1-1..T1-3 done; T1-4, T1-5 open |
 | 2 | Fix defects on current structure | All P2 items merged w/ regression test | ✅ F-1, F-2, C-1, C-2, C-3, F-7, F-9 done; F-5, F-8 (medium) remain |
-| 3 | Unit-test coverage buildout | Critical-four packages ≥70–80% | ◐ In progress: F-6, F-7, F-9 done, T3-4/T3-6 done; interceptor 38.9%, lsps 45.9%, postgresql 35.8%, notifications 39.1%, lnd 4.7%, common 36.0%, config 89.3%, lightning 86.9%, auth 76.5% |
+| 3 | Unit-test coverage buildout | Critical-four packages ≥70–80% | ◐ In progress: F-6, F-7, F-9 done, T3-2/T3-4/T3-6 done; interceptor 38.9%, lsps 49.0%, postgresql 35.8%, notifications 39.1%, lnd 4.7%, common 36.0%, config 89.3%, lightning 86.9%, auth 76.5% |
 | 4 | YAML-driven integration tests | Runner + 3 seed scenarios merged | ☐ Not started |
 | 5 | Config model + secrets-by-reference | New model shipped behind compat shim | ☐ Not started |
 | 6 | Repo structure / arbo migration | Tree matches target layout, build green throughout | ☐ Not started |
@@ -494,10 +494,13 @@ since it needs devnet-realistic HTLC flows, not deeper mocking.
 Cover `recoverStuckOrders`, `recoverSettledCreatedOrders`, and the F-1
 concurrency case with two racing processors against a CAS-aware fake store.
 
-**Status:** ✅ F-1 concurrency case done (commit `e13656c`,
-`TestF1_ConcurrentSettlementAndRecoveryOpenExactlyOneChannel`).
-`recoverStuckOrders`/`recoverSettledCreatedOrders` still need direct
-coverage. `lsps` package coverage: 45.9%.
+**Status:** ✅ Done (commits `e13656c`, `a0f6321`). F-1 concurrency case
+(`TestF1_ConcurrentSettlementAndRecoveryOpenExactlyOneChannel`).
+`recoverStuckOrders`/`recoverSettledCreatedOrders` now directly covered:
+SETTLED/CANCELED/OPEN invoice-state branches, empty-PaymentInvoice skip,
+per-order LookupInvoiceState error isolation, and the early-return when
+`GetAllPaidLsps1Orders` itself fails. `lsps` package coverage: 45.9% →
+49.0%.
 
 ### T3-3: postgresql store tests
 Introduce a container-backed store test harness (reuse itest's
