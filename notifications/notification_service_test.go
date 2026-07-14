@@ -74,6 +74,9 @@ type fakeNotifStore struct {
 	mu    sync.Mutex
 	items map[int64]*NotificationQueueItem
 	next  int64
+
+	removeExpiredCalls []time.Time
+	removeExpiredErr   error
 }
 
 func newFakeNotifStore() *fakeNotifStore {
@@ -85,7 +88,25 @@ func (f *fakeNotifStore) GetRegistrations(context.Context, string) ([]common.Not
 	return nil, nil
 }
 func (f *fakeNotifStore) Unsubscribe(context.Context, string, string) error { return nil }
-func (f *fakeNotifStore) RemoveExpired(context.Context, time.Time) error    { return nil }
+
+func (f *fakeNotifStore) RemoveExpired(_ context.Context, before time.Time) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.removeExpiredCalls = append(f.removeExpiredCalls, before)
+	return f.removeExpiredErr
+}
+
+func (f *fakeNotifStore) removeExpiredCallCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.removeExpiredCalls)
+}
+
+func (f *fakeNotifStore) lastRemoveExpiredBefore() time.Time {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.removeExpiredCalls[len(f.removeExpiredCalls)-1]
+}
 
 func (f *fakeNotifStore) Enqueue(_ context.Context, pubkey, url, transport, method string, params interface{}) (int64, error) {
 	f.mu.Lock()
