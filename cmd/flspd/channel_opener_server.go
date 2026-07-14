@@ -61,20 +61,21 @@ func (s *channelOpenerServer) ChannelInformation(ctx context.Context, in *rpc.Ch
 		})
 	}
 
+	cfg := node.NodeConfig.Load()
 	return &rpc.ChannelInformationReply{
-		Name:                   node.NodeConfig.Name,
-		Pubkey:                 node.NodeConfig.NodePubkey,
-		Host:                   node.NodeConfig.Host,
-		ChannelCapacity:        int64(node.NodeConfig.PublicChannelAmount),
-		TargetConf:             int32(node.NodeConfig.TargetConf),
-		MinHtlcMloki:           int64(node.NodeConfig.MinHtlcMloki),
-		BaseFeeMloki:           int64(node.NodeConfig.BaseFeeMloki),
-		FeeRate:                node.NodeConfig.FeeRate,
-		TimeLockDelta:          node.NodeConfig.TimeLockDelta,
-		ChannelFeePermyriad:    int64(node.NodeConfig.ChannelFeePermyriad),
-		ChannelMinimumFeeMloki: int64(node.NodeConfig.ChannelMinimumFeeMloki),
+		Name:                   cfg.Name,
+		Pubkey:                 cfg.NodePubkey,
+		Host:                   cfg.Host,
+		ChannelCapacity:        int64(cfg.PublicChannelAmount),
+		TargetConf:             int32(cfg.TargetConf),
+		MinHtlcMloki:           int64(cfg.MinHtlcMloki),
+		BaseFeeMloki:           int64(cfg.BaseFeeMloki),
+		FeeRate:                cfg.FeeRate,
+		TimeLockDelta:          cfg.TimeLockDelta,
+		ChannelFeePermyriad:    int64(cfg.ChannelFeePermyriad),
+		ChannelMinimumFeeMloki: int64(cfg.ChannelMinimumFeeMloki),
 		LspPubkey:              node.PublicKey.SerializeCompressed(), // TODO: Is the publicKey different from the ecies public key?
-		MaxInactiveDuration:    int64(node.NodeConfig.MaxInactiveDuration),
+		MaxInactiveDuration:    int64(cfg.MaxInactiveDuration),
 		OpeningFeeParamsMenu:   menu,
 	}, nil
 }
@@ -135,11 +136,12 @@ func (s *channelOpenerServer) RegisterPayment(
 	} else {
 		tokenHash := sha256.Sum256([]byte(token))
 		log.Info().Msgf("DEPRECATED: RegisterPayment with deprecated fee mechanism. sha256 hash of token used: %x", tokenHash)
+		cfg := node.NodeConfig.Load()
 		pi.OpeningFeeParams = &rpc.OpeningFeeParams{
-			MinMloki:             uint64(node.NodeConfig.ChannelMinimumFeeMloki),
-			Proportional:         uint32(node.NodeConfig.ChannelFeePermyriad * 100),
+			MinMloki:             uint64(cfg.ChannelMinimumFeeMloki),
+			Proportional:         uint32(cfg.ChannelFeePermyriad * 100),
 			ValidUntil:           time.Now().UTC().Add(time.Duration(time.Hour * 24)).Format(format.TIME_FORMAT),
-			MaxIdleTime:          uint32(node.NodeConfig.MaxInactiveDuration / 600),
+			MaxIdleTime:          uint32(cfg.MaxInactiveDuration / 600),
 			MaxClientToSelfDelay: uint32(10000),
 		}
 	}

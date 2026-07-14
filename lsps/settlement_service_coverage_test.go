@@ -144,7 +144,7 @@ func TestMatrixProcessSettledInvoice(t *testing.T) {
 				}
 			}
 
-			svc := NewLsps1SettlementService(mockClient, mockStore, mockHistory, &config.NodeConfig{}, mockFee, chain.FeeStrategyEconomy, nil)
+			svc := NewLsps1SettlementService(mockClient, mockStore, mockHistory, config.NewNodeConfigRef(&config.NodeConfig{}), mockFee, chain.FeeStrategyEconomy, nil)
 
 			svc.processSettledInvoice(&lightning.InvoiceUpdate{
 				PaymentRequest: tt.invoice,

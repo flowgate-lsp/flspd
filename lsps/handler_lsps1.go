@@ -62,7 +62,7 @@ func (s *Server) getLsps1ConfigValues() (uint16, uint16, bool, uint32, time.Dura
 		// Should not happen if validation passed at startup
 		return 0, 0, false, 0, 0, 0, 0, 0, 0, 0, 0, 0
 	}
-	c := nodes[0].NodeConfig
+	c := nodes[0].NodeConfig.Load()
 
 	// Dereference pointers as validation ensures they are non-nil
 	minReqConf := *c.Lsps1MinRequiredChannelConfirmations

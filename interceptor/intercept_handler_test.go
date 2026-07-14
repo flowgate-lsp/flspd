@@ -223,16 +223,17 @@ func TestOpenChannel_CapacityLogic(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			interceptor := &Interceptor{
-				config: &config.NodeConfig{
+				config: config.NewNodeConfigRef(&config.NodeConfig{
 					AdditionalChannelCapacity: tt.padding,
 					MinChannelCapacityLoki:    tt.minFloor,
-				},
+				}),
 			}
 
 			// Verify the math in openChannel
-			capacity := tt.incomingAmountMloki/1000 + interceptor.config.AdditionalChannelCapacity
-			if uint64(capacity) < interceptor.config.MinChannelCapacityLoki {
-				capacity = int64(interceptor.config.MinChannelCapacityLoki)
+			cfg := interceptor.config.Load()
+			capacity := tt.incomingAmountMloki/1000 + cfg.AdditionalChannelCapacity
+			if uint64(capacity) < cfg.MinChannelCapacityLoki {
+				capacity = int64(cfg.MinChannelCapacityLoki)
 			}
 
 			assert.Equal(t, tt.expectedCapacity, capacity, "Capacity calculation mismatch")

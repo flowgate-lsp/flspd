@@ -156,19 +156,20 @@ func runLspd(cliCtx *cli.Context) error {
 	// Logic: We no longer auto-adjust values at runtime. Instead, we validated
 	// them above to ensure they are safe based on the configured padding.
 	for _, node := range nodes {
+		cfg := node.NodeConfig.Load()
 		for _, token := range node.Tokens {
-			minPaymentSize := node.NodeConfig.MinPaymentSizeMloki
-			maxPaymentSize := node.NodeConfig.JitMaxPaymentSizeMloki
+			minPaymentSize := cfg.MinPaymentSizeMloki
+			maxPaymentSize := cfg.JitMaxPaymentSizeMloki
 			if maxPaymentSize == 0 {
 				maxPaymentSize = DefaultMaxPaymentSizeLoki
 			}
 
 			// Proportional from ChannelFeePermyriad (in basis points of basis points)
 			// ChannelFeePermyriad is per 10,000. PPM is per 1,000,000. So multiply by 100.
-			proportional := uint32(node.NodeConfig.ChannelFeePermyriad * 100)
+			proportional := uint32(cfg.ChannelFeePermyriad * 100)
 
 			params := common.OpeningFeeParams{
-				MinFeeMloki:          uint64(node.NodeConfig.ChannelMinimumFeeMloki),
+				MinFeeMloki:          uint64(cfg.ChannelMinimumFeeMloki),
 				Proportional:         proportional,
 				ValidUntil:           "",
 				MinLifetime:          DefaultMinLifetimeBlocks,
@@ -245,19 +246,20 @@ func runLspd(cliCtx *cli.Context) error {
 	var interceptors []interceptor.HtlcInterceptor
 	var lspsServers []*lsps.Server
 	for _, node := range nodes {
+		nodeCfg := node.NodeConfig.Load()
 		var htlcInterceptor interceptor.HtlcInterceptor
 		var feeEstimator chain.FeeEstimator
 		if mempoolClient == nil {
-			feeEstimator = chain.NewDefaultFeeEstimator(node.NodeConfig.TargetConf)
+			feeEstimator = chain.NewDefaultFeeEstimator(nodeCfg.TargetConf)
 		} else {
 			feeEstimator = mempoolClient
 		}
 
-		if node.NodeConfig.Lnd == nil {
+		if nodeCfg.Lnd == nil {
 			log.Fatal().Msgf("node has to be flnd")
 		}
 
-		client, err := lnd.NewLndClient(node.NodeConfig.Lnd)
+		client, err := lnd.NewLndClient(nodeCfg.Lnd)
 		if err != nil {
 			log.Fatal().Msgf("failed to initialize LND client: %v", err)
 		}
@@ -402,8 +404,10 @@ func initializeNodes(configs []*config.NodeConfig) ([]*common.Node, error) {
 	}
 
 	nodes := []*common.Node{}
-	for _, config := range configs {
-		hexKey, err := common.ParsePrivateKey(config.FlspdPrivateKey)
+	// Named cfg, not config, so the config package import stays reachable
+	// inside the loop body (needed below to construct the NodeConfigRef).
+	for _, cfg := range configs {
+		hexKey, err := common.ParsePrivateKey(cfg.FlspdPrivateKey)
 		if err != nil {
 			return nil, fmt.Errorf("ParsePrivateKey(config.flspdPrivateKey) error: %v", err)
 		}
@@ -418,69 +422,60 @@ func initializeNodes(configs []*config.NodeConfig) ([]*common.Node, error) {
 		privateKey, publicKey := btcec.PrivKeyFromBytes(pk)
 
 		// Validate config using the config package validation logic
-		if err := config.Validate(); err != nil {
+		if err := cfg.Validate(); err != nil {
 			return nil, err
 		}
 
 		// Validate wumbo limits (PublicChannelAmount or explicit wumbo needs)
-		if config.PublicChannelAmount > int64(funding.MaxFlokicoinFundingAmountWumbo) {
-			return nil, fmt.Errorf("publicChannelAmount %d exceeds MaxFlokicoinFundingAmountWumbo %d", config.PublicChannelAmount, funding.MaxFlokicoinFundingAmountWumbo)
+		if cfg.PublicChannelAmount > int64(funding.MaxFlokicoinFundingAmountWumbo) {
+			return nil, fmt.Errorf("publicChannelAmount %d exceeds MaxFlokicoinFundingAmountWumbo %d", cfg.PublicChannelAmount, funding.MaxFlokicoinFundingAmountWumbo)
 		}
 		// Warn if exceeding standard limit but under wumbo
-		if config.PublicChannelAmount > int64(funding.MaxFlokicoinFundingAmount) {
-			log.Warn().Msgf("PublicChannelAmount %d exceeds standard MaxFlokicoinFundingAmount %d. Ensure wumbo is enabled.", config.PublicChannelAmount, funding.MaxFlokicoinFundingAmount)
+		if cfg.PublicChannelAmount > int64(funding.MaxFlokicoinFundingAmount) {
+			log.Warn().Msgf("PublicChannelAmount %d exceeds standard MaxFlokicoinFundingAmount %d. Ensure wumbo is enabled.", cfg.PublicChannelAmount, funding.MaxFlokicoinFundingAmount)
 		}
 
-		if err := config.ValidateLsps1(); err != nil {
+		if err := cfg.ValidateLsps1(); err != nil {
 			return nil, fmt.Errorf("LSPS1 config validation failed: %w", err)
 		}
 
-		if err := config.ValidateJit(); err != nil {
+		if err := cfg.ValidateJit(); err != nil {
 			return nil, fmt.Errorf("JIT config validation failed: %w", err)
 		}
 
-		node := &common.Node{
-			NodeConfig:      config,
-			PrivateKey:      privateKey,
-			PublicKey:       publicKey,
-			EciesPrivateKey: eciesPrivateKey,
-			EciesPublicKey:  eciesPublicKey,
-		}
-
-		if config.Lnd == nil {
+		if cfg.Lnd == nil {
 			return nil, fmt.Errorf("node has to be flnd")
 		}
 
-		node.Client, err = lnd.NewLndClient(config.Lnd)
+		client, err := lnd.NewLndClient(cfg.Lnd)
 		if err != nil {
 			return nil, err
 		}
 
-		// Make sure the nodes is available and set name and pubkey if not set
-		// in config.
-		info, err := node.Client.GetInfo()
+		// Make sure the nodes is available and set name and pubkey if not
+		// set in config. This mutates cfg directly, before it's wrapped in
+		// a NodeConfigRef below — safe, single-threaded startup code.
+		info, err := client.GetInfo()
 		if err != nil {
-			decodedPubkey, decodeErr := hex.DecodeString(
-				node.NodeConfig.NodePubkey)
-			if node.NodeConfig.Name == "" || node.NodeConfig.NodePubkey == "" ||
+			decodedPubkey, decodeErr := hex.DecodeString(cfg.NodePubkey)
+			if cfg.Name == "" || cfg.NodePubkey == "" ||
 				decodeErr != nil || len(decodedPubkey) != 33 {
 
-				return nil, fmt.Errorf("failed to get info from host %s",
-					node.NodeConfig.Host)
+				return nil, fmt.Errorf("failed to get info from host %s", cfg.Host)
 			}
 
 			info = &lightning.GetInfoResult{
-				Alias:  node.NodeConfig.Name,
-				Pubkey: node.NodeConfig.NodePubkey,
+				Alias:  cfg.Name,
+				Pubkey: cfg.NodePubkey,
 			}
 		}
 
-		if node.NodeConfig.Name == "" {
-			node.NodeConfig.Name = info.Alias
+		if cfg.Name == "" {
+			cfg.Name = info.Alias
 		}
 
-		if node.NodeConfig.NodePubkey == "" {
-			node.NodeConfig.NodePubkey = info.Pubkey
+		if cfg.NodePubkey == "" {
+			cfg.NodePubkey = info.Pubkey
 		}
 
 		nodeId, err := hex.DecodeString(info.Pubkey)
@@ -488,11 +483,19 @@ func initializeNodes(configs []*config.NodeConfig) ([]*common.Node, error) {
 			return nil, fmt.Errorf("failed to parse node id %s", info.Pubkey)
 		}
 
-		node.NodeId = nodeId
-		node.Tokens = config.Tokens
+		node := &common.Node{
+			NodeConfig:      config.NewNodeConfigRef(cfg),
+			PrivateKey:      privateKey,
+			PublicKey:       publicKey,
+			EciesPrivateKey: eciesPrivateKey,
+			EciesPublicKey:  eciesPublicKey,
+			Client:          client,
+			NodeId:          nodeId,
+			Tokens:          cfg.Tokens,
+		}
 		nodes = append(nodes, node)
 
-		log.Info().Msgf("LSPS Connection URI: %s@%s", info.Pubkey, config.Host)
+		log.Info().Msgf("LSPS Connection URI: %s@%s", info.Pubkey, cfg.Host)
 	}
 
 	return nodes, nil

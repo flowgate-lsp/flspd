@@ -42,7 +42,7 @@ func TestHandleLsps2Buy_CapacityChecks(t *testing.T) {
 			mockSetup: func(ns *MockNodesService, os *MockOpeningService, lm *MockLiquidityManager) {
 				ns.On("GetNodes").Return([]*common.Node{{
 					PublicKey:  &btcec.PublicKey{},
-					NodeConfig: &config.NodeConfig{TimeLockDelta: 40},
+					NodeConfig: config.NewNodeConfigRef(&config.NodeConfig{TimeLockDelta: 40}),
 					Tokens:     []string{"token"},
 				}})
 				ns.On("GetMinChannelCapacity").Return(MinChan)

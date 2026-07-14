@@ -60,7 +60,7 @@ func TestTableHandleLsps1CreateOrder(t *testing.T) {
 				maxExpiry := uint32(201600)
 				orderExpiry := uint32(86400)
 
-				nodes.On("GetNodes").Return([]*common.Node{{NodeConfig: &config.NodeConfig{
+				nodes.On("GetNodes").Return([]*common.Node{{NodeConfig: config.NewNodeConfigRef(&config.NodeConfig{
 					Lsps1MinRequiredChannelConfirmations: &minReqConf,
 					Lsps1MinFundingConfirmsWithinBlocks:  &minFundingConf,
 					Lsps1SupportsZeroChannelReserve:      &supportsZeroReserve,
@@ -73,7 +73,7 @@ func TestTableHandleLsps1CreateOrder(t *testing.T) {
 					Lsps1MinChannelBalanceLoki:           &minChan,
 					Lsps1MaxChannelBalanceLoki:           &maxChan,
 					AdditionalChannelCapacity:            21000, // 100 + 21000 > 20000
-				}}}, nil)
+				})}}, nil)
 				nodes.On("GetMinChannelCapacity").Return(uint64(20000))
 				liquidity.On("CheckOnChainLiquidity", mock.Anything, mock.Anything).Return(nil)
 				notif.On("NotifyOrderStateChanged", mock.Anything, mock.Anything, "CREATED", "", "").Return(true, nil)
@@ -118,7 +118,7 @@ func TestTableHandleLsps1CreateOrder(t *testing.T) {
 				maxExpiry := uint32(201600)
 				orderExpiry := uint32(86400)
 
-				nodes.On("GetNodes").Return([]*common.Node{{NodeConfig: &config.NodeConfig{
+				nodes.On("GetNodes").Return([]*common.Node{{NodeConfig: config.NewNodeConfigRef(&config.NodeConfig{
 					FeeRate:                              0.000001,
 					Lsps1MinRequiredChannelConfirmations: &minReqConf,
 					Lsps1MinFundingConfirmsWithinBlocks:  &minFundingConf,
@@ -131,7 +131,7 @@ func TestTableHandleLsps1CreateOrder(t *testing.T) {
 					Lsps1MaxInitialLspBalanceLoki:        &maxLsp,
 					Lsps1MinChannelBalanceLoki:           &minChan,
 					Lsps1MaxChannelBalanceLoki:           &maxChan,
-				}}}, nil)
+				})}}, nil)
 				nodes.On("GetMinChannelCapacity").Return(uint64(20000))
 				liquidity.On("CheckOnChainLiquidity", mock.Anything, mock.Anything).Return(nil)
 				notif.On("NotifyOrderStateChanged", mock.Anything, mock.Anything, "CREATED", "", "").Return(true, nil)
@@ -160,7 +160,7 @@ func TestTableHandleLsps1CreateOrder(t *testing.T) {
 				orderExpiry := uint32(86400)
 				minChan := uint64(20000)
 				maxChan := uint64(100_000_000)
-				nodes.On("GetNodes").Return([]*common.Node{{NodeConfig: &config.NodeConfig{
+				nodes.On("GetNodes").Return([]*common.Node{{NodeConfig: config.NewNodeConfigRef(&config.NodeConfig{
 					Lsps1MinRequiredChannelConfirmations: &minReqConf,
 					Lsps1MinFundingConfirmsWithinBlocks:  &minFundingConf,
 					Lsps1SupportsZeroChannelReserve:      &supportsZeroReserve,
@@ -172,7 +172,7 @@ func TestTableHandleLsps1CreateOrder(t *testing.T) {
 					Lsps1MaxInitialLspBalanceLoki:        &maxLsp,
 					Lsps1MinChannelBalanceLoki:           &minChan,
 					Lsps1MaxChannelBalanceLoki:           &maxChan,
-				}}}, nil).Maybe()
+				})}}, nil).Maybe()
 			},
 			config:               lspsConfig{Lsps1MaxPendingOrders: 5},
 			expectedError:        -32602,
@@ -198,7 +198,7 @@ func TestTableHandleLsps1CreateOrder(t *testing.T) {
 				orderExpiry := uint32(86400)
 				minChan := uint64(20000)
 				maxChan := uint64(100_000_000)
-				nodes.On("GetNodes").Return([]*common.Node{{NodeConfig: &config.NodeConfig{
+				nodes.On("GetNodes").Return([]*common.Node{{NodeConfig: config.NewNodeConfigRef(&config.NodeConfig{
 					Lsps1MinRequiredChannelConfirmations: &minReqConf,
 					Lsps1MinFundingConfirmsWithinBlocks:  &minFundingConf,
 					Lsps1SupportsZeroChannelReserve:      &supportsZeroReserve,
@@ -210,7 +210,7 @@ func TestTableHandleLsps1CreateOrder(t *testing.T) {
 					Lsps1MaxInitialLspBalanceLoki:        &maxLsp,
 					Lsps1MinChannelBalanceLoki:           &minChan,
 					Lsps1MaxChannelBalanceLoki:           &maxChan,
-				}}}, nil).Maybe()
+				})}}, nil).Maybe()
 			},
 			config:               lspsConfig{Lsps1MaxPendingOrders: 5},
 			expectedError:        100,                            // Application specific error
@@ -239,7 +239,7 @@ func TestTableHandleLsps1CreateOrder(t *testing.T) {
 				minChan := uint64(20000)
 				maxChan := uint64(100_000_000)
 
-				nodes.On("GetNodes").Return([]*common.Node{{NodeConfig: &config.NodeConfig{
+				nodes.On("GetNodes").Return([]*common.Node{{NodeConfig: config.NewNodeConfigRef(&config.NodeConfig{
 					FeeRate:                              0.000001,
 					Lsps1MinRequiredChannelConfirmations: &minReqConf,
 					Lsps1MinFundingConfirmsWithinBlocks:  &minFundingConf,
@@ -252,7 +252,7 @@ func TestTableHandleLsps1CreateOrder(t *testing.T) {
 					Lsps1MaxInitialLspBalanceLoki:        &maxLsp,
 					Lsps1MinChannelBalanceLoki:           &minChan,
 					Lsps1MaxChannelBalanceLoki:           &maxChan,
-				}}}, nil)
+				})}}, nil)
 				nodes.On("GetMinChannelCapacity").Return(uint64(20000))
 				liquidity.On("CheckOnChainLiquidity", mock.Anything, mock.Anything).Return(nil)
 			},

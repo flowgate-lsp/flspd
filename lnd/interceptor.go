@@ -19,7 +19,7 @@ import (
 
 type LndHtlcInterceptor struct {
 	interceptor   common.InterceptHandler
-	config        *config.NodeConfig
+	config        *config.NodeConfigRef
 	client        *LndClient
 	stopRequested bool
 	initWg        sync.WaitGroup
@@ -29,7 +29,7 @@ type LndHtlcInterceptor struct {
 }
 
 func NewLndHtlcInterceptor(
-	conf *config.NodeConfig,
+	conf *config.NodeConfigRef,
 	client *LndClient,
 	interceptor common.InterceptHandler,
 ) (*LndHtlcInterceptor, error) {

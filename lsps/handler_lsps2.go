@@ -181,6 +181,9 @@ Loop:
 	if validNode == nil {
 		return NewJsonRpcErrorResponse(req.Id, 100, "Invalid promise or expired params", nil)
 	}
+	// Snapshot once so this request sees one consistent config even if the
+	// dashboard updates it concurrently (C-3).
+	validCfg := validNode.NodeConfig.Load()
 
 	scid, err := generateRandomScid()
 	if err != nil {
@@ -199,11 +202,11 @@ Loop:
 
 		// Validation: Check min channel capacity (approximate neededSat as capacity)
 		neededSat := *paymentSize / 1000
-		additional := uint64(validNode.NodeConfig.AdditionalChannelCapacity)
+		additional := uint64(validCfg.AdditionalChannelCapacity)
 		physicalFloor := s.nodesService.GetMinChannelCapacity()
 		businessFloor := uint64(0)
-		if validNode.NodeConfig.JitMinChannelBalanceLoki != nil {
-			businessFloor = *validNode.NodeConfig.JitMinChannelBalanceLoki
+		if validCfg.JitMinChannelBalanceLoki != nil {
+			businessFloor = *validCfg.JitMinChannelBalanceLoki
 		}
 
 		// Enforce Physical Floor
@@ -269,7 +272,7 @@ Loop:
 
 	result := Lsps2BuyResult{
 		JITChannelScid:     formatScid(scid),
-		LspCltvExpiryDelta: uint16(validNode.NodeConfig.TimeLockDelta),
+		LspCltvExpiryDelta: uint16(validCfg.TimeLockDelta),
 		ClientTrustsLsp:    false,
 		LspNodeId:          hex.EncodeToString(validNode.NodeId),
 	}

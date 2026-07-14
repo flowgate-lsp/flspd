@@ -351,7 +351,7 @@ func TestProcessSettledInvoice_Success(t *testing.T) {
 	mockNotification := new(MockNotificationService)
 	conf := &config.NodeConfig{}
 
-	svc := NewLsps1SettlementService(mockClient, mockStore, historyStore, conf, feeEstimator, chain.FeeStrategyEconomy, mockNotification)
+	svc := NewLsps1SettlementService(mockClient, mockStore, historyStore, config.NewNodeConfigRef(conf), feeEstimator, chain.FeeStrategyEconomy, mockNotification)
 
 	// Expect notification
 	mockNotification.On("NotifyOrderStateChanged", "deadbeef", "test-order-123", "PAID", "", "").Return(true, nil)
@@ -392,7 +392,7 @@ func TestProcessSettledInvoice_OrderNotFound(t *testing.T) {
 	feeEstimator := new(MockFeeEstimator)
 	conf := &config.NodeConfig{}
 
-	svc := NewLsps1SettlementService(mockClient, mockStore, historyStore, conf, feeEstimator, chain.FeeStrategyEconomy, nil)
+	svc := NewLsps1SettlementService(mockClient, mockStore, historyStore, config.NewNodeConfigRef(conf), feeEstimator, chain.FeeStrategyEconomy, nil)
 
 	update := &lightning.InvoiceUpdate{
 		State:          lightning.InvoiceStateSettled,
@@ -466,7 +466,7 @@ func TestProcessSettledInvoice_TriggerChannelOpen(t *testing.T) {
 	// 2. COMPLETED
 	mockNotification.On("NotifyOrderStateChanged", order.PeerId, "test-order-123", "COMPLETED", chanPoint.String(), "").Return(true, nil)
 
-	svc := NewLsps1SettlementService(mockClient, mockStore, historyStore, conf, feeEstimator, chain.FeeStrategyEconomy, mockNotification)
+	svc := NewLsps1SettlementService(mockClient, mockStore, historyStore, config.NewNodeConfigRef(conf), feeEstimator, chain.FeeStrategyEconomy, mockNotification)
 
 	update := &lightning.InvoiceUpdate{
 		State:          lightning.InvoiceStateSettled,
@@ -502,7 +502,7 @@ func TestProcessSettledInvoice_AlreadyPaid(t *testing.T) {
 	feeEstimator := new(MockFeeEstimator)
 	conf := &config.NodeConfig{}
 
-	svc := NewLsps1SettlementService(mockClient, mockStore, historyStore, conf, feeEstimator, chain.FeeStrategyEconomy, nil)
+	svc := NewLsps1SettlementService(mockClient, mockStore, historyStore, config.NewNodeConfigRef(conf), feeEstimator, chain.FeeStrategyEconomy, nil)
 
 	update := &lightning.InvoiceUpdate{
 		State:          lightning.InvoiceStateSettled,
@@ -531,7 +531,7 @@ func TestGracefulShutdown(t *testing.T) {
 	feeEstimator := new(MockFeeEstimator)
 	conf := &config.NodeConfig{}
 
-	svc := NewLsps1SettlementService(mockClient, mockStore, historyStore, conf, feeEstimator, chain.FeeStrategyEconomy, nil)
+	svc := NewLsps1SettlementService(mockClient, mockStore, historyStore, config.NewNodeConfigRef(conf), feeEstimator, chain.FeeStrategyEconomy, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	err := svc.Start(ctx)
@@ -595,7 +595,7 @@ func TestLsps1SettlementService_StartupRecovery(t *testing.T) {
 
 	mockClient.On("SubscribeInvoices").Return((<-chan *lightning.InvoiceUpdate)(invoiceChan), (<-chan error)(errChan), nil)
 
-	svc := NewLsps1SettlementService(mockClient, mockStore, historyStore, conf, feeEstimator, chain.FeeStrategyEconomy, mockNotification)
+	svc := NewLsps1SettlementService(mockClient, mockStore, historyStore, config.NewNodeConfigRef(conf), feeEstimator, chain.FeeStrategyEconomy, mockNotification)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -680,7 +680,7 @@ func TestF1_ConcurrentSettlementAndRecoveryOpenExactlyOneChannel(t *testing.T) {
 	historyStore := new(MockHistoryStore)
 	conf := &config.NodeConfig{FeeRate: 0.000001, BaseFeeMloki: 1000, TimeLockDelta: 40}
 
-	svc := NewLsps1SettlementService(mockClient, mockStore, historyStore, conf, feeEstimator, chain.FeeStrategyEconomy, nil)
+	svc := NewLsps1SettlementService(mockClient, mockStore, historyStore, config.NewNodeConfigRef(conf), feeEstimator, chain.FeeStrategyEconomy, nil)
 
 	var wg sync.WaitGroup
 	wg.Add(2)

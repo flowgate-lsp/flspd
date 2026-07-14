@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -18,6 +19,7 @@ import (
 	"github.com/flowgate-lsp/flspd/lsps"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"gopkg.in/yaml.v3"
 )
 
 // Mock definitions
@@ -332,10 +334,10 @@ func TestDashboardService_RPC(t *testing.T) {
 	testNode := &common.Node{
 		NodeId: []byte("testnode"),
 		Client: mockLnd,
-		NodeConfig: &config.NodeConfig{
+		NodeConfig: config.NewNodeConfigRef(&config.NodeConfig{
 			Name:       "Test Node",
 			NodePubkey: "02abc...",
-		},
+		}),
 	}
 
 	mockNodes.On("GetNodes").Return([]*common.Node{testNode})
@@ -420,4 +422,149 @@ func TestDashboardService_RPC(t *testing.T) {
 		resp := s.handleGetConfig(req)
 		assert.Nil(t, resp.Error)
 	})
+}
+
+// TestHandleGetConfig_StripsSecrets is the regression test for C-1:
+// get_config used to return the full NodeConfig, including
+// flspdPrivateKey, tokens (client auth tokens), and the flnd block
+// (macaroon + TLS cert), to any authenticated dashboard client.
+func TestHandleGetConfig_StripsSecrets(t *testing.T) {
+	mockNodes := new(MockNodesService)
+	node := &common.Node{
+		NodeConfig: config.NewNodeConfigRef(&config.NodeConfig{
+			Name:            "Secret Node",
+			NodePubkey:      "02abc...",
+			FlspdPrivateKey: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+			Tokens:          []string{"super-secret-client-token"},
+			Lnd: &config.LndConfig{
+				Address:  "flnd:10005",
+				Macaroon: "0102030405",
+				Cert:     "-----BEGIN CERTIFICATE-----",
+			},
+		}),
+	}
+	mockNodes.On("GetNodes").Return([]*common.Node{node})
+
+	s := NewDashboardService(mockNodes, nil, nil, nil, "pubkey_test", "")
+
+	req := &lsps.JsonRpcRequest{Id: json.RawMessage(`1`), Method: "get_config"}
+	resp := s.handleGetConfig(req)
+	assert.Nil(t, resp.Error)
+
+	// Round-trip through JSON the same way a real RPC response would, so
+	// this test catches the bug even if a future change returns the
+	// secrets under a different Go field but the same JSON shape.
+	raw, err := json.Marshal(resp.Result)
+	assert.NoError(t, err)
+	assert.NotContains(t, string(raw), "deadbeefdeadbeef", "flspdPrivateKey leaked into the response")
+	assert.NotContains(t, string(raw), "super-secret-client-token", "tokens leaked into the response")
+	assert.NotContains(t, string(raw), "0102030405", "macaroon leaked into the response")
+	assert.NotContains(t, string(raw), "BEGIN CERTIFICATE", "TLS cert leaked into the response")
+
+	// And the safe fields should still be present — this isn't just a
+	// bug fix, it still needs to be useful.
+	assert.Contains(t, string(raw), "Secret Node")
+	assert.Contains(t, string(raw), "02abc")
+}
+
+// TestHandleUpdateConfig_PreservesOtherNodes is the regression test for
+// C-2: update_config used to marshal only the single edited node back to
+// nodes.yaml, silently dropping every other configured node on a
+// multi-node deployment.
+func TestHandleUpdateConfig_PreservesOtherNodes(t *testing.T) {
+	mockNodes := new(MockNodesService)
+	nodeA := &common.Node{
+		NodeConfig: config.NewNodeConfigRef(&config.NodeConfig{
+			Name:                   "Node A",
+			NodePubkey:             "02aaa...",
+			TargetConf:             6,
+			ChannelMinimumFeeMloki: 1000,
+		}),
+	}
+	nodeB := &common.Node{
+		NodeConfig: config.NewNodeConfigRef(&config.NodeConfig{
+			Name:                   "Node B",
+			NodePubkey:             "02bbb...",
+			TargetConf:             6,
+			ChannelMinimumFeeMloki: 1000,
+		}),
+	}
+	mockNodes.On("GetNodes").Return([]*common.Node{nodeA, nodeB})
+
+	configPath := "/tmp/nodes-c2-test.yaml"
+	defer os.Remove(configPath)
+
+	s := NewDashboardService(mockNodes, nil, nil, nil, "pubkey_test", configPath)
+
+	updateReq := struct {
+		Config config.NodeConfig `json:"config"`
+	}{
+		Config: config.NodeConfig{
+			Name:                   "Node A Renamed",
+			NodePubkey:             "02aaa...",
+			TargetConf:             6,
+			ChannelMinimumFeeMloki: 1000,
+		},
+	}
+	body, err := json.Marshal(updateReq)
+	assert.NoError(t, err)
+
+	req := &lsps.JsonRpcRequest{Id: json.RawMessage(`1`), Method: "update_config", Params: body}
+	resp := s.handleUpdateConfig(req)
+	assert.Nil(t, resp.Error)
+
+	data, err := os.ReadFile(configPath)
+	assert.NoError(t, err)
+
+	var persisted []*config.NodeConfig
+	assert.NoError(t, yaml.Unmarshal(data, &persisted))
+	assert.Len(t, persisted, 2, "both nodes should still be present in the persisted file")
+	assert.Equal(t, "Node A Renamed", persisted[0].Name)
+	assert.Equal(t, "Node B", persisted[1].Name, "the second node must survive editing the first")
+}
+
+// TestNodeConfig_ConcurrentReadWriteNoRace is the regression test for C-3:
+// config used to be a raw *config.NodeConfig mutated in place
+// (*nodes[0].NodeConfig = newValue) with no synchronization against
+// concurrent readers on the HTLC hot path. Run with -race: this must pass
+// clean, not just avoid a panic.
+func TestNodeConfig_ConcurrentReadWriteNoRace(t *testing.T) {
+	ref := config.NewNodeConfigRef(&config.NodeConfig{TimeLockDelta: 144})
+
+	var wg sync.WaitGroup
+	stop := make(chan struct{})
+
+	// Simulate the interceptor's hot path: many concurrent readers taking
+	// a snapshot and reading fields off it.
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+					cfg := ref.Load()
+					_ = cfg.TimeLockDelta
+					_ = cfg.AdditionalChannelCapacity
+				}
+			}
+		}()
+	}
+
+	// Simulate the dashboard: one writer swapping in a whole new config
+	// repeatedly.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 1000; i++ {
+			ref.Store(&config.NodeConfig{TimeLockDelta: uint32(i)})
+		}
+	}()
+
+	// Let the readers run a little past the writer finishing, then stop.
+	time.Sleep(20 * time.Millisecond)
+	close(stop)
+	wg.Wait()
 }

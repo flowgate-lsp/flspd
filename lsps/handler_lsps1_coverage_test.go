@@ -73,7 +73,7 @@ func TestHandleLsps1CreateOrder_Matrix(t *testing.T) {
 			mockSetup: func(lm *MockLiquidityManager, ns *MockNodesService, os *MockOpeningService, lc *MockLndClient, notif *MockNotificationService) {
 				lm.On("CheckOnChainLiquidity", mock.Anything, uint64(50000)).Return(nil)
 				ns.On("GetMinChannelCapacity").Return(MinChan)
-				ns.On("GetNodes").Return([]*common.Node{{NodeConfig: &config.NodeConfig{}}})
+				ns.On("GetNodes").Return([]*common.Node{{NodeConfig: config.NewNodeConfigRef(&config.NodeConfig{})}})
 				os.On("GetFeeParamsMenu", mock.Anything, mock.Anything).Return([]*common.OpeningFeeParams{{
 					MinFeeMloki: 1000, Proportional: 100,
 				}}, nil)
@@ -108,7 +108,7 @@ func TestHandleLsps1CreateOrder_Matrix(t *testing.T) {
 			maxExpiry := uint32(201600)
 			orderExpiry := uint32(86400)
 
-			mockNS.On("GetNodes").Return([]*common.Node{{NodeConfig: &config.NodeConfig{
+			mockNS.On("GetNodes").Return([]*common.Node{{NodeConfig: config.NewNodeConfigRef(&config.NodeConfig{
 				Lsps1MinRequiredChannelConfirmations: &minReqConf,
 				Lsps1MinFundingConfirmsWithinBlocks:  &minFundingConf,
 				Lsps1SupportsZeroChannelReserve:      &supportsZeroReserve,
@@ -120,7 +120,7 @@ func TestHandleLsps1CreateOrder_Matrix(t *testing.T) {
 				Lsps1MaxInitialLspBalanceLoki:        &maxLsp,
 				Lsps1MinChannelBalanceLoki:           &minChan,
 				Lsps1MaxChannelBalanceLoki:           &maxChan,
-			}}}).Maybe()
+			})}}).Maybe()
 
 			if tt.mockSetup != nil {
 				tt.mockSetup(mockLM, mockNS, mockOS, mockLC, mockNotif)

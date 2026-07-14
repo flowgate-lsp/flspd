@@ -480,8 +480,8 @@ func (s *DashboardService) handleGetSummary(req *lsps.JsonRpcRequest) *lsps.Json
 
 	// Create simplified summary
 	summary := SummaryResponse{
-		NodeName:       mainNode.NodeConfig.Name,
-		NodePubkey:     mainNode.NodeConfig.NodePubkey,
+		NodeName:       mainNode.NodeConfig.Load().Name,
+		NodePubkey:     mainNode.NodeConfig.Load().NodePubkey,
 		Version:        build.GetTag(),
 		Revenue24h:     uint64(revenue24h),
 		LiquidityTotal: totalCapacity,
@@ -650,14 +650,43 @@ func (s *DashboardService) handleListJitChannels(req *lsps.JsonRpcRequest) *lsps
 	return lsps.NewJsonRpcResponse(req.Id, enrichedChannels)
 }
 
+// configSecretFields are the JSON keys of config.NodeConfig fields that
+// must never leave the server: the LSP's private key, client auth tokens,
+// and the LND connection block (which carries the macaroon and TLS cert).
+// See C-1 — the dashboard used to return the full NodeConfig, secrets
+// included, to any authenticated browser client.
+var configSecretFields = []string{"flspdPrivateKey", "tokens", "flnd"}
+
+// stripConfigSecrets returns cfg re-marshaled with configSecretFields
+// removed, safe to send to the dashboard UI.
+func stripConfigSecrets(cfg *config.NodeConfig) (map[string]interface{}, error) {
+	raw, err := json.Marshal(cfg)
+	if err != nil {
+		return nil, err
+	}
+	var m map[string]interface{}
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return nil, err
+	}
+	for _, field := range configSecretFields {
+		delete(m, field)
+	}
+	return m, nil
+}
+
 func (s *DashboardService) handleGetConfig(req *lsps.JsonRpcRequest) *lsps.JsonRpcResponse {
 	nodes := s.nodesService.GetNodes()
 	if len(nodes) == 0 {
 		return lsps.NewJsonRpcErrorResponse(req.Id, -32000, "No nodes configured", nil)
 	}
-	// Return the first node's config
+	// Return the first node's config, with secrets stripped (C-1).
+	safeConfig, err := stripConfigSecrets(nodes[0].NodeConfig.Load())
+	if err != nil {
+		log.Error().Err(err).Msg("Dashboard: failed to prepare config for response")
+		return lsps.NewJsonRpcErrorResponse(req.Id, -32603, "Internal error", nil)
+	}
 	return lsps.NewJsonRpcResponse(req.Id, map[string]interface{}{
-		"config": nodes[0].NodeConfig,
+		"config": safeConfig,
 	})
 }
 
@@ -681,12 +710,33 @@ func (s *DashboardService) handleUpdateConfig(req *lsps.JsonRpcRequest) *lsps.Js
 		return lsps.NewJsonRpcErrorResponse(req.Id, -32000, "No nodes configured", nil)
 	}
 
-	// 2. Persist to file first (if configPath is set)
+	// The dashboard only edits the first node today (same assumption
+	// handleGetConfig already makes) — but the request body never carries
+	// this node's secrets (they're stripped on the way out, C-1), so
+	// preserve them from the current in-memory config rather than
+	// clobbering them with the zero values an operator's edit wouldn't
+	// have included.
+	newConfig := params.Config
+	current := nodes[0].NodeConfig.Load()
+	newConfig.FlspdPrivateKey = current.FlspdPrivateKey
+	newConfig.Tokens = current.Tokens
+	newConfig.Lnd = current.Lnd
+
+	// 2. Persist to file first (if configPath is set).
 	// This ensures we don't update memory if persistence fails.
 	if s.configPath != "" {
-		// In a real scenario, we'd marshal all nodes back to YAML
-		// For this implementation, we'll assume a single node for simplicity
-		configs := []*config.NodeConfig{&params.Config}
+		// Read-modify-write the full node list (C-2): a naive
+		// []*config.NodeConfig{&newConfig} single-element write here would
+		// silently drop every other configured node from the file on a
+		// multi-node deployment. Build the full list from the live
+		// in-memory nodes, with only the edited node (index 0, matching
+		// the read side above) replaced.
+		configs := make([]*config.NodeConfig, len(nodes))
+		for idx, n := range nodes {
+			configs[idx] = n.NodeConfig.Load()
+		}
+		configs[0] = &newConfig
+
 		data, err := yaml.Marshal(configs)
 		if err != nil {
 			log.Error().Err(err).Msg("Failed to marshal config for persistence")
@@ -711,8 +761,11 @@ func (s *DashboardService) handleUpdateConfig(req *lsps.JsonRpcRequest) *lsps.Js
 		log.Info().Msgf("Persisted dashboard config changes to %s", s.configPath)
 	}
 
-	// 3. Update in memory only after successful persistence
-	*nodes[0].NodeConfig = params.Config
+	// 3. Update in memory only after successful persistence. Store()
+	// atomically swaps in the new config rather than mutating the shared
+	// struct in place, so concurrent readers on the HTLC hot path (the
+	// interceptor, the settlement service) never see a torn read (C-3).
+	nodes[0].NodeConfig.Store(&newConfig)
 
 	return lsps.NewJsonRpcResponse(req.Id, map[string]string{"status": "updated"})
 }

@@ -187,9 +187,9 @@ func TestLsps2Buy(t *testing.T) {
 		PublicKey:  pubKey,
 		PrivateKey: privKey,
 		Tokens:     []string{"test-token"},
-		NodeConfig: &config.NodeConfig{
+		NodeConfig: config.NewNodeConfigRef(&config.NodeConfig{
 			TimeLockDelta: 144,
-		},
+		}),
 	}
 
 	mockNodes.On("GetNodes").Return([]*common.Node{node})
@@ -265,9 +265,9 @@ func TestLsps2Buy_PaymentSizeValidation(t *testing.T) {
 		PublicKey:  pubKey,
 		PrivateKey: privKey,
 		Tokens:     []string{"test-token"},
-		NodeConfig: &config.NodeConfig{
+		NodeConfig: config.NewNodeConfigRef(&config.NodeConfig{
 			TimeLockDelta: 144,
-		},
+		}),
 	}
 
 	mockNodes.On("GetNodes").Return([]*common.Node{node})
@@ -361,7 +361,7 @@ func TestLsps1CreateOrder(t *testing.T) {
 		PublicKey:  pubKey,
 		PrivateKey: privKey,
 		Tokens:     []string{"test-token"},
-		NodeConfig: &config.NodeConfig{
+		NodeConfig: config.NewNodeConfigRef(&config.NodeConfig{
 			TimeLockDelta:                        144,
 			Lsps1MinRequiredChannelConfirmations: &minReqConf,
 			Lsps1MinFundingConfirmsWithinBlocks:  &minFundingConf,
@@ -374,7 +374,7 @@ func TestLsps1CreateOrder(t *testing.T) {
 			Lsps1MaxInitialLspBalanceLoki:        &maxLsp,
 			Lsps1MinChannelBalanceLoki:           &minChan,
 			Lsps1MaxChannelBalanceLoki:           &maxChan,
-		},
+		}),
 	}
 
 	mockNodes.On("GetNodes").Return([]*common.Node{node})

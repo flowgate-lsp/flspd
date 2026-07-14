@@ -162,7 +162,7 @@ func verifyLsps1Capacity(t *testing.T, tc matrixScenario, minFloor uint64) {
 		AdditionalChannelCapacity:            tc.padding,
 	}
 
-	nodes.On("GetNodes").Return([]*common.Node{{NodeConfig: nodeConfig}})
+	nodes.On("GetNodes").Return([]*common.Node{{NodeConfig: config.NewNodeConfigRef(nodeConfig)}})
 	nodes.On("GetMinChannelCapacity").Return(minFloor)
 	liquidity.On("CheckOnChainLiquidity", mock.Anything, mock.Anything).Return(nil)
 	store.On("GetFeeParamsMenu", mock.Anything, mock.Anything).Return([]*common.OpeningFeeParams{}, nil)
@@ -211,7 +211,7 @@ func verifyLsps2Capacity(t *testing.T, tc matrixScenario, minFloor uint64) {
 	}
 	validNode := &common.Node{
 		PublicKey:  nodePriv.PubKey(),
-		NodeConfig: nodeConfig,
+		NodeConfig: config.NewNodeConfigRef(nodeConfig),
 		Tokens:     []string{"token"},
 	}
 

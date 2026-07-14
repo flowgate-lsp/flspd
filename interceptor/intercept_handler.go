@@ -21,9 +21,13 @@ import (
 )
 
 type Interceptor struct {
-	nodeid              []byte
-	client              lightning.Client
-	config              *config.NodeConfig
+	nodeid []byte
+	client lightning.Client
+	// config is an atomic ref, not a raw pointer, so it can be hot-swapped
+	// by the dashboard's config-update handler without racing the HTLC
+	// hot path reading it here (C-3). Callers should Load() it once per
+	// logical operation for an internally consistent snapshot.
+	config              *config.NodeConfigRef
 	store               InterceptStore
 	historyStore        history.Store
 	openingService      common.OpeningService
@@ -36,7 +40,7 @@ type Interceptor struct {
 
 func NewInterceptHandler(
 	client lightning.Client,
-	config *config.NodeConfig,
+	config *config.NodeConfigRef,
 	store InterceptStore,
 	historyStore history.Store,
 	openingService common.OpeningService,
@@ -45,7 +49,7 @@ func NewInterceptHandler(
 	notificationService notifications.Notifier,
 	nodePrivKey interface{},
 ) *Interceptor {
-	nodeid, _ := hex.DecodeString(config.NodePubkey)
+	nodeid, _ := hex.DecodeString(config.Load().NodePubkey)
 	return &Interceptor{
 		nodeid:              nodeid,
 		client:              client,
@@ -65,6 +69,10 @@ func (i *Interceptor) Intercept(req common.InterceptRequest) common.InterceptRes
 	log.Debug().Msgf("Intercept: scid=%s paymentHash=%s outgoingAmount=%v outgoingExpiry=%v incomingExpiry=%v", req.Scid.ToString(), reqPaymentHashStr, req.OutgoingAmountMloki, req.OutgoingExpiry, req.IncomingExpiry)
 	log.Trace().Msgf("Checking singleflight for %s", reqPaymentHashStr)
 	resp, _, _ := i.payHashGroup.Do(reqPaymentHashStr, func() (interface{}, error) {
+		// Snapshot once so this payment's processing sees one internally
+		// consistent config even if the dashboard updates it concurrently
+		// mid-flight (C-3).
+		cfg := i.config.Load()
 		data, err := i.resolvePayment(req)
 		if err != nil {
 			log.Error().Msgf("resolvePayment(%x) error: %v", req.PaymentHash, err)
@@ -187,27 +195,27 @@ func (i *Interceptor) Intercept(req common.InterceptRequest) common.InterceptRes
 			// TODO: When opening_fee_params is enforced, turn this check in a temporary channel failure.
 			if params == nil {
 				validity := time.Hour * 24
-				if i.config.JitValidUntilSeconds > 0 {
-					validity = time.Duration(i.config.JitValidUntilSeconds) * time.Second
+				if cfg.JitValidUntilSeconds > 0 {
+					validity = time.Duration(cfg.JitValidUntilSeconds) * time.Second
 				}
 				maxDelay := uint32(10000)
-				if i.config.JitMaxClientToSelfDelay > 0 {
-					maxDelay = i.config.JitMaxClientToSelfDelay
+				if cfg.JitMaxClientToSelfDelay > 0 {
+					maxDelay = cfg.JitMaxClientToSelfDelay
 				}
 
 				log.Warn().Msgf("Intercept: DEPRECATED fee mechanism used, applying defaults. paymentHash=%s", reqPaymentHashStr)
 				params = &common.OpeningFeeParams{
-					MinFeeMloki:          uint64(i.config.ChannelMinimumFeeMloki),
-					Proportional:         uint32(i.config.ChannelFeePermyriad * 100),
+					MinFeeMloki:          uint64(cfg.ChannelMinimumFeeMloki),
+					Proportional:         uint32(cfg.ChannelFeePermyriad * 100),
 					ValidUntil:           time.Now().UTC().Add(validity).Format(format.TIME_FORMAT),
-					MinLifetime:          uint32(i.config.MaxInactiveDuration / 600),
+					MinLifetime:          uint32(cfg.MaxInactiveDuration / 600),
 					MaxClientToSelfDelay: maxDelay,
 				}
 			}
 
 			// Make sure the cltv delta is enough.
-			if int64(req.IncomingExpiry)-int64(req.OutgoingExpiry) < int64(i.config.TimeLockDelta) {
-				log.Debug().Msgf("Intercept: paymentHash=%s CLTV insufficient, outgoingExpiry=%v incomingExpiry=%v timeLockDelta=%v", reqPaymentHashStr, req.OutgoingExpiry, req.IncomingExpiry, i.config.TimeLockDelta)
+			if int64(req.IncomingExpiry)-int64(req.OutgoingExpiry) < int64(cfg.TimeLockDelta) {
+				log.Debug().Msgf("Intercept: paymentHash=%s CLTV insufficient, outgoingExpiry=%v incomingExpiry=%v timeLockDelta=%v", reqPaymentHashStr, req.OutgoingExpiry, req.IncomingExpiry, cfg.TimeLockDelta)
 				return common.InterceptResult{
 					Action:      common.INTERCEPT_FAIL_HTLC_WITH_CODE,
 					FailureCode: common.FAILURE_TEMPORARY_CHANNEL_FAILURE,
@@ -428,7 +436,7 @@ func (i *Interceptor) notifyAndWait(reqPaymentHashStr string, nextHop []byte, is
 	}
 
 	log.Debug().Msgf("Intercept: paymentHash=%s notified peer %x of pending HTLC", reqPaymentHashStr, nextHop)
-	d, err := time.ParseDuration(i.config.NotificationTimeout)
+	d, err := time.ParseDuration(i.config.Load().NotificationTimeout)
 	if err != nil {
 		log.Warn().Msg("Intercept: NotificationTimeout not set, using default 1m")
 		d = time.Minute
@@ -480,8 +488,13 @@ func (i *Interceptor) notifyAndWait(reqPaymentHashStr string, nextHop []byte, is
 }
 
 func (i *Interceptor) openChannel(paymentHash, destination []byte, incomingAmountMloki int64, tag *string, isJit bool) (*wire.OutPoint, error) {
-	capacity := incomingAmountMloki/1000 + i.config.AdditionalChannelCapacity
-	if capacity == i.config.PublicChannelAmount {
+	// Snapshot once so this channel-open decision is made against one
+	// internally consistent config even if the dashboard updates it
+	// concurrently mid-flight (C-3).
+	cfg := i.config.Load()
+
+	capacity := incomingAmountMloki/1000 + cfg.AdditionalChannelCapacity
+	if capacity == cfg.PublicChannelAmount {
 		capacity++
 	}
 
@@ -492,30 +505,30 @@ func (i *Interceptor) openChannel(paymentHash, destination []byte, incomingAmoun
 	if err != nil || fee == nil {
 		log.Error().Msgf("Error estimating chain fee, fallback to target conf: %v", err)
 		fee = &chain.FeeEstimation{
-			TargetConf: &i.config.TargetConf,
+			TargetConf: &cfg.TargetConf,
 		}
 	}
 
 	// Enforce Minimum Channel Capacity (Physical Floor)
-	if uint64(capacity) < i.config.MinChannelCapacityLoki {
-		return nil, fmt.Errorf("channel capacity %d is smaller than minimum %d (network floor)", capacity, i.config.MinChannelCapacityLoki)
+	if uint64(capacity) < cfg.MinChannelCapacityLoki {
+		return nil, fmt.Errorf("channel capacity %d is smaller than minimum %d (network floor)", capacity, cfg.MinChannelCapacityLoki)
 	}
 
 	// Enforce Business Limits for JIT
-	if i.config.JitEnabled && isJit {
+	if cfg.JitEnabled && isJit {
 		// 1. Check Business Floor (Minimum Channel Size)
-		if i.config.JitMinChannelBalanceLoki != nil && uint64(capacity) < *i.config.JitMinChannelBalanceLoki {
-			return nil, fmt.Errorf("channel capacity %d is smaller than business minimum %d", capacity, *i.config.JitMinChannelBalanceLoki)
+		if cfg.JitMinChannelBalanceLoki != nil && uint64(capacity) < *cfg.JitMinChannelBalanceLoki {
+			return nil, fmt.Errorf("channel capacity %d is smaller than business minimum %d", capacity, *cfg.JitMinChannelBalanceLoki)
 		}
 
 		// 2. Check Maximum Payment Size
-		if i.config.JitMaxPaymentSizeMloki > 0 && uint64(incomingAmountMloki) > i.config.JitMaxPaymentSizeMloki {
-			return nil, fmt.Errorf("payment size %d exceeds maximum allowed %d", incomingAmountMloki, i.config.JitMaxPaymentSizeMloki)
+		if cfg.JitMaxPaymentSizeMloki > 0 && uint64(incomingAmountMloki) > cfg.JitMaxPaymentSizeMloki {
+			return nil, fmt.Errorf("payment size %d exceeds maximum allowed %d", incomingAmountMloki, cfg.JitMaxPaymentSizeMloki)
 		}
 	}
 
-	minConfs := i.config.MinConfs
-	if i.config.JitEnabled && isJit {
+	minConfs := cfg.MinConfs
+	if cfg.JitEnabled && isJit {
 		log.Debug().Msgf("Intercept: JIT enabled, overriding MinConfs to 0 for paymentHash=%x", paymentHash)
 		zero := uint32(0)
 		minConfs = &zero
@@ -538,13 +551,13 @@ func (i *Interceptor) openChannel(paymentHash, destination []byte, incomingAmoun
 		routingPolicy = &lightning.RoutingPolicy{
 			Ppm:           0, // Zero fee rate for JIT
 			BaseMloki:     0, // Zero base fee for JIT
-			TimeLockDelta: i.config.TimeLockDelta,
+			TimeLockDelta: cfg.TimeLockDelta,
 		}
 	} else {
 		routingPolicy = &lightning.RoutingPolicy{
-			Ppm:           uint32(i.config.FeeRate * 1_000_000),
-			BaseMloki:     i.config.BaseFeeMloki,
-			TimeLockDelta: i.config.TimeLockDelta,
+			Ppm:           uint32(cfg.FeeRate * 1_000_000),
+			BaseMloki:     cfg.BaseFeeMloki,
+			TimeLockDelta: cfg.TimeLockDelta,
 		}
 	}
 
@@ -555,7 +568,7 @@ func (i *Interceptor) openChannel(paymentHash, destination []byte, incomingAmoun
 		FeeLokiPerVByte: fee.LokiPerVByte,
 		TargetConf:      fee.TargetConf,
 		RoutingPolicy:   routingPolicy,
-		ZeroConf:        i.config.JitEnabled && isJit,
+		ZeroConf:        cfg.JitEnabled && isJit,
 	})
 	if err != nil {
 		log.Error().Msgf("paymenthash %x, client.OpenChannelSync(%x, %v) error: %v", paymentHash, destination, capacity, err)
@@ -679,20 +692,21 @@ func (i *Interceptor) resolvePayment(req common.InterceptRequest) (*interceptDat
 
 					// Use default fee params for now as LSPS1 params aren't stored in DB in same format
 					// TODO: Store actual params from order creation
+					cfg := i.config.Load()
 					validity := time.Hour * 24
-					if i.config.JitValidUntilSeconds > 0 {
-						validity = time.Duration(i.config.JitValidUntilSeconds) * time.Second
+					if cfg.JitValidUntilSeconds > 0 {
+						validity = time.Duration(cfg.JitValidUntilSeconds) * time.Second
 					}
 					maxDelay := uint32(10000)
-					if i.config.JitMaxClientToSelfDelay > 0 {
-						maxDelay = i.config.JitMaxClientToSelfDelay
+					if cfg.JitMaxClientToSelfDelay > 0 {
+						maxDelay = cfg.JitMaxClientToSelfDelay
 					}
 
 					params = &common.OpeningFeeParams{
-						MinFeeMloki:          uint64(i.config.ChannelMinimumFeeMloki),
-						Proportional:         uint32(i.config.ChannelFeePermyriad * 100),
+						MinFeeMloki:          uint64(cfg.ChannelMinimumFeeMloki),
+						Proportional:         uint32(cfg.ChannelFeePermyriad * 100),
 						ValidUntil:           time.Now().Add(validity).Format(format.TIME_FORMAT),
-						MinLifetime:          uint32(i.config.MaxInactiveDuration / 600),
+						MinLifetime:          uint32(cfg.MaxInactiveDuration / 600),
 						MaxClientToSelfDelay: maxDelay,
 					}
 

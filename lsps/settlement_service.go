@@ -16,10 +16,13 @@ import (
 
 // Lsps1SettlementService monitors LND invoice settlements and processes LSPS1 orders
 type Lsps1SettlementService struct {
-	client              lightning.Client
-	openingStore        common.OpeningStore
-	historyStore        history.Store
-	config              *config.NodeConfig
+	client       lightning.Client
+	openingStore common.OpeningStore
+	historyStore history.Store
+	// config is an atomic ref, not a raw pointer, so it can be hot-swapped
+	// by the dashboard's config-update handler without racing settlement's
+	// own reads here (C-3). Load() it once per logical operation.
+	config              *config.NodeConfigRef
 	feeEstimator        chain.FeeEstimator
 	feeStrategy         chain.FeeStrategy
 	notificationService NotificationService
@@ -33,7 +36,7 @@ func NewLsps1SettlementService(
 	client lightning.Client,
 	openingStore common.OpeningStore,
 	historyStore history.Store,
-	config *config.NodeConfig,
+	config *config.NodeConfigRef,
 	feeEstimator chain.FeeEstimator,
 	feeStrategy chain.FeeStrategy,
 	notificationService NotificationService,
@@ -179,6 +182,11 @@ func (s *Lsps1SettlementService) processSettledInvoice(update *lightning.Invoice
 }
 
 func (s *Lsps1SettlementService) openChannelForOrder(order *common.Lsps1Order) {
+	// Snapshot once so this channel-open decision is made against one
+	// internally consistent config even if the dashboard updates it
+	// concurrently mid-flight (C-3).
+	cfg := s.config.Load()
+
 	log.Info().
 		Str("component", string(common.LogComponentSettlement)).
 		Str("action", string(common.LogActionRequest)).
@@ -222,13 +230,13 @@ func (s *Lsps1SettlementService) openChannelForOrder(order *common.Lsps1Order) {
 	if err != nil || fee == nil {
 		log.Warn().Err(err).Str("order_id", order.OrderId).Msg("LSPS1 Settlement: Fee estimation failed, using target conf from config")
 		fee = &chain.FeeEstimation{
-			TargetConf: &s.config.TargetConf,
+			TargetConf: &cfg.TargetConf,
 		}
 	}
 
-	capacity := uint64(order.LspBalanceLoki+order.ClientBalanceLoki) + uint64(s.config.AdditionalChannelCapacity)
-	if capacity < s.config.MinChannelCapacityLoki {
-		capacity = s.config.MinChannelCapacityLoki
+	capacity := uint64(order.LspBalanceLoki+order.ClientBalanceLoki) + uint64(cfg.AdditionalChannelCapacity)
+	if capacity < cfg.MinChannelCapacityLoki {
+		capacity = cfg.MinChannelCapacityLoki
 	}
 
 	// Open channel
@@ -248,9 +256,9 @@ func (s *Lsps1SettlementService) openChannelForOrder(order *common.Lsps1Order) {
 		FeeLokiPerVByte: fee.LokiPerVByte,
 		TargetConf:      fee.TargetConf,
 		RoutingPolicy: &lightning.RoutingPolicy{
-			Ppm:           uint32(s.config.FeeRate * 1_000_000),
-			BaseMloki:     s.config.BaseFeeMloki,
-			TimeLockDelta: s.config.TimeLockDelta,
+			Ppm:           uint32(cfg.FeeRate * 1_000_000),
+			BaseMloki:     cfg.BaseFeeMloki,
+			TimeLockDelta: cfg.TimeLockDelta,
 		},
 	})
 
