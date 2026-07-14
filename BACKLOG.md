@@ -743,26 +743,46 @@ opens and the LSPS5 order reaches `COMPLETED` server-side** (confirmed in
 a real run's log) — but the *payer's own* `SendPaymentV2` pathfinding
 intermittently/consistently fails with `FAILURE_REASON_NO_ROUTE` even
 when `OutgoingChanId` pins the first hop explicitly and the channel is
-confirmed + `Active: true`. Root-caused as far as: `getchaninfo` on the
-payer→lsp channel shows `node2_policy` (the LSP's side) as `null` from
-the *payer's* view for 90+ seconds and across a forced disconnect/
-reconnect, while the *same* query against `flnd-lsp` itself shows a
-freshly-populated policy immediately after `updatechanpolicy` — i.e. the
-`channel_update` gossip message genuinely isn't propagating between two
-directly-connected peers in this 3-node private regtest topology, for
-reasons not yet identified (worth checking whether `protocol.option-scid-alias`
-+`zero-conf` negotiated globally changes gossip-announcement behavior for
-*all* channels including plain ones, not just aliased ones; whether these
-private/isolated networks need an explicit graph-sync trigger LND doesn't
-send unprompted; or an flnd-fork-specific gap). `OutgoingChanId` was
-expected to route around exactly this by skipping graph lookup for the
-first hop, and measurably changed the failure mode (from instant
+confirmed + `Active: true`.
+
+Root-caused this far: `getchaninfo` on the payer→lsp channel shows each
+side's `channel_update` policy known *only locally* — LSP sees its own
+side populated and the payer's side `null`; payer sees the reverse. Ruled
+out simple trickle-timer latency specifically: `flnd/config.go`'s
+`defaultTrickleDelay` is 90s (announcements are deliberately batched, not
+broadcast instantly), so a first pass assumed "just wait longer" — but a
+controlled poll against a single untouched channel (nothing else
+happening on the devnet) still showed zero propagation after 170+
+seconds, i.e. nearly two full trickle cycles. So this isn't a "give it
+more time" problem; something is actually suppressing the exchange
+between these two directly-connected peers. Untested hypotheses for a
+fresh run at this: (a) `protocol.option-scid-alias`+`zero-conf` negotiated
+globally may make flnd treat *all* channels as effectively-unadvertised
+for gossip purposes, not just explicitly-private ones — check by opening
+a channel with those features disabled and see if its `channel_update`
+propagates normally; (b) a 3-node fully-meshed private network might need
+an explicit `--gossip.pinned-syncers` config (LND's syncer selection
+logic may be leaving both peers as passive syncers with neither actively
+pulling); (c) an flnd-fork-specific regression, checked by diffing this
+behavior against the upstream LND version it forked from.
+
+**Recommended next step, not yet tried:** stop trying to make graph-based
+pathfinding work at all — `routerrpc.BuildRoute` + `SendToRouteV2` build
+and send an *explicitly specified* route (hop pubkeys + first-hop
+`OutgoingChanId`) without depending on the local graph having full policy
+data for every edge. This may not resolve the *phantom* (LSP→client) hop,
+since `BuildRoute` still needs *some* per-hop routing info for that leg —
+worth checking whether it accepts the same hop-hint fee/cltv data
+`SendPaymentV2`'s route hints do, since if so this sidesteps the gossip
+gap entirely rather than working around it.
+
+`OutgoingChanId` alone measurably changed the failure mode (from instant
 `NO_ROUTE` to a ~70s run that reached the interceptor and got a real
-`FAILURE_REASON_TIMEOUT` instead) but didn't fully resolve it on the last
-attempt. Next session: try `nodesignet`/explicit `SubscribeChannelGraph`-driven
-sync wait, or check for a `--gossip.no-sync-mode`-equivalent flag; the
-devnet itself, `FlspdProcess`, and the LSPS2 client are all solid and
-reusable regardless of how this specific gossip gap gets resolved.
+`FAILURE_REASON_TIMEOUT`) but didn't fully resolve it on repeat attempts —
+worth keeping regardless of what else changes. The devnet itself,
+`FlspdProcess`, and the LSPS2 client are all solid and reusable regardless
+of how this specific gossip gap gets resolved; this is purely a routing/
+pathfinding-layer blocker on top of infrastructure that already works.
 
 **Also learned the hard way:** this devnet's chain/wallet state is meant
 to be treated as disposable session-to-session (see `test/devnet/README.md`)
