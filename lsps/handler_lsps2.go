@@ -233,7 +233,7 @@ Loop:
 		}
 
 		// Compute Opening Fee
-		openingFee, err := computeOpeningFee(*paymentSize, commonParams.MinFeeMloki, uint64(commonParams.Proportional))
+		openingFee, err := ComputeOpeningFee(*paymentSize, commonParams.MinFeeMloki, uint64(commonParams.Proportional))
 		if err != nil {
 			return NewJsonRpcErrorResponse(req.Id, 203, "Fee computation overflow", nil)
 		}

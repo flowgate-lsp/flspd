@@ -297,7 +297,13 @@ func parseUint64(s string) uint64 {
 	return v
 }
 
-func computeOpeningFee(paymentSizeMloki, minFeeMloki, proportional uint64) (uint64, error) {
+// ComputeOpeningFee is the single implementation of the LSPS1/LSPS2
+// channel-opening fee (F-5): proportional * paymentSizeMloki, rounded up
+// to the nearest mloki, floored at minFeeMloki. Exported so callers
+// outside this package (e.g. the `flspd config explain fees` CLI) can
+// reuse the exact same math flspd itself uses to quote a fee, rather than
+// re-deriving it.
+func ComputeOpeningFee(paymentSizeMloki, minFeeMloki, proportional uint64) (uint64, error) {
 	var prod uint64
 	if paymentSizeMloki != 0 {
 		prod = paymentSizeMloki * proportional

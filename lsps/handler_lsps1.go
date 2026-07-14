@@ -309,17 +309,17 @@ func (s *Server) handleLsps1CreateOrder(req *JsonRpcRequest, peer []byte) *JsonR
 		if len(fees) > 0 {
 			// pick the first fee param
 			f := fees[0]
-			// fee_loki = (min_fee_mloki / 1000) + (capacity * proportional / 1M)
+			// F-5: use the same fee function LSPS2 uses (computeOpeningFee)
+			// rather than a separately hand-rolled floor(max(proportional,
+			// min)) calculation — this used to round differently (floor)
+			// than LSPS2's ceiling-rounded, overflow-checked version of the
+			// same logical "opening fee" concept.
 			capacity := clientBalance + lspBalance
-			proportionalFee := (capacity * uint64(f.Proportional)) / 1_000_000
-			minFeeLoki := f.MinFeeMloki / 1000
-
-			// Use Max(Min, Proportional) logic
-			if proportionalFee > minFeeLoki {
-				feeLoki = proportionalFee
-			} else {
-				feeLoki = minFeeLoki
+			feeMloki, err := ComputeOpeningFee(capacity*1000, f.MinFeeMloki, uint64(f.Proportional))
+			if err != nil {
+				return NewJsonRpcErrorResponse(req.Id, -32603, "Failed to compute opening fee", err.Error())
 			}
+			feeLoki = feeMloki / 1000
 		} else {
 			// Fallback default
 			feeLoki = 1000 // 1000 loki default fee?
