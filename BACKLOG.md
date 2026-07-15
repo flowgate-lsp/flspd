@@ -41,7 +41,7 @@ number-soup and then get reorganized a second time.
 | 3 | Unit-test coverage buildout | Critical-four packages ≥70–80% | ✅ Done: F-5, F-6, F-7, F-8, F-9, F-12, F-13, T1-4/T3-2..T3-6 all done. All four critical packages now clear the target: **postgresql 69.1%→81.2%, notifications 54.3%→70.3%, lsps 50.1%→78.6%, interceptor 58.3%→73.4%**. Notable finds along the way, not just coverage: `lsps1_settlement_store.go`'s `UpdateLsps1OrderFunding` silently no-ops on an unknown order_id; two near-duplicate `GetPaidLsps1Order` implementations disagree on their not-found contract (only one is actually reachable in production); `notification_service.go`'s `Notify()` return value is a real fast-fail signal `notifyAndWait` depends on (relevant background for the still-open Performance-backlog P-4 write-up below); a genuine data race in a `lsps` test itself (reading `mock.Mock.Calls` from a different goroutine than the one appending to it) caught by `-race`, not just written defensively. `handler_lsps2.go`'s `lsps2Buy` and `server.go`'s core JSON-RPC dispatch (`subscribeAndListen`/`handleMessage`/`route`) remain the largest *remaining* gaps in `lsps` specifically, but the package-level target is already met. `lnd` 4.7%, `common` 36.0%, `config` 93.4%, `lightning` 86.9%, `auth` 76.5% are not part of the critical four and untouched this round. |
 | 4 | YAML-driven integration tests | Runner + 3 seed scenarios merged | ✅ Runner built + all 3 seed scenarios landed (T4-1/T4-2). LSPS1 test client added; `lsps1_order_settle_and_open.yaml` and `lsps1_recovery_after_restart.yaml` (F-1 regression, real kill/restart) both pass on real flspd/flnd/chain processes. `lsps2_jit_happy_path.yaml` intentionally left known-failing on the distinct zero-conf-balance-sync race documented in T4-1 — not swept under the rug. `kill_lsp`/`restart_lsp` fault injection landed (T4-3, partial); relay-failure/mempool-fee fault injection not started. This package isn't wired into the CI gate yet (path-filtered out of `ci.yml`), so "pass in CI" is still open follow-up work. |
 | 5 | Config model + secrets-by-reference | New model shipped behind compat shim | ✅ T5-1..T5-7 done (secrets-by-reference, unit/fee/channel-size model, profiles, CLI tooling, Settings.tsx re-skin — frontend not browser-verified, no automation tooling available) |
-| 6 | Repo structure / arbo migration | Tree matches target layout, build green throughout | ◐ T6-1..T6-3 done (format/ folded into common/, internal/adapters/ introduced, common/ split into core/ports/services/); T6-4 partial (rpc/→api/proto/rpc/, config/→platform/config/, build/→platform/build/, auth/→transport/auth/ done; notifications/ proto split, lsps/ and dashboard/ transport-vs-logic splits, common/ logging split deliberately deferred — genuine symbol-level ambiguity, not mechanical risk); T6-5 partial (configs/examples/, test/itest/ done; deploy/, web/ deliberately deferred — uncommitted dev-tooling state + sibling-checkout paths) |
+| 6 | Repo structure / arbo migration | Tree matches target layout, build green throughout | ◐ T6-1..T6-3 done (format/ folded into common/, internal/adapters/ introduced, common/ split into core/ports/services/); T6-4 partial (rpc/→api/proto/rpc/, config/→platform/config/, build/→platform/build/, auth/→transport/auth/, notifications/ proto split→api/proto/notifications/ all done; lsps/ and dashboard/ transport-vs-logic splits, notifications/server.go transport classification, common/ logging split deliberately deferred — genuine symbol-level ambiguity, not mechanical risk); T6-5 partial (configs/examples/, test/itest/ done; deploy/, web/ deliberately deferred — uncommitted dev-tooling state + sibling-checkout paths) |
 | — | Performance backlog (parallel, non-blocking) | — | ◐ Investigated, not implemented: P-3 verified as no-op (never called hot); P-1/P-2 have concrete fix paths documented but need dedicated live-devnet regression verification; P-4's literal fix would regress `notifyAndWait`'s fast-fail behavior — narrower fix documented instead |
 
 ---
@@ -1335,24 +1335,40 @@ before moving to the next:
   cleanest case in this pass: NIP-98 HTTP auth verification has no
   separate "business logic" dimension to split out, it *is* the
   transport-layer concern.
+- `notifications/`'s `.proto`/generated code (`notifications.pb.go`,
+  `notifications_grpc.pb.go`, `notifications.proto`, `genproto.sh`) →
+  `api/proto/notifications/`, following the exact `rpc/` precedent
+  (package name `notifications` unchanged, only the import path moved).
+  Turned out narrower than first estimated: a blast-radius grep before
+  moving anything showed only `notifications/server.go` (the gRPC
+  service impl) and its test reference the proto-generated symbols
+  unqualified — `cleanup.go`, `expiry_watcher.go`,
+  `notification_service.go`, and `store.go` all deal exclusively in
+  hand-written types (`NotificationService`, `NotificationQueueItem`,
+  `Notifier`), not proto ones, so they needed zero changes.
+  `cmd/flspd/grpc_server.go` already used fully-qualified
+  `notifications.NotificationsServer` syntax and touches no
+  hand-written symbols, so its fix was a pure import-path swap; its
+  sibling `cmd/flspd/run.go` calls `notifications.NewNotificationsServer`
+  (the hand-written constructor, still in the original `notifications`
+  package) and needed no change at all. `server.go`/`server_test.go`
+  got a `pb "github.com/flowgate-lsp/flspd/api/proto/notifications"`
+  import alias (matching the `rpc "..."` alias pattern already used in
+  the same file) with every proto-type reference qualified. The
+  `notifications/server.go`-is-also-a-transport/-candidate question
+  (layering transport-vs-logic on top of the proto split) below remains
+  open and deliberately deferred — this was purely the mechanical proto
+  move, same class of risk as `rpc/`'s, not an attempt at that harder
+  split.
 
 **Deliberately not done, same reasoning as T6-5's own precedent below**
 (genuine architectural ambiguity needing careful per-symbol work, not
 mechanical risk):
-- `notifications/`'s `.proto`/generated code vs. hand-written logic split.
-  Unlike `rpc/`, this one can't be a clean mechanical move: the
-  hand-written files (`server.go`, `cleanup.go`, `expiry_watcher.go`,
-  `notification_service.go`, `store.go`) reference the proto-generated
-  types (`NotificationsServer`, `EncryptedNotificationRequest`, ...)
-  *unqualified*, because today they're in the same package. Moving just
-  the generated files to `api/proto/notifications/` means every one of
-  those unqualified references across every hand-written file needs to
-  become package-qualified — a real, if mechanical-once-planned, sweep
-  T6-3's own ~46-file audit is the right template for, not something to
-  improvise inside a broader T6-4 pass. `notifications/server.go` (the
-  actual gRPC service impl, an inbound surface) is also a `transport/`
-  candidate by T6-4's own definition, layering a second decision on top
-  of the proto split.
+- `notifications/server.go` (the actual gRPC service impl) vs.
+  `transport/` — is this file transport (it's an inbound gRPC surface)
+  or does it stay put now that its proto split above is done? Left as
+  today's structure; revisit alongside the `lsps/`/`dashboard/` splits
+  below since it's the same category of question.
 - `lsps/`'s transport (JSON-RPC plumbing) vs. business logic
   (LSPS0/1/2/5 protocol implementation, order/settlement handling) split
   — flagged as genuinely ambiguous when T4-1 first ran into this same

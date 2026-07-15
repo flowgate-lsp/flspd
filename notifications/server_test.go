@@ -8,6 +8,7 @@ import (
 	ecies "github.com/ecies/go/v2"
 	btcec "github.com/flokiorg/go-flokicoin/crypto"
 	"github.com/flokiorg/go-flokicoin/crypto/ecdsa"
+	pb "github.com/flowgate-lsp/flspd/api/proto/notifications"
 	rpc "github.com/flowgate-lsp/flspd/api/proto/rpc"
 	"github.com/flowgate-lsp/flspd/core"
 	"github.com/stretchr/testify/assert"
@@ -69,9 +70,9 @@ func (f *serverTestFixture) buildEncryptedRequest(t *testing.T, clientPrivKey *b
 	var payload []byte
 	var err error
 	if unsubscribe {
-		payload, err = proto.Marshal(&UnsubscribeNotificationsRequest{Url: url, Signature: sig})
+		payload, err = proto.Marshal(&pb.UnsubscribeNotificationsRequest{Url: url, Signature: sig})
 	} else {
-		payload, err = proto.Marshal(&SubscribeNotificationsRequest{Url: url, Signature: sig, Transport: transport})
+		payload, err = proto.Marshal(&pb.SubscribeNotificationsRequest{Url: url, Signature: sig, Transport: transport})
 	}
 	require.NoError(t, err)
 
@@ -92,7 +93,7 @@ func TestSubscribeNotifications_ValidRequest_RegistersInStore(t *testing.T) {
 	blob := f.buildEncryptedRequest(t, clientPrivKey, "https://client.example/webhook", "push", false)
 	ctx := rpc.WithNode(t.Context(), &core.Node{EciesPrivateKey: f.nodeKey}, "token")
 
-	resp, err := f.srv.SubscribeNotifications(ctx, &EncryptedNotificationRequest{Blob: blob})
+	resp, err := f.srv.SubscribeNotifications(ctx, &pb.EncryptedNotificationRequest{Blob: blob})
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 
@@ -115,7 +116,7 @@ func TestSubscribeNotifications_DefaultsTransportToPush(t *testing.T) {
 	blob := f.buildEncryptedRequest(t, clientPrivKey, "https://client.example/webhook", "", false)
 	ctx := rpc.WithNode(t.Context(), &core.Node{EciesPrivateKey: f.nodeKey}, "token")
 
-	_, err = f.srv.SubscribeNotifications(ctx, &EncryptedNotificationRequest{Blob: blob})
+	_, err = f.srv.SubscribeNotifications(ctx, &pb.EncryptedNotificationRequest{Blob: blob})
 	require.NoError(t, err)
 
 	require.Len(t, f.store.registerCalls, 1)
@@ -128,7 +129,7 @@ func TestSubscribeNotifications_DefaultsTransportToPush(t *testing.T) {
 func TestSubscribeNotifications_NoNodeInContext(t *testing.T) {
 	f := newServerTestFixture(t)
 
-	_, err := f.srv.SubscribeNotifications(t.Context(), &EncryptedNotificationRequest{Blob: []byte("irrelevant")})
+	_, err := f.srv.SubscribeNotifications(t.Context(), &pb.EncryptedNotificationRequest{Blob: []byte("irrelevant")})
 	assert.Error(t, err)
 	assert.Empty(t, f.store.registerCalls)
 }
@@ -147,7 +148,7 @@ func TestSubscribeNotifications_WrongEciesKeyFailsDecrypt(t *testing.T) {
 	require.NoError(t, err)
 	ctx := rpc.WithNode(t.Context(), &core.Node{EciesPrivateKey: wrongNodeKey}, "token")
 
-	_, err = f.srv.SubscribeNotifications(ctx, &EncryptedNotificationRequest{Blob: blob})
+	_, err = f.srv.SubscribeNotifications(ctx, &pb.EncryptedNotificationRequest{Blob: blob})
 	assert.Error(t, err)
 	assert.Empty(t, f.store.registerCalls)
 }
@@ -164,7 +165,7 @@ func TestSubscribeNotifications_StoreErrorReturnsInternalError(t *testing.T) {
 	blob := f.buildEncryptedRequest(t, clientPrivKey, "https://client.example/webhook", "push", false)
 	ctx := rpc.WithNode(t.Context(), &core.Node{EciesPrivateKey: f.nodeKey}, "token")
 
-	_, err = f.srv.SubscribeNotifications(ctx, &EncryptedNotificationRequest{Blob: blob})
+	_, err = f.srv.SubscribeNotifications(ctx, &pb.EncryptedNotificationRequest{Blob: blob})
 	assert.ErrorIs(t, err, ErrInternal)
 }
 
@@ -178,7 +179,7 @@ func TestUnsubscribeNotifications_ValidRequest_RemovesFromStore(t *testing.T) {
 	blob := f.buildEncryptedRequest(t, clientPrivKey, "https://client.example/webhook", "", true)
 	ctx := rpc.WithNode(t.Context(), &core.Node{EciesPrivateKey: f.nodeKey}, "token")
 
-	resp, err := f.srv.UnsubscribeNotifications(ctx, &EncryptedNotificationRequest{Blob: blob})
+	resp, err := f.srv.UnsubscribeNotifications(ctx, &pb.EncryptedNotificationRequest{Blob: blob})
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 
@@ -200,7 +201,7 @@ func TestUnsubscribeNotifications_StoreErrorReturnsInternalError(t *testing.T) {
 	blob := f.buildEncryptedRequest(t, clientPrivKey, "https://client.example/webhook", "", true)
 	ctx := rpc.WithNode(t.Context(), &core.Node{EciesPrivateKey: f.nodeKey}, "token")
 
-	_, err = f.srv.UnsubscribeNotifications(ctx, &EncryptedNotificationRequest{Blob: blob})
+	_, err = f.srv.UnsubscribeNotifications(ctx, &pb.EncryptedNotificationRequest{Blob: blob})
 	assert.ErrorIs(t, err, ErrInternal)
 }
 
