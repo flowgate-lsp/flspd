@@ -19,8 +19,29 @@ type MockStore struct {
 
 func (m *MockStore) PaymentInfo(paymentHash []byte) (string, string, *core.OpeningFeeParams, []byte, []byte, []byte, int64, int64, *wire.OutPoint, *string, error) {
 	args := m.Called(paymentHash)
-	// Return default nil/empty for not found
-	return args.String(0), args.String(1), nil, nil, nil, nil, 0, 0, nil, nil, args.Error(10)
+	var params *core.OpeningFeeParams
+	if v := args.Get(2); v != nil {
+		params = v.(*core.OpeningFeeParams)
+	}
+	var gotHash, secret, dest []byte
+	if v := args.Get(3); v != nil {
+		gotHash = v.([]byte)
+	}
+	if v := args.Get(4); v != nil {
+		secret = v.([]byte)
+	}
+	if v := args.Get(5); v != nil {
+		dest = v.([]byte)
+	}
+	var channelPoint *wire.OutPoint
+	if v := args.Get(8); v != nil {
+		channelPoint = v.(*wire.OutPoint)
+	}
+	var tag *string
+	if v := args.Get(9); v != nil {
+		tag = v.(*string)
+	}
+	return args.String(0), args.String(1), params, gotHash, secret, dest, args.Get(6).(int64), args.Get(7).(int64), channelPoint, tag, args.Error(10)
 }
 
 func (m *MockStore) GetLsps2Order(scid uint64) (*core.Lsps2BuyRegistration, error) {
