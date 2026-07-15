@@ -39,7 +39,7 @@ number-soup and then get reorganized a second time.
 | 1 | Green the build + safety net | `go test ./... -race` passes in CI | ✅ T1-1..T1-5 done |
 | 2 | Fix defects on current structure | All P2 items merged w/ regression test | ✅ All items done: F-1, F-2, C-1, C-2, C-3, F-5, F-7, F-8, F-9, F-10, F-11, F-12, F-13 |
 | 3 | Unit-test coverage buildout | Critical-four packages ≥70–80% | ✅ Done: F-5, F-6, F-7, F-8, F-9, F-12, F-13, T1-4/T3-2..T3-6 all done. All four critical packages now clear the target: **postgresql 69.1%→81.2%, notifications 54.3%→70.3%, lsps 50.1%→78.6%, interceptor 58.3%→73.4%**. Notable finds along the way, not just coverage: `lsps1_settlement_store.go`'s `UpdateLsps1OrderFunding` silently no-ops on an unknown order_id; two near-duplicate `GetPaidLsps1Order` implementations disagree on their not-found contract (only one is actually reachable in production); `notification_service.go`'s `Notify()` return value is a real fast-fail signal `notifyAndWait` depends on (relevant background for the still-open Performance-backlog P-4 write-up below); a genuine data race in a `lsps` test itself (reading `mock.Mock.Calls` from a different goroutine than the one appending to it) caught by `-race`, not just written defensively. `handler_lsps2.go`'s `lsps2Buy` and `server.go`'s core JSON-RPC dispatch (`subscribeAndListen`/`handleMessage`/`route`) remain the largest *remaining* gaps in `lsps` specifically, but the package-level target is already met. `lnd` 4.7%, `common` 36.0%, `config` 93.4%, `lightning` 86.9%, `auth` 76.5% are not part of the critical four and untouched this round. |
-| 4 | YAML-driven integration tests | Runner + 3 seed scenarios merged | ◐ Foundation built + proven (Devnet/FlspdProcess/LSPS2 client, 2 more real bugs found — F-10 additions); gossip-propagation blocker root-caused + fixed (see T4-1); YAML runner built and working (T4-1/T4-2) with scenario 1 wired through it — known-failing on a distinct zero-conf-balance-sync race, documented, not part of the CI gate; scenarios 2/3 need a new LSPS1 test client, not started; T4-3 fault injection not started |
+| 4 | YAML-driven integration tests | Runner + 3 seed scenarios merged | ✅ Runner built + all 3 seed scenarios landed (T4-1/T4-2). LSPS1 test client added; `lsps1_order_settle_and_open.yaml` and `lsps1_recovery_after_restart.yaml` (F-1 regression, real kill/restart) both pass on real flspd/flnd/chain processes. `lsps2_jit_happy_path.yaml` intentionally left known-failing on the distinct zero-conf-balance-sync race documented in T4-1 — not swept under the rug. `kill_lsp`/`restart_lsp` fault injection landed (T4-3, partial); relay-failure/mempool-fee fault injection not started. This package isn't wired into the CI gate yet (path-filtered out of `ci.yml`), so "pass in CI" is still open follow-up work. |
 | 5 | Config model + secrets-by-reference | New model shipped behind compat shim | ✅ T5-1..T5-7 done (secrets-by-reference, unit/fee/channel-size model, profiles, CLI tooling, Settings.tsx re-skin — frontend not browser-verified, no automation tooling available) |
 | 6 | Repo structure / arbo migration | Tree matches target layout, build green throughout | ◐ T6-1..T6-3 done (format/ folded into common/, internal/adapters/ introduced, common/ split into core/ports/services/); T6-4 partial (rpc/→api/proto/rpc/, config/→platform/config/, build/→platform/build/, auth/→transport/auth/ done; notifications/ proto split, lsps/ and dashboard/ transport-vs-logic splits, common/ logging split deliberately deferred — genuine symbol-level ambiguity, not mechanical risk); T6-5 partial (configs/examples/, test/itest/ done; deploy/, web/ deliberately deferred — uncommitted dev-tooling state + sibling-checkout paths) |
 | — | Performance backlog (parallel, non-blocking) | — | ◐ Investigated, not implemented: P-3 verified as no-op (never called hot); P-1/P-2 have concrete fix paths documented but need dedicated live-devnet regression verification; P-4's literal fix would regress `notifyAndWait`'s fast-fail behavior — narrower fix documented instead |
@@ -1006,51 +1006,73 @@ caught and blocked by the safety classifier on the following command, user
 re-authorized a fresh re-provision). Don't repeat that: ask first.
 
 ### T4-2: Seed scenarios
-**Status (2026-07-15):** ◐ Runner built (T4-1's actual deliverable, not
-just the seed scenarios): `test/itest/scenario.go` (`Scenario`/`VerbCall`
-types, strict YAML decoding — unknown top-level keys, unknown verbs, and
-unknown per-verb params are all hard errors at load time, not silently
-ignored), `test/itest/scenario_steps.go` /
-`test/itest/scenario_asserts.go` (the `map[string]StepFn` /
-`map[string]AssertFn` registries T4-1 specified), and
-`test/itest/runner_test.go` (`TestScenarios` globs `scenarios/*.yaml`,
+**Status (2026-07-15):** ✅ Runner built and all 3 seed scenarios landed.
+`test/itest/scenario.go` (`Scenario`/`VerbCall` types, strict YAML
+decoding — unknown top-level keys, unknown verbs, and unknown per-verb
+params are all hard errors at load time, not silently ignored),
+`test/itest/scenario_steps.go` / `test/itest/scenario_asserts.go` (the
+`map[string]StepFn` / `map[string]AssertFn` registries T4-1 specified),
+and `test/itest/runner_test.go` (`TestScenarios` globs `scenarios/*.yaml`,
 runs each as a named subtest against a fresh flspd + Postgres on the
 shared devnet). `test/itest/scenario_test.go` covers the parsing/
-validation logic itself with no devnet required. Step verbs implemented
-so far: `connect_peer`, `open_channel` (idempotent, mirrors the existing
-Go-level test's reuse logic), `mine_blocks`, `auto_accept_channels`,
-`lsps2_buy`, `create_jit_invoice`, `pay_invoice`; one assertion verb,
-`channel_exists`.
+validation logic itself with no devnet required. Step verbs: `connect_peer`,
+`open_channel` (idempotent), `mine_blocks`, `auto_accept_channels`,
+`lsps1_create_order`, `wait_for_lsps1_order_state`, `lsps2_buy`,
+`create_jit_invoice`, `pay_invoice` (accepts either a plain saved invoice
+string or an LSPS1 create_order result), `kill_lsp`/`restart_lsp` (fault
+injection, T4-3's first concrete step), `count_channels`. Assertion verbs:
+`channel_exists`, `channel_count`, `channel_count_delta`.
 
-1. `lsps2_jit_happy_path.yaml` — buy → pay → zero-conf channel open. Now
-   wired through the actual YAML runner (`test/itest/scenarios/`) rather
-   than only the hand-written Go-level proof (`lsps2_jit_test.go`, kept
-   alongside it) — confirmed to fail at the exact same step
-   (`pay_invoice`) for the exact same reason as the Go-level test: see
-   T4-1's "new blocker found immediately behind it." **Known-failing, not
-   swept under the rug** — the scenario file's own header comment
-   explains why and points back here. Not part of the CI gate either way
-   (this whole package is path-filtered out of `ci.yml`'s test job).
+1. `lsps2_jit_happy_path.yaml` — buy → pay → zero-conf channel open. Wired
+   through the actual YAML runner — confirmed to fail at the exact same
+   step (`pay_invoice`) for the exact same reason as the hand-written
+   Go-level proof (`lsps2_jit_test.go`, kept alongside it): see T4-1's
+   "new blocker found immediately behind it." **Known-failing, not swept
+   under the rug** — the scenario file's own header comment explains why
+   and points back here. Not part of the CI gate either way (this whole
+   package is path-filtered out of `ci.yml`'s test job).
 2. `lsps1_order_settle_and_open.yaml` — manual order → settle → auto-open.
-   **Not started.** Needs a new LSPS1 test client (order creation +
-   watching for the on-chain settlement payment) comparable in scope to
-   what `lsps2_client.go` took for LSPS2 — nothing like it exists yet in
-   `test/itest/`.
-3. `lsps1_recovery_after_restart.yaml` — reproduces F-1: settle invoice, kill
-   the LSP mid-flight, restart, assert **exactly one** channel opens (not
-   two) and the order reaches COMPLETED. **Not started**, same LSPS1
-   client dependency as #2, plus needs a `kill_lsp`-style fault-injection
-   step (see T4-3, which this scenario also needs regardless of T4-3's
-   own broader scope).
+   **Passing**, both as the Go-level proof (`lsps1_settle_test.go`) and
+   through the YAML runner — passed on the first real run. Needed a new
+   LSPS1 test client (`test/itest/lsps1_client.go`: `GetInfo`,
+   `CreateOrder`, `GetOrder`), comparable in scope to `lsps2_client.go`.
+   Unlike LSPS2's JIT flow, the settlement invoice is an ordinary one (no
+   phantom SCID, no zero-conf channel, no interceptor balance-sync race),
+   so once the payer↔lsp channel routes correctly (T4-1's gossip fix),
+   nothing else stands in its way.
+3. `lsps1_recovery_after_restart.yaml` — reproduces F-1: settle invoice,
+   kill the LSP mid-flight, restart, assert **exactly one new** channel
+   opens (not two) and the order reaches COMPLETED. **Passing**, first
+   real run. Root-caused the exploitable window by reading
+   `settlement_service.go` directly: `processSettledInvoice` commits PAID
+   to the DB, then hands off to `openChannelForOrder` *asynchronously* —
+   and the payer's own view of payment settlement (driven by flnd
+   directly) is independent of flspd's own async invoice-subscription
+   processing, so `kill_lsp` immediately after `pay_invoice` returns
+   reliably lands at or before that handoff completes, with no artificial
+   delays or test-only hooks needed. Channel counting had to be relative,
+   not absolute — this devnet's state is long-lived across test runs, so
+   `channel_count: 1` immediately failed with "found 9" (channels
+   accumulated from earlier, unrelated runs against the same lsp↔client
+   pair); `count_channels` + `channel_count_delta` fixed this by
+   snapshotting a baseline first.
 
 ### T4-3: External-party fault injection
-Extend the scenario schema to script relay failure modes
-(`reject_then_accept`), LND fault injection (`kill_lsp` at a given step), and
-mempool fee-congestion fixtures — this is what exercises F-6/F-8-shaped bugs
-under CI rather than only in production.
+**Status (2026-07-15):** ◐ Partial. `kill_lsp`/`restart_lsp` (LND-process
+fault injection — actually SIGKILL/restart flspd itself, exercising real
+crash recovery, not a simulated failure) landed and already earning its
+keep as T4-2 scenario #3's core mechanism. Relay failure modes
+(`reject_then_accept`) and mempool fee-congestion fixtures not started.
 
 **Acceptance criteria for Phase 4:** the 3 seed scenarios pass in CI; adding
-a new scenario requires zero Go code, only a new YAML file.
+a new scenario requires zero Go code, only a new YAML file. **Landed with
+one deliberate exception**: all 3 scenarios exist and 2 of 3 pass; the
+third (`lsps2_jit_happy_path.yaml`) is intentionally left red pending the
+still-open zero-conf-balance-sync blocker from T4-1 rather than papered
+over. None of the 3 are part of the CI gate yet either way (path-filtered
+out of `ci.yml`), so "pass in CI" doesn't yet apply literally — wiring
+this package into CI (presumably a separate, devnet-provisioning-capable
+job, not the fast PR pipeline) is unstarted follow-up work.
 
 ---
 
