@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 
-	"github.com/flowgate-lsp/flspd/postgresql"
+	"github.com/flowgate-lsp/flspd/internal/adapters/postgres"
 	"github.com/urfave/cli"
 )
 
@@ -26,5 +26,5 @@ func migrate(cliCtx *cli.Context) error {
 		return fmt.Errorf("database-url is required")
 	}
 
-	return postgresql.Migrate(dbUrl)
+	return postgres.Migrate(dbUrl)
 }

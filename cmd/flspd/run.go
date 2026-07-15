@@ -27,12 +27,12 @@ import (
 	"github.com/flowgate-lsp/flspd/dashboard"
 	"github.com/flowgate-lsp/flspd/history"
 	"github.com/flowgate-lsp/flspd/interceptor"
+	"github.com/flowgate-lsp/flspd/internal/adapters/lnd"
+	"github.com/flowgate-lsp/flspd/internal/adapters/mempool"
+	"github.com/flowgate-lsp/flspd/internal/adapters/postgres"
 	"github.com/flowgate-lsp/flspd/lightning"
-	"github.com/flowgate-lsp/flspd/lnd"
 	"github.com/flowgate-lsp/flspd/lsps"
-	"github.com/flowgate-lsp/flspd/mempool"
 	"github.com/flowgate-lsp/flspd/notifications"
-	"github.com/flowgate-lsp/flspd/postgresql"
 	"github.com/urfave/cli"
 )
 
@@ -115,20 +115,20 @@ func runLspd(cliCtx *cli.Context) error {
 	databaseUrl := os.Getenv("DATABASE_URL")
 	automigrate, _ := strconv.ParseBool(os.Getenv("AUTO_MIGRATE_DATABASE"))
 	if automigrate {
-		err = postgresql.Migrate(databaseUrl)
+		err = postgres.Migrate(databaseUrl)
 		if err != nil {
 			log.Fatal().Msgf("Failed to migrate postgres database: %v", err)
 		}
 	}
-	pool, err := postgresql.PgConnect(databaseUrl)
+	pool, err := postgres.PgConnect(databaseUrl)
 	if err != nil {
 		log.Fatal().Msgf("pgConnect() error: %v", err)
 	}
 
-	interceptStore := postgresql.NewPostgresInterceptStore(pool)
-	openingStore := postgresql.NewPostgresOpeningStore(pool)
-	notificationsStore := postgresql.NewNotificationsStore(pool)
-	historyStore := postgresql.NewHistoryStore(pool)
+	interceptStore := postgres.NewPostgresInterceptStore(pool)
+	openingStore := postgres.NewPostgresOpeningStore(pool)
+	notificationsStore := postgres.NewNotificationsStore(pool)
+	historyStore := postgres.NewHistoryStore(pool)
 
 	// Logic: We no longer auto-adjust values at runtime. Instead, we validated
 	// them above to ensure they are safe based on the configured padding.

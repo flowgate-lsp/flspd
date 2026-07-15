@@ -1,4 +1,4 @@
-package postgresql
+package postgres
 
 import (
 	"context"
@@ -201,7 +201,6 @@ func (s *PostgresOpeningStore) ListLsps1Orders(limit, offset int) ([]*common.Lsp
 	}
 	return orders, nil
 }
-
 
 func (s *PostgresOpeningStore) RegisterLsps5Webhook(webhook *common.Lsps5Webhook) error {
 	_, err := s.pool.Exec(context.Background(),

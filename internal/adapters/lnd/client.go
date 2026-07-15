@@ -660,7 +660,7 @@ func (c *LndClient) ListPeers() ([]*lightning.Peer, error) {
 	for i, p := range resp.Peers {
 		alias := ""
 		color := ""
-		
+
 		// Attempt to fetch node info for better UI experience (alias & color)
 		nodeInfo, err := c.client.GetNodeInfo(context.Background(), &lnrpc.NodeInfoRequest{
 			PubKey: p.PubKey,

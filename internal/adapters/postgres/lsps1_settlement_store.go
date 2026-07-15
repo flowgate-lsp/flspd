@@ -1,4 +1,4 @@
-package postgresql
+package postgres
 
 import (
 	"context"
@@ -155,7 +155,6 @@ func (s *PostgresOpeningStore) GetAllPaidLsps1Orders() ([]*common.Lsps1Order, er
 	}
 	return orders, rows.Err()
 }
-
 
 // GetAllCreatedLsps1Orders returns all orders still in CREATED state that have not expired.
 // Used during startup to check whether any invoice was settled in LND while flspd was down.

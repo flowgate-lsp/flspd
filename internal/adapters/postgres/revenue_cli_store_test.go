@@ -1,4 +1,4 @@
-package postgresql
+package postgres
 
 import (
 	"context"
@@ -15,10 +15,10 @@ import (
 // revenueChannelFixture is one row in the `channels` table, along with the
 // values needed to build the matching wire.OutPoint for assertions.
 type revenueChannelFixture struct {
-	nodeId       []byte
-	peerId       []byte
-	fundingTxId  []byte
-	fundingOut   int64
+	nodeId        []byte
+	peerId        []byte
+	fundingTxId   []byte
+	fundingOut    int64
 	confirmedScid int64
 }
 

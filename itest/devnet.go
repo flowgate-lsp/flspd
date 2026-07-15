@@ -13,8 +13,8 @@ import (
 	"github.com/flokiorg/flnd/lnrpc"
 	"github.com/flokiorg/flnd/lnrpc/routerrpc"
 	"github.com/flowgate-lsp/flspd/config"
+	"github.com/flowgate-lsp/flspd/internal/adapters/lnd"
 	"github.com/flowgate-lsp/flspd/lightning"
-	"github.com/flowgate-lsp/flspd/lnd"
 )
 
 // devnetRole describes one of test/devnet/docker-compose.yml's named flnd

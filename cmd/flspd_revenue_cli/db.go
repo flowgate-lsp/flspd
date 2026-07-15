@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 
-	"github.com/flowgate-lsp/flspd/postgresql"
+	"github.com/flowgate-lsp/flspd/internal/adapters/postgres"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/urfave/cli"
 )
@@ -14,7 +14,7 @@ func getPool(ctx *cli.Context) (*pgxpool.Pool, error) {
 		return nil, fmt.Errorf("database-url is required")
 	}
 
-	pool, err := postgresql.PgConnect(url)
+	pool, err := postgres.PgConnect(url)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
@@ -22,11 +22,11 @@ func getPool(ctx *cli.Context) (*pgxpool.Pool, error) {
 	return pool, nil
 }
 
-func getStore(ctx *cli.Context) (*postgresql.RevenueCliStore, error) {
+func getStore(ctx *cli.Context) (*postgres.RevenueCliStore, error) {
 	pool, err := getPool(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	return postgresql.NewCliStore(pool), nil
+	return postgres.NewCliStore(pool), nil
 }
