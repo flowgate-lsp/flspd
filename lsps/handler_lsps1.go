@@ -210,7 +210,7 @@ func (s *Server) handleLsps1CreateOrder(req *JsonRpcRequest, peer []byte) *JsonR
 	}
 
 	// Validation: Check bounds
-	_, _, _, _, orderExpiry, minClient, maxClient, _, maxLsp, _, _, additionalPadding := s.getLsps1ConfigValues()
+	_, _, _, _, orderExpiry, minClient, maxClient, _, maxLsp, _, _, _ := s.getLsps1ConfigValues()
 
 	if clientBalance < minClient || clientBalance > maxClient {
 		return NewJsonRpcErrorResponse(req.Id, 100, "Client balance out of bounds", map[string]interface{}{

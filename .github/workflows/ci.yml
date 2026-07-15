@@ -9,6 +9,24 @@ permissions:
   contents: read
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      docker: ${{ steps.filter.outputs.docker }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v4.0.2
+        id: filter
+        with:
+          filters: |
+            docker:
+              - 'Dockerfile'
+              - 'go.mod'
+              - 'go.sum'
+            frontend:
+              - 'frontend/**'
+
   test:
     runs-on: ubuntu-latest
     steps:
@@ -27,6 +45,88 @@ jobs:
 
       - name: Test (race detector)
         run: go test -race -count=1 $(go list ./... | grep -v '/itest')
+
+  lint:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      # The codebase carries pre-existing lint debt (see .golangci.yml history);
+      # only-new-issues gates the diff instead of demanding a big-bang cleanup.
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.12
+          only-new-issues: true
+
+  frontend:
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Non-blocking: the frontend has ~65 pre-existing eslint errors
+      # (no-explicit-any, react-hooks/set-state-in-effect,
+      # react-refresh/only-export-components) that predate this job. Surface
+      # them without blocking merges until that debt is burned down; test
+      # and build below (both clean) remain blocking.
+      - name: Lint
+        run: npm run lint
+        continue-on-error: true
+
+      - name: Test
+        run: npm run test
+
+      - name: Build
+        run: npm run build
+
+  docker-validate:
+    needs: changes
+    if: needs.changes.outputs.docker == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Build-only, no push: this just proves the production Dockerfile
+      # still builds against the changed go.mod/go.sum/Dockerfile. It
+      # covers Dockerfile (repo-root context) only -- Dockerfile.dev needs
+      # sibling flokiorg checkouts (see docker-compose.dev.yml) that don't
+      # exist on a plain CI runner, so it isn't validated here.
+      - name: Build image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          build-args: |
+            TAG=ci-validate
+            COMMIT=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
   secret-scan:
     runs-on: ubuntu-latest

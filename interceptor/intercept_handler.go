@@ -636,7 +636,6 @@ func (i *Interceptor) resolvePayment(req core.InterceptRequest) (*interceptData,
 		// Try LSPS2 lookup using SCID
 		lsps2Order, err2 := i.store.GetLsps2Order(uint64(req.Scid))
 		if err2 == nil && lsps2Order != nil {
-			err = nil
 			token = lsps2Order.Token
 			destination, _ = hex.DecodeString(lsps2Order.PeerId)
 			params = &core.OpeningFeeParams{
@@ -687,7 +686,6 @@ func (i *Interceptor) resolvePayment(req core.InterceptRequest) (*interceptData,
 					log.Info().Msgf("Found PAID LSPS1 order %s for peer %s, activating JIT", lsps1Order.OrderId, clientNodeId)
 
 					// Found a matching order! Activate JIT channel opening.
-					err = nil
 					token = lsps1Order.Token
 					destination = nextHop
 

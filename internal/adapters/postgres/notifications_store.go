@@ -98,7 +98,7 @@ func (s *NotificationsStore) Unsubscribe(
 		url,
 	)
 
-	return nil
+	return err
 }
 
 func (s *NotificationsStore) RemoveExpired(

@@ -1,6 +1,14 @@
 name: Release Build
 
 on:
+  # Changelog-driven: a push to main that bumps VERSION is the release
+  # trigger. The `prepare` job's release-notes check still hard-fails the
+  # run if releasenotes/${VERSION}.md wasn't added in the same change, so a
+  # bad push fails loudly instead of silently cutting a release with no
+  # notes.
+  push:
+    branches: [main]
+    paths: [VERSION]
   workflow_dispatch:
 
 permissions:
@@ -14,7 +22,7 @@ jobs:
       version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Read Version
         id: version
         run: echo "version=$(cat VERSION)" >> $GITHUB_OUTPUT
@@ -36,12 +44,12 @@ jobs:
         goarch: [amd64, arm64]
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.22'  # Use recent Go version
-          
+          go-version-file: go.mod
+
       - name: Build
         env:
           GOOS: ${{ matrix.goos }}
@@ -50,16 +58,16 @@ jobs:
         run: |
           VERSION=${{ needs.prepare.outputs.version }}
           LDFLAGS="-s -w -X github.com/flowgate-lsp/flspd/build.tag=${VERSION}"
-          
-          
+
+
           mkdir -p dist
           go build -trimpath -ldflags "$LDFLAGS" -o dist/flspd ./cmd/flspd
           go build -trimpath -ldflags "$LDFLAGS" -o dist/flspd_revenue_cli ./cmd/flspd_revenue_cli
 
-          
+
           cd dist
           tar -czvf flspd_${{ matrix.goos }}_${{ matrix.goarch }}_${VERSION}.tar.gz flspd flspd_revenue_cli
-          
+
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -95,13 +103,27 @@ jobs:
           build-args: |
             TAG=${{ needs.prepare.outputs.version }}
             COMMIT=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Non-blocking: surfaces known CVEs in the release image without
+      # gating the release on a scanner false-positive or an upstream base
+      # image CVE nobody's shipped a fix for yet.
+      - name: Scan image for vulnerabilities (informational)
+        uses: aquasecurity/trivy-action@0.36.0
+        continue-on-error: true
+        with:
+          image-ref: ghcr.io/${{ github.repository }}:${{ needs.prepare.outputs.version }}
+          format: table
+          exit-code: '0'
+          severity: 'CRITICAL,HIGH'
 
   create-release:
     needs: [prepare, build-binaries, build-docker]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Download Artifacts
         uses: actions/download-artifact@v4
         with:
@@ -109,7 +131,7 @@ jobs:
           merge-multiple: true
 
       - name: Create Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ needs.prepare.outputs.version }} # Use raw version or v<version>? User said VERSION creates tag. If VERSION is v1.0.0, tag is v1.0.0.
           name: Release ${{ needs.prepare.outputs.version }}

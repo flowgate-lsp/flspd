@@ -1,5 +1,9 @@
 # Build Stage
-FROM golang:alpine AS builder
+# Pinned to the Go version go.mod requires (rather than the floating
+# `alpine` tag, which silently tracks whatever Go release is newest) plus
+# its digest for build reproducibility. Bumped automatically by Dependabot
+# (.github/dependabot.yml, docker ecosystem).
+FROM golang:1.26.1-alpine@sha256:2389ebfa5b7f43eeafbd6be0c3700cc46690ef842ad962f6c5bd6be49ed82039 AS builder
 
 # Install build dependencies
 RUN apk add --no-cache git make build-base
@@ -27,7 +31,7 @@ RUN go build -ldflags "-w -s -X github.com/flowgate-lsp/flspd/build.tag=${TAG} -
 RUN go build -ldflags "-w -s -X github.com/flowgate-lsp/flspd/build.tag=${TAG} -X github.com/flowgate-lsp/flspd/build.revision=${COMMIT}" -o /bin/flspd_revenue_cli ./cmd/flspd_revenue_cli
 
 # Runtime Stage
-FROM alpine:latest
+FROM alpine:latest@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b
 
 # Install runtime dependencies
 # ca-certificates: for HTTPS connections

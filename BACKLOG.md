@@ -36,7 +36,7 @@ number-soup and then get reorganized a second time.
 | Phase | Theme | Gate to proceed | Status |
 |---|---|---|---|
 | 0 | Contain live secret exposure | Untracked, purged, guarded | ✅ Done — confirmed test data, no rotation needed |
-| 1 | Green the build + safety net | `go test ./... -race` passes in CI | ◐ T1-1..T1-4 done; T1-5 open |
+| 1 | Green the build + safety net | `go test ./... -race` passes in CI | ✅ T1-1..T1-5 done |
 | 2 | Fix defects on current structure | All P2 items merged w/ regression test | ✅ All items done: F-1, F-2, C-1, C-2, C-3, F-5, F-7, F-8, F-9, F-10, F-11, F-12, F-13 |
 | 3 | Unit-test coverage buildout | Critical-four packages ≥70–80% | ◐ In progress: F-5, F-6, F-7, F-8, F-9, F-12, F-13 done, T1-4/T3-2/T3-3/T3-4/T3-5/T3-6 done; interceptor 58.3%, lsps 50.1%, postgresql 69.1%, notifications 54.3%, lnd 4.7%, common 36.0%, config 93.4%, lightning 86.9%, auth 76.5% |
 | 4 | YAML-driven integration tests | Runner + 3 seed scenarios merged | ◐ Foundation built + proven (Devnet/FlspdProcess/LSPS2 client, 2 more real bugs found — F-10 additions); YAML schema/runner not started; scenario 1's Go-level proof blocked on a devnet gossip-propagation gap, see T4-1 |
@@ -274,6 +274,65 @@ PR that broke it, not at release time; a merged changelog entry with a
 bumped `VERSION` triggers a release without a human clicking
 `workflow_dispatch`; `go-version` is declared in exactly one place
 (`go.mod`) across all workflows.
+
+**Status: done.** All six scope items shipped:
+
+1. `release.yml`'s `build-binaries` job now uses `go-version-file: go.mod`
+   (was hardcoded `'1.22'`), matching `ci.yml`.
+2. `ci.yml` gained `lint`, `frontend`, and `docker-validate` jobs alongside
+   the existing `test`/`secret-scan` — `frontend`/`docker-validate` are
+   gated on a new `changes` job (`dorny/paths-filter`) so they only run
+   when `frontend/**` or `Dockerfile`/`go.mod`/`go.sum` actually changed.
+   `docker-validate` build-only's the production `Dockerfile` (context `.`,
+   no push); `Dockerfile.dev` isn't validated in CI since it needs sibling
+   `flokiorg/*` checkouts that don't exist on a plain runner.
+3. Added `.golangci.yml` (`golangci-lint` v2 config format). Fixed the
+   issues cheap enough to just fix outright: 3 genuinely dead declarations
+   in `test/itest/notification_service.go`, 4 ineffectual assignments
+   (including one real bug — `postgres/notifications_store.go`'s
+   `Unsubscribe` silently discarded the delete's error and always returned
+   `nil`), and excluded `frontend/` (a vendored `.go` file under
+   `frontend/node_modules` was tripping `govet`). The remaining 68 issues
+   (50 `errcheck` — mostly conventionally-ignored `defer x.Close()` —  and
+   18 `staticcheck`, mostly deprecation notices) are pre-existing debt too
+   large to burn down as part of a CI-wiring pass; the `ci.yml` `lint` job
+   uses `golangci-lint-action`'s `only-new-issues: true` so it grandfathers
+   that debt and gates only new code. `just lint` still runs the full,
+   ungated scan for whoever wants to pay it down.
+4. Frontend CI wired to `frontend/`'s own `npm run lint|test|build`
+   (equivalent to the `justfile` recipes). Along the way, `npm run test`
+   turned up two real pre-existing failures in
+   `frontend/src/hooks/useEvents.test.ts` — the test predated an
+   `EventsContext`/`EventsProvider` refactor and no longer wrapped the hook
+   in a provider, and separately the `vi.mock('./useAuth', ...)` factory
+   returned a fresh `getAuthHeader` `vi.fn()` on every call, which (since
+   `EventsContext`'s `connect` callback depends on it) retriggered its
+   connect/cleanup effect every render and flapped the socket
+   connect/disconnect. Fixed both; all 7 frontend tests pass. `npm run
+   lint` has ~65 pre-existing eslint errors (`no-explicit-any`,
+   `react-hooks/set-state-in-effect`, `react-refresh/only-export-components`
+   in `OrderDetail.tsx`/`Settings.tsx`/`router.tsx`) — real issues, but a
+   frontend cleanup outside this task's scope, so that step runs
+   non-blocking (`continue-on-error: true`) in CI for now.
+5. `release.yml` now triggers on `push: branches: [main], paths: [VERSION]`
+   (in addition to `workflow_dispatch`) — a merge that bumps `VERSION`
+   auto-fires the release; the existing "release notes must exist" check
+   still hard-fails the run if `releasenotes/${VERSION}.md` wasn't added in
+   the same change.
+6. `build-docker` in `release.yml` gained `cache-from`/`cache-to:
+   type=gha` buildx caching and a non-blocking (`continue-on-error: true`,
+   `exit-code: '0'`) `trivy` scan of the pushed image. `Dockerfile` now
+   pins `golang:1.26.1-alpine` (was the floating `golang:alpine` tag —
+   switched to the exact toolchain `go.mod` requires) and `alpine:latest`
+   to their current digests; added `.github/dependabot.yml` (`gomod`,
+   `npm` for `frontend/`, `docker`, `github-actions` ecosystems, weekly) so
+   those pins and action versions don't quietly rot. Also bumped
+   `softprops/action-gh-release` from `v1` to `v3` — `actionlint` flagged
+   `v1` as running on a runtime GitHub Actions no longer supports.
+
+Verified: `go build/vet/test -race` all green; `docker build` of the
+pinned `Dockerfile` succeeds locally; `actionlint` clean on all workflow
+files; frontend `test`/`build` pass, `lint` runs (non-blocking).
 
 ---
 

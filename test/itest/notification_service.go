@@ -1,11 +1,5 @@
 package itest
 
-import (
-	"context"
-	"net"
-	"net/http"
-)
-
 type PaymentReceivedPayload struct {
 	Template string `json:"template" binding:"required,eq=payment_received"`
 	Data     struct {
@@ -30,35 +24,4 @@ type Lsps5Notification struct {
 	JsonRpc string      `json:"jsonrpc"`
 	Method  string      `json:"method"`
 	Params  interface{} `json:"params"`
-}
-
-type notificationDeliveryService struct {
-	addr       string
-	handleFunc func(resp http.ResponseWriter, req *http.Request)
-}
-
-func newNotificationDeliveryService(
-	addr string,
-	handleFunc func(resp http.ResponseWriter, req *http.Request),
-) *notificationDeliveryService {
-	return &notificationDeliveryService{
-		addr:       addr,
-		handleFunc: handleFunc,
-	}
-}
-
-func (s *notificationDeliveryService) Start(ctx context.Context) error {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/api/v1/notify", s.handleFunc)
-	lis, err := net.Listen("tcp", s.addr)
-	if err != nil {
-		return err
-	}
-
-	go func() {
-		<-ctx.Done()
-		lis.Close()
-	}()
-
-	return http.Serve(lis, mux)
 }
