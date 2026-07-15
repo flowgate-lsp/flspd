@@ -1383,6 +1383,19 @@ location changes — real risk of silently breaking local dev if gotten
 wrong, on top of files already mid-edit. Left for deliberate, focused
 handling rather than folding into this session's sweep.
 
+**Re-checked (2026-07-15), still deferred:** the blocker is unchanged.
+`Dockerfile.dev`/`docker-compose.dev.yml` still carry the same
+uncommitted dev-tooling edits (not this session's — someone else's
+in-progress work, not mine to fold into a structural move), and
+`docker-compose.dev.yml` now visibly has *three* fragile relative paths
+that would all need re-deriving together if it moved: `../../flokiorg/flnd`
+(the `flnd` service), `../../` + `flowgate/flspd/Dockerfile.dev` (the
+`flspd` service, assumes a specific depth inside a multi-repo workspace
+layout), and `./frontend` + `Dockerfile.dev` (the frontend dev service —
+meaning `web/`'s relocation and `deploy/`'s are coupled: moving one
+without the other breaks this reference regardless). Same call as before:
+don't touch it speculatively.
+
 ---
 
 ## Performance backlog (non-blocking, run in parallel once Phase 1 gate is met)
