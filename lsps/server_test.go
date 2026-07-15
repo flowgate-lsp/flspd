@@ -22,6 +22,9 @@ type MockLndClient struct {
 
 func (m *MockLndClient) SubscribeCustomMessages(ctx context.Context, req *lnrpc.SubscribeCustomMessagesRequest) (lnrpc.Lightning_SubscribeCustomMessagesClient, error) {
 	args := m.Called(ctx, req)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
 	return args.Get(0).(lnrpc.Lightning_SubscribeCustomMessagesClient), args.Error(1)
 }
 

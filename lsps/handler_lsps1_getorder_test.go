@@ -8,6 +8,7 @@ import (
 	"github.com/flowgate-lsp/flspd/core"
 	"github.com/flowgate-lsp/flspd/platform/config"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
 
@@ -41,6 +42,53 @@ func newGetOrderTestServer(t *testing.T, mockOS *MockOpeningService, orderExpiry
 
 	return NewServer(Config{}, new(MockLndClient), mockNS, mockOS, new(MockLiquidityManager), new(MockNotificationService))
 }
+
+func TestHandleLsps1GetInfo(t *testing.T) {
+	mockOS := new(MockOpeningService)
+	mockOS.On("GetFeeParamsMenu", "token-a", mock.Anything).Return([]*core.OpeningFeeParams{
+		{MinFeeMloki: 1000, Proportional: 100, ValidUntil: "2099-01-01T00:00:00.000Z"},
+	}, nil)
+	server := newGetOrderTestServer(t, mockOS, 3600)
+	// newGetOrderTestServer's NodesService fixture has no Tokens, so
+	// override with one that does, to exercise the fee-params-gathering
+	// loop rather than just the (already-covered-elsewhere) empty case.
+	mockNS := new(MockNodesService)
+	mockNS.On("GetNodes").Return([]*core.Node{{
+		Tokens: []string{"token-a"},
+		NodeConfig: config.NewNodeConfigRef(&config.NodeConfig{
+			Lsps1MinRequiredChannelConfirmations: uint16Ptr(1),
+			Lsps1MinFundingConfirmsWithinBlocks:  uint16Ptr(2),
+			Lsps1SupportsZeroChannelReserve:      boolPtr(true),
+			Lsps1MaxChannelExpiryBlocks:          uint32Ptr(201600),
+			Lsps1OrderExpirySeconds:              uint32Ptr(3600),
+			Lsps1MinInitialClientBalanceLoki:     uint64Ptr(0),
+			Lsps1MaxInitialClientBalanceLoki:     uint64Ptr(100_000_000),
+			Lsps1MinInitialLspBalanceLoki:        uint64Ptr(0),
+			Lsps1MaxInitialLspBalanceLoki:        uint64Ptr(100_000_000),
+			Lsps1MinChannelBalanceLoki:           uint64Ptr(20000),
+			Lsps1MaxChannelBalanceLoki:           uint64Ptr(100_000_000),
+		}),
+	}})
+	server.nodesService = mockNS
+
+	req := &JsonRpcRequest{Id: json.RawMessage(`"id"`)}
+	resp := server.handleLsps1GetInfo(req)
+
+	require.Nil(t, resp.Error)
+	result, ok := resp.Result.(Lsps1GetInfoResponse)
+	require.True(t, ok)
+	assert.Equal(t, []string{"lsps1.create_order", "lsps1.get_order"}, result.Options)
+	require.Len(t, result.OpeningFeeParams, 1)
+	assert.Equal(t, "1000", result.OpeningFeeParams[0].MinFeeMloki)
+	assert.EqualValues(t, 1, result.MinRequiredChannelConfirmations)
+	assert.True(t, result.SupportsZeroChannelReserve)
+	assert.Equal(t, "20000", result.MinChannelBalanceLoki)
+}
+
+func uint16Ptr(v uint16) *uint16 { return &v }
+func uint32Ptr(v uint32) *uint32 { return &v }
+func uint64Ptr(v uint64) *uint64 { return &v }
+func boolPtr(v bool) *bool       { return &v }
 
 func TestIsOrderExpired(t *testing.T) {
 	server := newGetOrderTestServer(t, new(MockOpeningService), 3600) // 1 hour
