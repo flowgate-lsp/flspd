@@ -42,7 +42,7 @@ number-soup and then get reorganized a second time.
 | 4 | YAML-driven integration tests | Runner + 3 seed scenarios merged | ✅ Runner built + all 3 seed scenarios landed (T4-1/T4-2). LSPS1 test client added; `lsps1_order_settle_and_open.yaml` and `lsps1_recovery_after_restart.yaml` (F-1 regression, real kill/restart) both pass on real flspd/flnd/chain processes, though the latter is flaky (new 2026-07-15 finding, pre-existing not a regression — see T4-2's own writeup). `lsps2_jit_happy_path.yaml` intentionally left known-failing on the distinct zero-conf-balance-sync race documented in T4-1 — not swept under the rug. `kill_lsp`/`restart_lsp` fault injection landed (T4-3, partial); relay-failure/mempool-fee fault injection not started. Wired into CI as `.github/workflows/itest.yml` (2026-07-15) — `workflow_dispatch` + nightly, deliberately *not* on every push/PR (user's explicit call): the suite checks out and builds 4 sibling repos from source plus a live devnet before testing, realistically 10-20+ min with more inherent flakiness risk than a unit suite, not something to put in the PR-blocking path. |
 | 5 | Config model + secrets-by-reference | New model shipped behind compat shim | ✅ T5-1..T5-7 done (secrets-by-reference, unit/fee/channel-size model, profiles, CLI tooling, Settings.tsx re-skin — frontend not browser-verified, no automation tooling available) |
 | 6 | Repo structure / arbo migration | Tree matches target layout, build green throughout | ✅ Done. T6-1..T6-3 (format/ folded into common/, internal/adapters/ introduced, common/ split into core/ports/services/); T6-4 (rpc/→api/proto/rpc/, config/→platform/config/, build/→platform/build/, auth/→transport/auth/, notifications/ proto split→api/proto/notifications/, common/logger.go+log_enums.go→platform/logging/, notifications/server.go transport classification resolved "stays put", lsps/→lsps+transport/lsps/ and dashboard/→dashboard+transport/dashboard/ splits both landed on the real transport-vs-logic seam, verified live against devnet for lsps/); T6-5 (configs/examples/, test/itest/, deploy/, web/ — deploy/+web/ landed on explicit user go-ahead, stashed+reapplied someone else's uncommitted dev-tooling edits with re-derived paths) — all sub-items done. |
-| — | Performance backlog (parallel, non-blocking) | — | ◐ P-3 verified as no-op (never called hot), nothing to do; P-4 done (2026-07-15) — split `Notify`/`NotifyAsync` on the real sync-vs-fire-and-forget seam, `notifyAndWait`'s fast-fail behavior untouched; P-1/P-2 have concrete fix paths documented but still need dedicated live-devnet regression verification before touching hot-path timing |
+| — | Performance backlog (parallel, non-blocking) | — | ✅ P-3 verified as no-op (never called hot), nothing to do; P-4 done — split `Notify`/`NotifyAsync` on the real sync-vs-fire-and-forget seam; P-2 done — cached peer↔scid map off the existing peer/channel-event subscriptions; P-1 done for its `GetChannel` half (`WaitChannelPointActive`, verified live), its `QueryRoutes` half is inseparable from the still-open LSPS2 zero-conf balance-sync race, tracked there instead of as a standalone perf item. All 4 items verified live against the devnet where the code path allowed it. |
 
 ---
 
@@ -1594,22 +1594,21 @@ is the actual deliverable here, given what's already fragile in this area.
 - **P-1** `Intercept` polls `GetChannel` (1s) and `QueryRoutes` (500ms) on
   fixed timers instead of driving off the existing channel-active event
   subscription in `lnd/client.go` — costs tail latency and idle load.
-  **Confirmed, concrete fix path exists but not attempted:**
-  `internal/adapters/lnd/client.go`'s `listenChannelEvents()` +
-  `WaitChannelActive` already implement exactly this kind of
-  subscription-based wait (`notifyAndWait` already uses
-  `WaitChannelActive` for a different case), so P-1 isn't a "build new
-  infrastructure" problem, it's a "wire the existing primitive into this
-  specific loop" problem. Not done this pass: the `GetChannel` loop needs
-  the *specific* `channelPoint` `openChannel` just returned, not just
-  "any active channel with this peer" (what `WaitChannelActive` checks),
-  and the second inner loop (`QueryRoutes` polling for router balance
-  sync) has no existing event-driven equivalent at all — that's the same
-  "insufficient local balance never resolves" gap Phase 4 already
-  documented as open. Changing this loop's timing without dedicated,
-  repeated live-devnet verification (each run takes over a minute) risks
-  masking or worsening that already-tracked race rather than just being a
-  clean perf win.
+  **`GetChannel` half done (2026-07-15), `QueryRoutes` half deliberately
+  left for the LSPS2 zero-conf race investigation it's inseparable
+  from.** Added `WaitChannelPointActive` (mirrors `WaitChannelActive`'s
+  subscribe-then-recheck pattern, `chansubs`-keyed by the *specific*
+  `channelPoint` `openChannel` just returned rather than "any channel
+  with this peer") and replaced the `GetChannel` polling loop with it.
+  4 new unit tests; verified live — flspd's own log for a real JIT open
+  shows zero 1s-interval "waiting for channel to open" messages now,
+  `Intercept()` proceeds straight from `OpenChannel` into the
+  `QueryRoutes` loop. That `QueryRoutes` loop is untouched: it has no
+  existing event-driven equivalent (nothing in flnd fires an event for
+  "the router's internal balance view for a zero-conf channel just
+  synced"), and it's the *exact* mechanism behind the still-open
+  zero-conf balance-sync race below — building a real fix for it isn't
+  a P-1 perf task anymore, it's part of that investigation.
 - **P-2** `GetPeerId` / `IsConnected` do full `ListChannels`/`ListPeers`
   scans on every interception; a cached peer↔scid map refreshed off the
   channel-event stream removes them from the hot path. **Done
