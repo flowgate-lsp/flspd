@@ -41,7 +41,7 @@ number-soup and then get reorganized a second time.
 | 3 | Unit-test coverage buildout | Critical-four packages ≥70–80% | ◐ In progress: F-5, F-6, F-7, F-9, F-12, F-13 done, T3-2/T3-3/T3-4/T3-5/T3-6 done; interceptor 38.9%, lsps 49.4%, postgresql 69.1%, notifications 54.3%, lnd 4.7%, common 36.0%, config 93.4%, lightning 86.9%, auth 76.5% |
 | 4 | YAML-driven integration tests | Runner + 3 seed scenarios merged | ◐ Foundation built + proven (Devnet/FlspdProcess/LSPS2 client, 2 more real bugs found — F-10 additions); YAML schema/runner not started; scenario 1's Go-level proof blocked on a devnet gossip-propagation gap, see T4-1 |
 | 5 | Config model + secrets-by-reference | New model shipped behind compat shim | ✅ T5-1..T5-7 done (secrets-by-reference, unit/fee/channel-size model, profiles, CLI tooling, Settings.tsx re-skin — frontend not browser-verified, no automation tooling available) |
-| 6 | Repo structure / arbo migration | Tree matches target layout, build green throughout | ◐ T6-1..T6-3 done (format/ folded into common/, internal/adapters/ introduced, common/ split into core/ports/services/); T6-4 (transport/platform/proto), T6-5 (samples/deploy/frontend relocation) not started |
+| 6 | Repo structure / arbo migration | Tree matches target layout, build green throughout | ◐ T6-1..T6-3 done (format/ folded into common/, internal/adapters/ introduced, common/ split into core/ports/services/); T6-5 partial (configs/examples/, test/itest/ done; deploy/, web/ deliberately deferred — uncommitted dev-tooling state + sibling-checkout paths); T6-4 (transport/platform/proto) not started, scope genuinely ambiguous (lsps/ is mostly business logic, not pure transport) |
 | — | Performance backlog (parallel, non-blocking) | — | ☐ Not started |
 
 ---
@@ -1147,6 +1147,26 @@ housing `itest/`, the new `scenarios/` from Phase 4, and `devnet/`
 **Acceptance criteria:** tree matches the target layout from the structure
 report; `go build ./...`, `go vet ./...`, and the full test suite pass after
 every individual PR, not just at the end.
+
+**Status:** ◐ Partially done. Landed (commits `e4d0f91`, `1f4667b`):
+`configs/examples/` (nodes.sample.yaml, compose.env.sample,
+flspd.env.sample — updated justfile's `setup-backend` and
+`config/secretref_test.go`'s relative path); `itest/` → `test/itest/`
+(fixed `devnetDir()`'s relative path, verified against the *real* devnet
+via `TestDevnetSmoke`/`TestFlspdProcessSmoke`, not just a build check;
+also fixed README.md's already-stale Integration Tests section, which
+still referenced CLI flags from the itest/lntest harness removed earlier
+this session). **Deliberately not done**, per an explicit decision this
+session: `deploy/` (Dockerfile, Dockerfile.dev, docker-compose.{dev,prod}.yml)
+and `web/` (frontend/) relocation. `Dockerfile.dev`/`docker-compose.dev.yml`
+carry uncommitted local dev-tooling changes (the air.toml hot-reload
+setup) from earlier in this session, and `docker-compose.dev.yml`'s
+`flnd` service build context is a sibling-checkout-relative path
+(`../../flokiorg/flnd`, resolved *outside this repo* against a workspace
+layout) that would need careful re-derivation if the compose file's own
+location changes — real risk of silently breaking local dev if gotten
+wrong, on top of files already mid-edit. Left for deliberate, focused
+handling rather than folding into this session's sweep.
 
 ---
 
