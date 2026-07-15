@@ -36,6 +36,19 @@ type LndClient struct {
 	chansubs            map[string]map[uint64]chan struct{}
 	submtx              sync.RWMutex
 	index               uint64
+
+	// peerCacheMtx guards scidToPeer/connectedPeers (P-2): GetPeerId and
+	// IsConnected are called on every intercepted HTLC, so they read from
+	// this in-memory cache instead of doing a full ListChannels/ListPeers
+	// scan inline on that path. The cache is kept warm by
+	// refreshPeerCache, called on every channel/peer event
+	// (listenChannelEvents/listenPeerEvents) and on a periodic safety-net
+	// timer -- see refreshPeerCache's own doc comment for why a full
+	// resync per event, not incremental patching, was the deliberate
+	// choice here.
+	peerCacheMtx   sync.RWMutex
+	scidToPeer     map[uint64][]byte
+	connectedPeers map[string]bool
 }
 
 func NewLndClient(conf *config.LndConfig) (*LndClient, error) {
@@ -101,6 +114,8 @@ func NewLndClient(conf *config.LndConfig) (*LndClient, error) {
 		conn:                conn,
 		peersubs:            make(map[string]map[uint64]chan struct{}),
 		chansubs:            make(map[string]map[uint64]chan struct{}),
+		scidToPeer:          make(map[uint64][]byte),
+		connectedPeers:      make(map[string]bool),
 	}, nil
 }
 
@@ -130,8 +145,92 @@ func (c *LndClient) Close() {
 
 func (c *LndClient) StartListeners() {
 	c.listenerCtx, c.listenerCancel = context.WithCancel(context.Background())
+	// Seed the cache synchronously so GetPeerId/IsConnected never race a
+	// caller against the first background refresh -- by the time
+	// StartListeners returns, the cache reflects real state (or, on a
+	// transient RPC failure here, self-heals via the periodic ticker
+	// below rather than staying empty forever).
+	c.refreshPeerCache()
 	go c.listenPeerEvents()
 	go c.listenChannelEvents()
+	go c.periodicPeerCacheRefresh()
+}
+
+// periodicPeerCacheRefresh is the safety net under refreshPeerCache's
+// event-triggered calls: if a channel/peer event's implications for
+// scidToPeer turn out to be less complete than assumed (see
+// refreshPeerCache's doc comment), or a subscription gap loses events
+// despite the reconnect-triggered refresh, staleness is bounded to this
+// interval rather than persisting indefinitely.
+func (c *LndClient) periodicPeerCacheRefresh() {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-c.listenerCtx.Done():
+			return
+		case <-ticker.C:
+			c.refreshPeerCache()
+		}
+	}
+}
+
+// refreshPeerCache rebuilds scidToPeer and connectedPeers from a fresh
+// ListChannels/ListPeers snapshot (P-2). A full resync on every
+// channel/peer event, rather than patching the two maps incrementally
+// from each event's own payload, is the deliberate choice: OPEN_CHANNEL/
+// CLOSED_CHANNEL events carry a complete *Channel/*ChannelCloseSummary
+// (so incremental add/remove would be precise there), but ACTIVE_CHANNEL
+// only carries a bare ChannelPoint, and it's genuinely unclear from the
+// proto alone whether a zero-conf channel's alias-to-confirmed SCID
+// transition (which GetPeerId must resolve correctly, since a payer may
+// route using either) always fires its own event or requires a fresh
+// ListChannels read to observe. This runs in the listener goroutine, not
+// on the interception path, so the extra RPC cost of "always resync"
+// instead of "resync only when provably necessary" is free where it
+// actually matters -- getting a misrouted-HTLC edge case wrong here is
+// not a tradeoff worth making for it.
+func (c *LndClient) refreshPeerCache() {
+	ctx := context.Background()
+
+	chans, err := c.client.ListChannels(ctx, &lnrpc.ListChannelsRequest{})
+	if err != nil {
+		log.Error().Err(err).Msg("LND: refreshPeerCache: ListChannels failed")
+	} else {
+		scidToPeer := make(map[uint64][]byte, len(chans.Channels))
+		for _, ch := range chans.Channels {
+			peerBytes, err := hex.DecodeString(ch.RemotePubkey)
+			if err != nil {
+				log.Warn().Err(err).Str("remote_pubkey", ch.RemotePubkey).Msg("LND: refreshPeerCache: undecodable remote pubkey, skipping channel")
+				continue
+			}
+			if ch.ChanId != 0 {
+				scidToPeer[ch.ChanId] = peerBytes
+			}
+			if ch.ZeroConfConfirmedScid != 0 {
+				scidToPeer[ch.ZeroConfConfirmedScid] = peerBytes
+			}
+			for _, alias := range ch.AliasScids {
+				scidToPeer[alias] = peerBytes
+			}
+		}
+		c.peerCacheMtx.Lock()
+		c.scidToPeer = scidToPeer
+		c.peerCacheMtx.Unlock()
+	}
+
+	peers, err := c.client.ListPeers(ctx, &lnrpc.ListPeersRequest{})
+	if err != nil {
+		log.Error().Err(err).Msg("LND: refreshPeerCache: ListPeers failed")
+		return
+	}
+	connectedPeers := make(map[string]bool, len(peers.Peers))
+	for _, p := range peers.Peers {
+		connectedPeers[p.PubKey] = true
+	}
+	c.peerCacheMtx.Lock()
+	c.connectedPeers = connectedPeers
+	c.peerCacheMtx.Unlock()
 }
 
 func (c *LndClient) listenPeerEvents() {
@@ -151,6 +250,11 @@ func (c *LndClient) listenPeerEvents() {
 			continue
 		}
 
+		// A fresh (re)subscribe may have missed events during the gap
+		// since the last one (initial startup, or a dropped stream) --
+		// resync now rather than waiting for the periodic ticker.
+		c.refreshPeerCache()
+
 		for {
 			if ctx.Err() != nil {
 				return
@@ -167,6 +271,11 @@ func (c *LndClient) listenPeerEvents() {
 				log.Error().Err(err).Msg("LND: Peer event listener error")
 				break
 			}
+
+			// Both ONLINE and OFFLINE affect connectedPeers (P-2); only
+			// ONLINE wakes WaitOnline's own subscribers, unchanged from
+			// before.
+			c.refreshPeerCache()
 
 			if msg.Type != lnrpc.PeerEvent_PEER_ONLINE {
 				continue
@@ -203,6 +312,11 @@ func (c *LndClient) listenChannelEvents() {
 			continue
 		}
 
+		// A fresh (re)subscribe may have missed events during the gap
+		// since the last one (initial startup, or a dropped stream) --
+		// resync now rather than waiting for the periodic ticker.
+		c.refreshPeerCache()
+
 		for {
 			if ctx.Err() != nil {
 				return
@@ -219,6 +333,13 @@ func (c *LndClient) listenChannelEvents() {
 				log.Error().Err(err).Msg("LND: Channel event listener error")
 				break
 			}
+
+			// Any channel event (open/closed/active/inactive/...) can
+			// affect scidToPeer -- resync on all of them (P-2's own doc
+			// comment on refreshPeerCache explains why full resync, not
+			// per-type incremental patching). The chansubs signaling
+			// below stays scoped to ACTIVE_CHANNEL only, unchanged.
+			c.refreshPeerCache()
 
 			if msg.Type != lnrpc.ChannelEventUpdate_ACTIVE_CHANNEL {
 				continue
@@ -272,24 +393,22 @@ func (c *LndClient) GetInfo() (*lightning.GetInfoResult, error) {
 	}, nil
 }
 
+// IsConnected reads from the cache refreshPeerCache maintains (P-2)
+// instead of calling ListPeers inline -- this is called on every
+// intercepted HTLC.
 func (c *LndClient) IsConnected(destination []byte) (bool, error) {
 	pubkey := hex.EncodeToString(destination)
 
-	resp, err := c.client.ListPeers(context.Background(), &lnrpc.ListPeersRequest{})
-	if err != nil {
-		log.Error().Msgf("LND: client.ListPeers() error: %v", err)
-		return false, fmt.Errorf("LND: client.ListPeers() error: %w", err)
-	}
+	c.peerCacheMtx.RLock()
+	connected := c.connectedPeers[pubkey]
+	c.peerCacheMtx.RUnlock()
 
-	for _, peer := range resp.Peers {
-		if peer.PubKey == pubkey {
-			log.Debug().Str("pubkey", pubkey).Msg("LND: Destination peer is online")
-			return true, nil
-		}
+	if connected {
+		log.Debug().Str("pubkey", pubkey).Msg("LND: Destination peer is online")
+	} else {
+		log.Debug().Str("pubkey", pubkey).Msg("LND: Destination peer is offline")
 	}
-
-	log.Debug().Str("pubkey", pubkey).Msg("LND: Destination peer is offline")
-	return false, nil
+	return connected, nil
 }
 
 func (c *LndClient) OpenChannel(req *lightning.OpenChannelRequest) (*wire.OutPoint, error) {
@@ -426,25 +545,13 @@ func (c *LndClient) getWaitingCloseChannels(nodeID string) ([]*lnrpc.PendingChan
 	return waitingCloseChannels, nil
 }
 
+// GetPeerId reads from the cache refreshPeerCache maintains (P-2) instead
+// of calling ListChannels inline -- this is called on every intercepted
+// HTLC.
 func (c *LndClient) GetPeerId(scid *lightning.ShortChannelID) ([]byte, error) {
-	scidu64 := uint64(*scid)
-	resp, err := c.client.ListChannels(context.Background(), &lnrpc.ListChannelsRequest{})
-	if err != nil {
-		return nil, err
-	}
-
-	for _, ch := range resp.Channels {
-		if ch.ChanId == scidu64 || ch.ZeroConfConfirmedScid == scidu64 {
-			return hex.DecodeString(ch.RemotePubkey)
-		}
-		for _, alias := range ch.AliasScids {
-			if alias == scidu64 {
-				return hex.DecodeString(ch.RemotePubkey)
-			}
-		}
-	}
-
-	return nil, nil
+	c.peerCacheMtx.RLock()
+	defer c.peerCacheMtx.RUnlock()
+	return c.scidToPeer[uint64(*scid)], nil
 }
 
 func (c *LndClient) WaitOnline(peerID []byte, deadline time.Time) error {

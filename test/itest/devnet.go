@@ -144,13 +144,22 @@ func (d *Devnet) LndConfigFor(role string) (*config.LndConfig, error) {
 // LightningClient returns flspd's own production lnd.LndClient wired
 // against the given devnet role, so scenario steps/assertions exercise the
 // exact same gRPC client code flspd uses in production rather than a
-// separate test-only implementation.
+// separate test-only implementation. StartListeners is called here (not
+// left to the caller) since it's required for IsConnected/GetPeerId's
+// peer-cache (P-2) to ever be populated -- production's own callers
+// (cmd/flspd/run.go) call it right after construction too, for the same
+// reason.
 func (d *Devnet) LightningClient(role string) (lightning.Client, error) {
 	conf, err := d.lndConfigFor(role)
 	if err != nil {
 		return nil, err
 	}
-	return lnd.NewLndClient(conf)
+	client, err := lnd.NewLndClient(conf)
+	if err != nil {
+		return nil, err
+	}
+	client.StartListeners()
+	return client, nil
 }
 
 // RawLightningClient returns the same connection as LightningClient but as
