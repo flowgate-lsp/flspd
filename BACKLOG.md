@@ -42,7 +42,7 @@ number-soup and then get reorganized a second time.
 | 4 | YAML-driven integration tests | Runner + 3 seed scenarios merged | ✅ Runner built + all 3 seed scenarios landed (T4-1/T4-2). LSPS1 test client added; `lsps1_order_settle_and_open.yaml` and `lsps1_recovery_after_restart.yaml` (F-1 regression, real kill/restart) both pass on real flspd/flnd/chain processes. `lsps2_jit_happy_path.yaml` intentionally left known-failing on the distinct zero-conf-balance-sync race documented in T4-1 — not swept under the rug. `kill_lsp`/`restart_lsp` fault injection landed (T4-3, partial); relay-failure/mempool-fee fault injection not started. Wired into CI as `.github/workflows/itest.yml` (2026-07-15) — `workflow_dispatch` + nightly, deliberately *not* on every push/PR (user's explicit call): the suite checks out and builds 4 sibling repos from source plus a live devnet before testing, realistically 10-20+ min with more inherent flakiness risk than a unit suite, not something to put in the PR-blocking path. |
 | 5 | Config model + secrets-by-reference | New model shipped behind compat shim | ✅ T5-1..T5-7 done (secrets-by-reference, unit/fee/channel-size model, profiles, CLI tooling, Settings.tsx re-skin — frontend not browser-verified, no automation tooling available) |
 | 6 | Repo structure / arbo migration | Tree matches target layout, build green throughout | ✅ Done. T6-1..T6-3 (format/ folded into common/, internal/adapters/ introduced, common/ split into core/ports/services/); T6-4 (rpc/→api/proto/rpc/, config/→platform/config/, build/→platform/build/, auth/→transport/auth/, notifications/ proto split→api/proto/notifications/, common/logger.go+log_enums.go→platform/logging/, notifications/server.go transport classification resolved "stays put", lsps/→lsps+transport/lsps/ and dashboard/→dashboard+transport/dashboard/ splits both landed on the real transport-vs-logic seam, verified live against devnet for lsps/); T6-5 (configs/examples/, test/itest/, deploy/, web/ — deploy/+web/ landed on explicit user go-ahead, stashed+reapplied someone else's uncommitted dev-tooling edits with re-derived paths) — all sub-items done. |
-| — | Performance backlog (parallel, non-blocking) | — | ◐ Investigated, not implemented: P-3 verified as no-op (never called hot); P-1/P-2 have concrete fix paths documented but need dedicated live-devnet regression verification; P-4's literal fix would regress `notifyAndWait`'s fast-fail behavior — narrower fix documented instead |
+| — | Performance backlog (parallel, non-blocking) | — | ◐ P-3 verified as no-op (never called hot), nothing to do; P-4 done (2026-07-15) — split `Notify`/`NotifyAsync` on the real sync-vs-fire-and-forget seam, `notifyAndWait`'s fast-fail behavior untouched; P-1/P-2 have concrete fix paths documented but still need dedicated live-devnet regression verification before touching hot-path timing |
 
 ---
 
@@ -1606,30 +1606,40 @@ is the actual deliverable here, given what's already fragile in this area.
   the note's own caveat doesn't currently apply.
 - **P-4** Notification fan-out spawns one goroutine per webhook per event
   with a 7s context inline on the interception path; route through the
-  existing persistent queue asynchronously instead. **The literal fix
-  would be a regression, found by actually reading the call sites:**
-  `notifications/notification_service.go`'s `Notify()` already writes to
-  a durable, persistent queue (`store.Enqueue` → `notification_queue`
-  table) *and* a background poller already exists
-  (`NotificationService.Start` → `runWorker`, 10s tick,
-  `processPending`/`GetPending` with exponential backoff) — so "enqueue
-  and let the async worker deliver it" is mechanically trivial (drop the
-  eager `deliverOne` call + `wg.Wait()` in `Notify()`/`enqueueAndDeliver`,
-  just enqueue and return). *But* `interceptor/intercept_handler.go`'s
-  `notifyAndWait` (line ~424) depends on `Notify()`'s current *synchronous
-  delivery* return value as a real fast-fail signal: `if err != nil ||
-  !notified { resume immediately }` — skipping the up-to-`NotificationTimeout`
-  (default 1 minute) `WaitOnline` block specifically when the push
-  notification is known to have failed to *reach* the client (webhook
-  down, DNS failure, etc.), not just "wasn't delivered yet." Making
-  `Notify()` enqueue-only would make every one of those failed-webhook
-  cases block for up to a minute instead of failing fast — a real latency
-  regression on exactly the path this was meant to speed up, not a safe
-  perf-only change. A correct fix needs to preserve that fast-fail
-  signal (e.g. keep one bounded/short synchronous delivery attempt for
-  the `notifyAndWait` caller specifically, route only the
-  fire-and-forget caller at `intercept_handler.go:173` through pure
-  enqueue) rather than changing `Notify()`'s contract wholesale.
+  existing persistent queue asynchronously instead. **Done (2026-07-15),
+  the narrower fix the original note called for.** The literal fix (make
+  `Notify()` enqueue-only) would have been a regression:
+  `interceptor/intercept_handler.go`'s `notifyAndWait` depends on
+  `Notify()`'s synchronous return value as a real fast-fail signal (client
+  unreachable → resume the HTLC now, not block up to `NotificationTimeout`
+  default 1 minute). But `intercept_handler.go`'s *other* call site
+  (`isConnected` already true, line ~173) was already wrapped in `go ...`
+  with its return value discarded — genuinely fire-and-forget, just
+  paying for a synchronous HTTP attempt (up to 7s/webhook) it never
+  needed. Added `NotifyAsync` (new `Notifier` interface method) that
+  durably enqueues via the existing `store.Enqueue` and returns without
+  attempting delivery — the existing 10s-tick background worker
+  (`runWorker`/`processPending`) picks it up, same path already used for
+  retries. Only that one call site switched to it; `notifyAndWait`'s own
+  `Notify()` call is untouched, zero behavior change there. Caught by the
+  new code's own test suite, not before landing it: factoring
+  `Notify`/`NotifyAsync`'s shared dedup-window prelude out initially
+  collapsed "dedup window suppressed this call" and "an error occurred"
+  into the same early-return, making `Notify()` incorrectly return
+  `false` (not "already notified") on a dedup hit —
+  `TestNotify_DispatchesToAllWebhooksAndDedupsWithinWindow` caught it
+  immediately, fixed by making the three-way distinction explicit
+  (`deduped bool` alongside `err`, not `!ok`). Added 3 new tests for
+  `NotifyAsync` (enqueue-without-synchronous-delivery, verified via a
+  transport with a nil `sendFunc` that panics if `Send` is ever called;
+  dedup; no-webhooks no-op). Not re-verified against the live devnet:
+  LSPS1's real flow settles via an ordinary bolt11 invoice, never
+  touching this specific interceptor branch, and LSPS2's flow (which
+  does) is already known-failing for the unrelated, pre-existing
+  zero-conf balance-sync race from T4-1 — the interceptor + notifications
+  unit suites (both re-run under `-race`) are the precise, clean signal
+  here, a live run wouldn't add confidence a broken mock wouldn't already
+  catch louder.
 
 ---
 
