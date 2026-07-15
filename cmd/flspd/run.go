@@ -31,12 +31,13 @@ import (
 	"github.com/flowgate-lsp/flspd/internal/adapters/postgres"
 	"github.com/flowgate-lsp/flspd/lightning"
 	"github.com/flowgate-lsp/flspd/lsps"
-	translsps "github.com/flowgate-lsp/flspd/transport/lsps"
 	"github.com/flowgate-lsp/flspd/notifications"
 	"github.com/flowgate-lsp/flspd/platform/build"
 	"github.com/flowgate-lsp/flspd/platform/config"
 	"github.com/flowgate-lsp/flspd/platform/logging"
 	"github.com/flowgate-lsp/flspd/services"
+	transdashboard "github.com/flowgate-lsp/flspd/transport/dashboard"
+	translsps "github.com/flowgate-lsp/flspd/transport/lsps"
 	"github.com/urfave/cli"
 )
 
@@ -197,14 +198,14 @@ func runLspd(cliCtx *cli.Context) error {
 		dashboardListenAddr = ":8080"
 	}
 
-	dashSvc := dashboard.NewDashboardService(
+	dashHandlers := dashboard.NewHandlers(
 		nodesService,
 		openingService,
 		openingStore,
 		historyStore,
-		dashboardAdminPubkey,
 		os.Getenv("NODES_CONFIG_PATH"),
 	)
+	dashSvc := transdashboard.NewServer(dashboardAdminPubkey, dashHandlers)
 
 	// Start dashboard HTTP server
 	go func() {

@@ -343,7 +343,7 @@ func TestDashboardService_RPC(t *testing.T) {
 	mockNodes.On("GetNodes").Return([]*core.Node{testNode})
 	mockStore.On("GetReservedLiquidity").Return(uint64(10000), nil)
 
-	s := NewDashboardService(mockNodes, mockOpeningSvc, mockStore, mockHistory, "pubkey_test", "/tmp/nodes.test.yaml")
+	s := NewHandlers(mockNodes, mockOpeningSvc, mockStore, mockHistory, "/tmp/nodes.test.yaml")
 
 	t.Run("get_summary", func(t *testing.T) {
 		// Scoped with .Once() so these don't leak into later subtests that
@@ -445,7 +445,7 @@ func TestHandleGetConfig_StripsSecrets(t *testing.T) {
 	}
 	mockNodes.On("GetNodes").Return([]*core.Node{node})
 
-	s := NewDashboardService(mockNodes, nil, nil, nil, "pubkey_test", "")
+	s := NewHandlers(mockNodes, nil, nil, nil, "")
 
 	req := &lsps.JsonRpcRequest{Id: json.RawMessage(`1`), Method: "get_config"}
 	resp := s.handleGetConfig(req)
@@ -494,7 +494,7 @@ func TestHandleUpdateConfig_PreservesOtherNodes(t *testing.T) {
 	configPath := "/tmp/nodes-c2-test.yaml"
 	defer os.Remove(configPath)
 
-	s := NewDashboardService(mockNodes, nil, nil, nil, "pubkey_test", configPath)
+	s := NewHandlers(mockNodes, nil, nil, nil, configPath)
 
 	updateReq := struct {
 		Config config.NodeConfig `json:"config"`

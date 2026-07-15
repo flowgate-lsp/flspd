@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"os"
 	"time"
 
@@ -14,8 +13,6 @@ import (
 	"github.com/flowgate-lsp/flspd/platform/build"
 	"github.com/flowgate-lsp/flspd/platform/config"
 	"github.com/flowgate-lsp/flspd/ports"
-	"github.com/flowgate-lsp/flspd/transport/auth"
-	"github.com/gorilla/websocket"
 	"github.com/rs/zerolog/log"
 	"gopkg.in/yaml.v3"
 )
@@ -29,22 +26,19 @@ const (
 	analyticsHistoryDays = 14
 )
 
-type DashboardService struct {
+// Handlers implements the dashboard's JSON-RPC methods (get_summary,
+// list_orders, update_config, ...): parsing a method's params, doing the
+// real work (config CRUD, analytics/liquidity aggregation), and returning
+// a result or error. How a request arrived (HTTP, NIP-98 auth, the
+// admin-pubkey authorization gate, the websocket event feed) is
+// transport/dashboard's job; see Route below for the one seam between
+// them.
+type Handlers struct {
 	nodesService   ports.NodesService
 	openingService ports.OpeningService
 	openingStore   ports.OpeningStore
 	historyStore   history.Store
-	adminPubKey    string // Authorized Nostr pubkey for dashboard access
 	configPath     string // Path to nodes.yaml for persistence
-	hub            *Hub
-}
-
-var upgrader = websocket.Upgrader{
-	ReadBufferSize:  1024,
-	WriteBufferSize: 1024,
-	CheckOrigin: func(r *http.Request) bool {
-		return true // Auth is handled by NIP-98 beforehand
-	},
 }
 
 type SummaryResponse struct {
@@ -63,173 +57,53 @@ type SummaryResponse struct {
 	VolumeTrend      string         `json:"volume_trend"`
 }
 
-func NewDashboardService(
+func NewHandlers(
 	nodesService ports.NodesService,
 	openingService ports.OpeningService,
 	openingStore ports.OpeningStore,
 	historyStore history.Store,
-	adminPubKey string,
 	configPath string,
-) *DashboardService {
-	svc := &DashboardService{
+) *Handlers {
+	return &Handlers{
 		nodesService:   nodesService,
 		openingService: openingService,
 		openingStore:   openingStore,
 		historyStore:   historyStore,
-		adminPubKey:    adminPubKey,
 		configPath:     configPath,
-		hub:            NewHub(),
-	}
-	go svc.hub.Run()
-	return svc
-}
-
-// Hub maintains the set of active clients and broadcasts messages to the clients.
-type Hub struct {
-	clients    map[*Client]bool
-	broadcast  chan []byte
-	register   chan *Client
-	unregister chan *Client
-}
-
-func NewHub() *Hub {
-	return &Hub{
-		broadcast:  make(chan []byte),
-		register:   make(chan *Client),
-		unregister: make(chan *Client),
-		clients:    make(map[*Client]bool),
 	}
 }
 
-func (h *Hub) Run() {
-	for {
-		select {
-		case client := <-h.register:
-			h.clients[client] = true
-		case client := <-h.unregister:
-			if _, ok := h.clients[client]; ok {
-				delete(h.clients, client)
-				close(client.send)
-			}
-		case message := <-h.broadcast:
-			for client := range h.clients {
-				select {
-				case client.send <- message:
-				default:
-					close(client.send)
-					delete(h.clients, client)
-				}
-			}
-		}
-	}
-}
-
-func (h *Hub) Broadcast(msg interface{}) {
-	data, err := json.Marshal(msg)
-	if err != nil {
-		log.Error().Err(err).Msg("Failed to marshal broadcast message")
-		return
-	}
-	h.broadcast <- data
-}
-
-type Client struct {
-	hub  *Hub
-	conn *websocket.Conn
-	send chan []byte
-}
-
-func (c *Client) writePump() {
-	defer func() {
-		c.conn.Close()
-	}()
-	for message := range c.send {
-		err := c.conn.WriteMessage(websocket.TextMessage, message)
-		if err != nil {
-			return
-		}
-	}
-}
-
-func (s *DashboardService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// 0. Handle Health Check (must be before upgrade & auth)
-	if r.URL.Path == "/healthz" {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{
-			"status":  "ok",
-			"version": build.GetTag(),
-			"commit":  build.GetRevision(),
-		})
-		return
-	}
-
-	// 0. Handle WebSocket Upgrade
-	if websocket.IsWebSocketUpgrade(r) {
-		s.handleWS(w, r)
-		return
-	}
-
-	// 1. Authenticate
-	session, err := auth.VerifyNostrAuth(r)
-	if err != nil {
-		log.Error().Err(err).Msg("Dashboard auth failed")
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
-	}
-
-	// 2. Authorize
-	if s.adminPubKey == "" {
-		log.Error().Msg("Dashboard attempted to be accessed but adminPubKey is not configured")
-		http.Error(w, "Dashboard is disabled (misconfigured)", http.StatusForbidden)
-		return
-	}
-	if session.PubKey != s.adminPubKey {
-		log.Warn().Msgf("Unauthorized dashboard access attempt by %s", session.PubKey)
-		http.Error(w, "Forbidden", http.StatusForbidden)
-		return
-	}
-
-	// 3. Handle JSON-RPC
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	var req lsps.JsonRpcRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Bad request", http.StatusBadRequest)
-		return
-	}
-
-	var resp *lsps.JsonRpcResponse
+// Route dispatches an already-decoded JSON-RPC request to the handler for
+// its method, by name. The only seam between transport/dashboard (which
+// owns HTTP routing, NIP-98 auth, and JSON-RPC envelope marshal/unmarshal)
+// and Handlers (this type): transport/dashboard calls Route once it has a
+// *lsps.JsonRpcRequest, and does nothing else with the method name itself.
+func (s *Handlers) Route(req *lsps.JsonRpcRequest) *lsps.JsonRpcResponse {
 	switch req.Method {
 	case "get_summary":
-		resp = s.handleGetSummary(&req)
+		return s.handleGetSummary(req)
 	case "list_orders":
-		resp = s.handleListOrders(&req)
+		return s.handleListOrders(req)
 	case "get_radar_data":
-		resp = s.handleGetRadarData(&req)
+		return s.handleGetRadarData(req)
 	case "get_analytics":
-		resp = s.handleGetAnalytics(&req)
+		return s.handleGetAnalytics(req)
 	case "get_config":
-		resp = s.handleGetConfig(&req)
+		return s.handleGetConfig(req)
 	case "update_config":
-		resp = s.handleUpdateConfig(&req)
+		return s.handleUpdateConfig(req)
 	case "list_peers":
-		resp = s.handleListPeers(&req)
+		return s.handleListPeers(req)
 	case "list_jit_channels":
-		resp = s.handleListJitChannels(&req)
+		return s.handleListJitChannels(req)
 	case "get_order_detail":
-		resp = s.handleGetOrderDetail(&req)
+		return s.handleGetOrderDetail(req)
 	default:
-		resp = lsps.NewJsonRpcErrorResponse(req.Id, -32601, "Method not found", nil)
+		return lsps.NewJsonRpcErrorResponse(req.Id, -32601, "Method not found", nil)
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
 }
 
-func (s *DashboardService) handleGetRadarData(req *lsps.JsonRpcRequest) *lsps.JsonRpcResponse {
+func (s *Handlers) handleGetRadarData(req *lsps.JsonRpcRequest) *lsps.JsonRpcResponse {
 	// Calculate real metrics
 	totalCapacity, _, reserved := s.getLiquidityMetrics(context.Background())
 
@@ -286,7 +160,7 @@ func (s *DashboardService) handleGetRadarData(req *lsps.JsonRpcRequest) *lsps.Js
 	return lsps.NewJsonRpcResponse(req.Id, data)
 }
 
-func (s *DashboardService) handleGetAnalytics(req *lsps.JsonRpcRequest) *lsps.JsonRpcResponse {
+func (s *Handlers) handleGetAnalytics(req *lsps.JsonRpcRequest) *lsps.JsonRpcResponse {
 	// Fetch a generous amount of recent orders to compute stats
 	orders, _ := s.openingStore.ListLsps1Orders(analyticsListLimit, 0)
 
@@ -396,7 +270,7 @@ func (s *DashboardService) handleGetAnalytics(req *lsps.JsonRpcRequest) *lsps.Js
 	})
 }
 
-func (s *DashboardService) handleGetSummary(req *lsps.JsonRpcRequest) *lsps.JsonRpcResponse {
+func (s *Handlers) handleGetSummary(req *lsps.JsonRpcRequest) *lsps.JsonRpcResponse {
 	// Fetch real data from stores/services
 	nodes := s.nodesService.GetNodes()
 	if len(nodes) == 0 {
@@ -498,7 +372,7 @@ func (s *DashboardService) handleGetSummary(req *lsps.JsonRpcRequest) *lsps.Json
 	return lsps.NewJsonRpcResponse(req.Id, summary)
 }
 
-func (s *DashboardService) handleListOrders(req *lsps.JsonRpcRequest) *lsps.JsonRpcResponse {
+func (s *Handlers) handleListOrders(req *lsps.JsonRpcRequest) *lsps.JsonRpcResponse {
 	// For LSP dashboard, we usually want recent orders across all nodes we manage
 	orders, err := s.openingStore.ListLsps1Orders(defaultListLimit, 0)
 	if err != nil {
@@ -542,7 +416,7 @@ func (s *DashboardService) handleListOrders(req *lsps.JsonRpcRequest) *lsps.Json
 	return lsps.NewJsonRpcResponse(req.Id, orders)
 }
 
-func (s *DashboardService) handleListPeers(req *lsps.JsonRpcRequest) *lsps.JsonRpcResponse {
+func (s *Handlers) handleListPeers(req *lsps.JsonRpcRequest) *lsps.JsonRpcResponse {
 	nodes := s.nodesService.GetNodes()
 	var allPeers []interface{}
 
@@ -582,7 +456,7 @@ func (s *DashboardService) handleListPeers(req *lsps.JsonRpcRequest) *lsps.JsonR
 	return lsps.NewJsonRpcResponse(req.Id, allPeers)
 }
 
-func (s *DashboardService) handleListJitChannels(req *lsps.JsonRpcRequest) *lsps.JsonRpcResponse {
+func (s *Handlers) handleListJitChannels(req *lsps.JsonRpcRequest) *lsps.JsonRpcResponse {
 	// JIT channels are represented by LSPS1 orders that have been successfully funded
 	orders, err := s.openingStore.ListLsps1Orders(defaultListLimit, 0)
 	if err != nil {
@@ -674,7 +548,7 @@ func stripConfigSecrets(cfg *config.NodeConfig) (map[string]interface{}, error) 
 	return m, nil
 }
 
-func (s *DashboardService) handleGetConfig(req *lsps.JsonRpcRequest) *lsps.JsonRpcResponse {
+func (s *Handlers) handleGetConfig(req *lsps.JsonRpcRequest) *lsps.JsonRpcResponse {
 	nodes := s.nodesService.GetNodes()
 	if len(nodes) == 0 {
 		return lsps.NewJsonRpcErrorResponse(req.Id, -32000, "No nodes configured", nil)
@@ -690,7 +564,7 @@ func (s *DashboardService) handleGetConfig(req *lsps.JsonRpcRequest) *lsps.JsonR
 	})
 }
 
-func (s *DashboardService) handleUpdateConfig(req *lsps.JsonRpcRequest) *lsps.JsonRpcResponse {
+func (s *Handlers) handleUpdateConfig(req *lsps.JsonRpcRequest) *lsps.JsonRpcResponse {
 	var params struct {
 		Config config.NodeConfig `json:"config"`
 	}
@@ -770,7 +644,7 @@ func (s *DashboardService) handleUpdateConfig(req *lsps.JsonRpcRequest) *lsps.Js
 	return lsps.NewJsonRpcResponse(req.Id, map[string]string{"status": "updated"})
 }
 
-func (s *DashboardService) handleGetOrderDetail(req *lsps.JsonRpcRequest) *lsps.JsonRpcResponse {
+func (s *Handlers) handleGetOrderDetail(req *lsps.JsonRpcRequest) *lsps.JsonRpcResponse {
 	var params struct {
 		OrderId string `json:"order_id"`
 	}
@@ -829,35 +703,7 @@ func (s *DashboardService) handleGetOrderDetail(req *lsps.JsonRpcRequest) *lsps.
 	return lsps.NewJsonRpcResponse(req.Id, result)
 }
 
-func (s *DashboardService) handleWS(w http.ResponseWriter, r *http.Request) {
-	// Verify auth before upgrade
-	session, err := auth.VerifyNostrAuth(r)
-	if err != nil {
-		log.Error().Err(err).Msg("Dashboard WebSocket auth failed")
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
-	}
-
-	// Authorize
-	if s.adminPubKey == "" || session.PubKey != s.adminPubKey {
-		log.Warn().Msgf("Unauthorized dashboard WebSocket attempt by %s", session.PubKey)
-		http.Error(w, "Forbidden", http.StatusForbidden)
-		return
-	}
-
-	conn, err := upgrader.Upgrade(w, r, nil)
-	if err != nil {
-		log.Error().Err(err).Msg("Failed to upgrade to websocket")
-		return
-	}
-
-	client := &Client{hub: s.hub, conn: conn, send: make(chan []byte, 256)}
-	s.hub.register <- client
-
-	go client.writePump()
-}
-
-func (s *DashboardService) getLiquidityMetrics(ctx context.Context) (total, free, reserved uint64) {
+func (s *Handlers) getLiquidityMetrics(ctx context.Context) (total, free, reserved uint64) {
 	reserved, _ = s.openingStore.GetReservedLiquidity()
 
 	nodes := s.nodesService.GetNodes()
@@ -874,13 +720,4 @@ func (s *DashboardService) getLiquidityMetrics(ctx context.Context) (total, free
 	total = 500000000
 	free = 500000000 - reserved
 	return
-}
-
-func (s *DashboardService) BroadcastEvent(event string, data interface{}) {
-	msg := map[string]interface{}{
-		"type": event,
-		"data": data,
-		"ts":   time.Now().Unix(),
-	}
-	s.hub.Broadcast(msg)
 }

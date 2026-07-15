@@ -2,16 +2,16 @@ package main
 
 import (
 	"github.com/flowgate-lsp/flspd/core"
-	"github.com/flowgate-lsp/flspd/dashboard"
 	"github.com/flowgate-lsp/flspd/notifications"
+	transdashboard "github.com/flowgate-lsp/flspd/transport/dashboard"
 )
 
 type DashboardNotificationBridge struct {
 	inner   *notifications.NotificationService
-	dashSvc *dashboard.DashboardService
+	dashSvc *transdashboard.Server
 }
 
-func NewDashboardNotificationBridge(inner *notifications.NotificationService, dashSvc *dashboard.DashboardService) *DashboardNotificationBridge {
+func NewDashboardNotificationBridge(inner *notifications.NotificationService, dashSvc *transdashboard.Server) *DashboardNotificationBridge {
 	return &DashboardNotificationBridge{
 		inner:   inner,
 		dashSvc: dashSvc,
