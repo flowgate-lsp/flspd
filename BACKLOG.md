@@ -41,7 +41,7 @@ number-soup and then get reorganized a second time.
 | 3 | Unit-test coverage buildout | Critical-four packages ≥70–80% | ◐ In progress: F-5, F-6, F-7, F-9, F-12, F-13 done, T3-2/T3-3/T3-4/T3-5/T3-6 done; interceptor 38.9%, lsps 49.4%, postgresql 69.1%, notifications 54.3%, lnd 4.7%, common 36.0%, config 93.4%, lightning 86.9%, auth 76.5% |
 | 4 | YAML-driven integration tests | Runner + 3 seed scenarios merged | ◐ Foundation built + proven (Devnet/FlspdProcess/LSPS2 client, 2 more real bugs found — F-10 additions); YAML schema/runner not started; scenario 1's Go-level proof blocked on a devnet gossip-propagation gap, see T4-1 |
 | 5 | Config model + secrets-by-reference | New model shipped behind compat shim | ✅ T5-1..T5-7 done (secrets-by-reference, unit/fee/channel-size model, profiles, CLI tooling, Settings.tsx re-skin — frontend not browser-verified, no automation tooling available) |
-| 6 | Repo structure / arbo migration | Tree matches target layout, build green throughout | ☐ Not started |
+| 6 | Repo structure / arbo migration | Tree matches target layout, build green throughout | ◐ T6-1..T6-3 done (format/ folded into common/, internal/adapters/ introduced, common/ split into core/ports/services/); T6-4 (transport/platform/proto), T6-5 (samples/deploy/frontend relocation) not started |
 | — | Performance backlog (parallel, non-blocking) | — | ☐ Not started |
 
 ---
@@ -1079,10 +1079,32 @@ Delete `format/` (3 LOC), fold its one constant into wherever `platform/`
 config/logging ends up. Add a `make clean` / `just clean` target that clears
 `data/ dist/ tmp/ *.test` from the working tree.
 
+**Status:** ✅ Done (commit `53340d9`). `format.TIME_FORMAT` moved to
+`common/time_format.go` as `TimeFormat` (idiomatic naming, since it was
+being touched anyway) — `platform/` doesn't exist yet (that's T6-4), so
+this landed in `common/` as the closest current home, to be moved again
+when T6-4 happens. `just clean`/`clean-all` extended, but deliberately
+*not* exactly as specced: `data/` (nodes.yaml, flnd data dir, postgres
+data dir — live local dev state, not a build artifact) went into
+`clean-all` (already the destructive tier, alongside the docker-volume
+wipe) rather than plain `clean`, so a routine "clean build artifacts"
+command a developer runs reflexively can't silently wipe local devnet
+state — see this session's earlier devnet-wipe incident for why that
+distinction matters.
+
 ### T6-2: Introduce `internal/`
 Move the clearly-private adapters (`lnd`, `postgresql`→`adapters/postgres`,
 `mempool`) under `internal/adapters/`. No public API depends on these being
 importable from outside.
+
+**Status:** ✅ Done (commit `1360196`). Blast radius was small (5 files:
+`cmd/flspd/run.go`, `cmd/flspd/migrate.go`,
+`cmd/flspd_revenue_cli/{revenue,db}.go`, `itest/devnet.go`), confirming
+BACKLOG's own rationale. `postgresql` renamed to `postgres` (package
+identifier, not just the directory) to match its new path, per the
+`→adapters/postgres` arrow notation — `lnd`/`mempool` kept their package
+names, only the path changed. `go:embed`'s relative `migrations/*.sql`
+path moved as a unit with the package, no changes needed.
 
 ### T6-3: Split `common/` into `core/`, `ports/`, `services/`
 The largest single change: separate domain types (`core/order`,
@@ -1090,6 +1112,25 @@ The largest single change: separate domain types (`core/order`,
 orchestration logic currently sitting in `common`'s services
 (`OpeningService`, `NodesService` → `services/`). Do this alone, in its own
 PR window, with the Phase 3 tests as the regression net.
+
+**Status:** ✅ Done (commit `be7232d`). `core/` — domain types only, no
+interfaces: `Node`, `NotificationRegistration`, the intercept domain
+(`InterceptRequest`/`InterceptResult`/action+failure-code consts), the
+opening/LSPS domain (`OpeningFeeParams`, `Lsps2BuyRegistration`,
+`Lsps1Order`, `Lsps5Webhook`), the extra-fee TLV helper. `ports/` —
+`InterceptHandler`, `NodesService`, `OpeningStore`, `OpeningService`
+interfaces, depending on `core` for their signatures. `services/` —
+`CombinedHandler`, `nodesService`, `openingService` (the concrete
+implementations, plus the promise sign/verify helpers), depending on
+both. `common/` remains as a smaller, genuinely cross-cutting residual —
+logging setup + the `LogComponent`/`LogAction` taxonomy (left alone on
+purpose, that's T6-4's "platform/" territory, not this PR's), `TimeFormat`,
+and the generic `ValidateWebhookUrl`/`ParsePrivateKey` helpers that don't
+have one natural domain home. ~46 files referencing `common.*` across the
+whole module needed symbol-by-symbol reclassification (never a blind
+package-name find-replace) — verified via a zero-remaining-old-references
+grep sweep before considering it done, not just "it compiles." Full test
+suite green throughout.
 
 ### T6-4: Consolidate transport, platform, proto
 `transport/` for inbound surfaces (grpc, lsps json-rpc, dashboard http,
