@@ -1,4 +1,4 @@
-package common
+package core
 
 // NotificationRegistration represents a client's registration for notifications
 type NotificationRegistration struct {

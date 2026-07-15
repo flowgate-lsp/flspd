@@ -8,6 +8,7 @@ import (
 	"strconv"
 
 	"github.com/flowgate-lsp/flspd/common"
+	"github.com/flowgate-lsp/flspd/core"
 	"github.com/rs/zerolog/log"
 )
 
@@ -150,21 +151,21 @@ func (s *Server) lsps2Buy(req *JsonRpcRequest, peer []byte) *JsonRpcResponse {
 
 	// Validate params
 	minFee, _ := strconv.ParseUint(params.OpeningFeeParams.MinFeeMloki, 10, 64)
-	commonParams := &common.OpeningFeeParams{
+	commonParams := &core.OpeningFeeParams{
 		MinFeeMloki:          minFee,
 		Proportional:         params.OpeningFeeParams.Proportional,
 		ValidUntil:           params.OpeningFeeParams.ValidUntil,
 		MinLifetime:          params.OpeningFeeParams.MinLifetime,
 		MaxClientToSelfDelay: params.OpeningFeeParams.MaxClientToSelfDelay,
-		// These fields are not in common.OpeningFeeParams, but needed for paramsHash if we updated it?
-		// Wait, we updated common.OpeningFeeParams to include them. We need to parse them from request params.
+		// These fields are not in core.OpeningFeeParams, but needed for paramsHash if we updated it?
+		// Wait, we updated core.OpeningFeeParams to include them. We need to parse them from request params.
 		MinPaymentSizeMloki: parseUint64(params.OpeningFeeParams.MinPaymentSizeMloki),
 		MaxPaymentSizeMloki: parseUint64(params.OpeningFeeParams.MaxPaymentSizeMloki),
 		Promise:             params.OpeningFeeParams.Promise,
 	}
 
 	nodes := s.nodesService.GetNodes()
-	var validNode *common.Node
+	var validNode *core.Node
 	var validToken string
 
 Loop:
@@ -245,7 +246,7 @@ Loop:
 
 	regID, _ := generateUUID()
 
-	err = s.openingService.RegisterLsps2Buy(&common.Lsps2BuyRegistration{
+	err = s.openingService.RegisterLsps2Buy(&core.Lsps2BuyRegistration{
 		Id:                         regID,
 		LspId:                      hex.EncodeToString(validNode.PublicKey.SerializeCompressed()),
 		PeerId:                     hex.EncodeToString(peer),

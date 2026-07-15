@@ -6,60 +6,60 @@ import (
 	"testing"
 	"time"
 
-	"github.com/flowgate-lsp/flspd/common"
+	"github.com/flowgate-lsp/flspd/core"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-// fakeOpeningStore implements common.OpeningStore with real logic only for
+// fakeOpeningStore implements ports.OpeningStore with real logic only for
 // GetLsps5Webhooks (all NotificationService needs); every other method is a
 // no-op stub so the fake satisfies the (large) interface without pulling in
 // a mocking framework for methods this package never calls.
 type fakeOpeningStore struct {
-	webhooks       map[string][]*common.Lsps5Webhook
+	webhooks       map[string][]*core.Lsps5Webhook
 	getWebhooksErr error
 }
 
 func newFakeOpeningStore() *fakeOpeningStore {
-	return &fakeOpeningStore{webhooks: make(map[string][]*common.Lsps5Webhook)}
+	return &fakeOpeningStore{webhooks: make(map[string][]*core.Lsps5Webhook)}
 }
 
-func (f *fakeOpeningStore) GetLsps5Webhooks(clientNodeId string) ([]*common.Lsps5Webhook, error) {
+func (f *fakeOpeningStore) GetLsps5Webhooks(clientNodeId string) ([]*core.Lsps5Webhook, error) {
 	if f.getWebhooksErr != nil {
 		return nil, f.getWebhooksErr
 	}
 	return f.webhooks[clientNodeId], nil
 }
 
-func (f *fakeOpeningStore) GetFeeParamsSettings(string) ([]*common.OpeningFeeParamsSetting, error) {
+func (f *fakeOpeningStore) GetFeeParamsSettings(string) ([]*core.OpeningFeeParamsSetting, error) {
 	return nil, nil
 }
-func (f *fakeOpeningStore) SetFeeParams(string, time.Duration, common.OpeningFeeParams) error {
+func (f *fakeOpeningStore) SetFeeParams(string, time.Duration, core.OpeningFeeParams) error {
 	return nil
 }
-func (f *fakeOpeningStore) RegisterLsps2Buy(*common.Lsps2BuyRegistration) error { return nil }
-func (f *fakeOpeningStore) GetLsps2BuyRegistration(uint64) (*common.Lsps2BuyRegistration, error) {
+func (f *fakeOpeningStore) RegisterLsps2Buy(*core.Lsps2BuyRegistration) error { return nil }
+func (f *fakeOpeningStore) GetLsps2BuyRegistration(uint64) (*core.Lsps2BuyRegistration, error) {
 	return nil, nil
 }
-func (f *fakeOpeningStore) RegisterLsps1Order(*common.Lsps1Order) error      { return nil }
-func (f *fakeOpeningStore) GetLsps1Order(string) (*common.Lsps1Order, error) { return nil, nil }
-func (f *fakeOpeningStore) GetLsps1OrderByPaymentInvoice(string) (*common.Lsps1Order, error) {
+func (f *fakeOpeningStore) RegisterLsps1Order(*core.Lsps1Order) error      { return nil }
+func (f *fakeOpeningStore) GetLsps1Order(string) (*core.Lsps1Order, error) { return nil, nil }
+func (f *fakeOpeningStore) GetLsps1OrderByPaymentInvoice(string) (*core.Lsps1Order, error) {
 	return nil, nil
 }
-func (f *fakeOpeningStore) GetPaidLsps1Order(string) (*common.Lsps1Order, error) { return nil, nil }
-func (f *fakeOpeningStore) GetPaidLsps1Orders(string) ([]*common.Lsps1Order, error) {
+func (f *fakeOpeningStore) GetPaidLsps1Order(string) (*core.Lsps1Order, error) { return nil, nil }
+func (f *fakeOpeningStore) GetPaidLsps1Orders(string) ([]*core.Lsps1Order, error) {
 	return nil, nil
 }
-func (f *fakeOpeningStore) GetAllPaidLsps1Orders() ([]*common.Lsps1Order, error) { return nil, nil }
-func (f *fakeOpeningStore) GetAllCreatedLsps1Orders() ([]*common.Lsps1Order, error) {
+func (f *fakeOpeningStore) GetAllPaidLsps1Orders() ([]*core.Lsps1Order, error) { return nil, nil }
+func (f *fakeOpeningStore) GetAllCreatedLsps1Orders() ([]*core.Lsps1Order, error) {
 	return nil, nil
 }
-func (f *fakeOpeningStore) ListLsps1Orders(int, int) ([]*common.Lsps1Order, error) { return nil, nil }
+func (f *fakeOpeningStore) ListLsps1Orders(int, int) ([]*core.Lsps1Order, error) { return nil, nil }
 func (f *fakeOpeningStore) UpdateLsps1OrderState(string, string, string, string) (bool, error) {
 	return false, nil
 }
 func (f *fakeOpeningStore) UpdateLsps1OrderFunding(string, string, int) error { return nil }
-func (f *fakeOpeningStore) RegisterLsps5Webhook(*common.Lsps5Webhook) error   { return nil }
+func (f *fakeOpeningStore) RegisterLsps5Webhook(*core.Lsps5Webhook) error     { return nil }
 func (f *fakeOpeningStore) RemoveLsps5Webhook(string, string) error           { return nil }
 func (f *fakeOpeningStore) CountLsps1Orders(string, string, *time.Time) (int, error) {
 	return 0, nil
@@ -84,7 +84,7 @@ func newFakeNotifStore() *fakeNotifStore {
 }
 
 func (f *fakeNotifStore) Register(context.Context, string, string, string) error { return nil }
-func (f *fakeNotifStore) GetRegistrations(context.Context, string) ([]common.NotificationRegistration, error) {
+func (f *fakeNotifStore) GetRegistrations(context.Context, string) ([]core.NotificationRegistration, error) {
 	return nil, nil
 }
 func (f *fakeNotifStore) Unsubscribe(context.Context, string, string) error { return nil }
@@ -169,7 +169,7 @@ func (s *stubTransport) callCount() int32 {
 
 func TestNotify_DispatchesToAllWebhooksAndDedupsWithinWindow(t *testing.T) {
 	store := newFakeOpeningStore()
-	store.webhooks["peer1"] = []*common.Lsps5Webhook{
+	store.webhooks["peer1"] = []*core.Lsps5Webhook{
 		{ClientNodeId: "peer1", AppName: "wallet-a", Url: "https://a.example", Transport: "push"},
 		{ClientNodeId: "peer1", AppName: "wallet-b", Url: "https://b.example", Transport: "push"},
 	}

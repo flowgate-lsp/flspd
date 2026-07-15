@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/flowgate-lsp/flspd/common"
 	"github.com/flowgate-lsp/flspd/config"
+	"github.com/flowgate-lsp/flspd/core"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -27,7 +27,7 @@ func TestNotifyAndWait_NotifyErrorResumesHtlc(t *testing.T) {
 
 	result := i.notifyAndWait("hash", []byte{1}, false)
 	require.NotNil(t, result)
-	assert.Equal(t, common.INTERCEPT_RESUME, result.Action)
+	assert.Equal(t, core.INTERCEPT_RESUME, result.Action)
 	client.AssertNotCalled(t, "WaitOnline", mock.Anything, mock.Anything)
 }
 
@@ -39,7 +39,7 @@ func TestNotifyAndWait_ClientNotNotifiedResumesHtlc(t *testing.T) {
 
 	result := i.notifyAndWait("hash", []byte{1}, false)
 	require.NotNil(t, result)
-	assert.Equal(t, common.INTERCEPT_RESUME, result.Action)
+	assert.Equal(t, core.INTERCEPT_RESUME, result.Action)
 }
 
 func TestNotifyAndWait_WaitOnlineErrorResumesHtlc(t *testing.T) {
@@ -51,7 +51,7 @@ func TestNotifyAndWait_WaitOnlineErrorResumesHtlc(t *testing.T) {
 
 	result := i.notifyAndWait("hash", []byte{1}, false)
 	require.NotNil(t, result)
-	assert.Equal(t, common.INTERCEPT_RESUME, result.Action)
+	assert.Equal(t, core.INTERCEPT_RESUME, result.Action)
 	client.AssertNotCalled(t, "WaitChannelActive", mock.Anything, mock.Anything)
 }
 
@@ -78,7 +78,7 @@ func TestNotifyAndWait_UnregisteredChannelNeverActiveResumesHtlc(t *testing.T) {
 
 	result := i.notifyAndWait("hash", []byte{1}, false)
 	require.NotNil(t, result)
-	assert.Equal(t, common.INTERCEPT_RESUME, result.Action)
+	assert.Equal(t, core.INTERCEPT_RESUME, result.Action)
 }
 
 func TestNotifyAndWait_RegisteredPaymentSkipsChannelActiveWait(t *testing.T) {

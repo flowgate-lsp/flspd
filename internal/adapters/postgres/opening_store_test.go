@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/flowgate-lsp/flspd/common"
+	"github.com/flowgate-lsp/flspd/core"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -21,8 +21,8 @@ func newOrderId(t *testing.T) string {
 	return hex.EncodeToString(buf)
 }
 
-func sampleOrder(orderId string) *common.Lsps1Order {
-	return &common.Lsps1Order{
+func sampleOrder(orderId string) *core.Lsps1Order {
+	return &core.Lsps1Order{
 		OrderId:                      orderId,
 		PeerId:                       "peer-pubkey",
 		LspBalanceLoki:               100_000,
@@ -128,7 +128,7 @@ func TestOpeningStore_Lsps5Webhooks_RegisterListRemove(t *testing.T) {
 	store := NewPostgresOpeningStore(testPool)
 	clientNodeId := newOrderId(t)
 
-	webhook := &common.Lsps5Webhook{
+	webhook := &core.Lsps5Webhook{
 		ClientNodeId: clientNodeId,
 		AppName:      "wallet-app",
 		Url:          "https://example.com/hook",
@@ -158,7 +158,7 @@ func TestOpeningStore_RegisterLsps5Webhook_UpsertsOnConflict(t *testing.T) {
 	store := NewPostgresOpeningStore(testPool)
 	clientNodeId := newOrderId(t)
 
-	first := &common.Lsps5Webhook{
+	first := &core.Lsps5Webhook{
 		ClientNodeId: clientNodeId,
 		AppName:      "wallet-app",
 		Url:          "https://example.com/v1",
@@ -167,7 +167,7 @@ func TestOpeningStore_RegisterLsps5Webhook_UpsertsOnConflict(t *testing.T) {
 	}
 	require.NoError(t, store.RegisterLsps5Webhook(first))
 
-	second := &common.Lsps5Webhook{
+	second := &core.Lsps5Webhook{
 		ClientNodeId: clientNodeId,
 		AppName:      "wallet-app", // same (client_node_id, app_name) key
 		Url:          "https://example.com/v2",
@@ -186,7 +186,7 @@ func TestOpeningStore_RegisterLsps5Webhook_UpsertsOnConflict(t *testing.T) {
 // findByValidity picks out the one setting matching validity, ignoring the
 // two global (token IS NULL) default rows the initial migration seeds,
 // which GetFeeParamsSettings always includes alongside token-specific ones.
-func findByValidity(t *testing.T, settings []*common.OpeningFeeParamsSetting, validity time.Duration) *common.OpeningFeeParamsSetting {
+func findByValidity(t *testing.T, settings []*core.OpeningFeeParamsSetting, validity time.Duration) *core.OpeningFeeParamsSetting {
 	t.Helper()
 	for _, s := range settings {
 		if s.Validity == validity {
@@ -201,7 +201,7 @@ func TestOpeningStore_SetAndGetFeeParamsSettings(t *testing.T) {
 	token := newOrderId(t) // unique token per test
 	const validity = 2 * time.Hour
 
-	params := common.OpeningFeeParams{
+	params := core.OpeningFeeParams{
 		MinFeeMloki:          1000,
 		Proportional:         4000,
 		ValidUntil:           "2099-01-01T00:00:00.000Z",
@@ -223,10 +223,10 @@ func TestOpeningStore_SetFeeParams_ReplacesSameValidityForToken(t *testing.T) {
 	token := newOrderId(t)
 	const validity = 2 * time.Hour
 
-	original := common.OpeningFeeParams{MinFeeMloki: 1000, Proportional: 4000, ValidUntil: "2099-01-01T00:00:00.000Z"}
+	original := core.OpeningFeeParams{MinFeeMloki: 1000, Proportional: 4000, ValidUntil: "2099-01-01T00:00:00.000Z"}
 	require.NoError(t, store.SetFeeParams(token, validity, original))
 
-	updated := common.OpeningFeeParams{MinFeeMloki: 2000, Proportional: 5000, ValidUntil: "2099-01-01T00:00:00.000Z"}
+	updated := core.OpeningFeeParams{MinFeeMloki: 2000, Proportional: 5000, ValidUntil: "2099-01-01T00:00:00.000Z"}
 	require.NoError(t, store.SetFeeParams(token, validity, updated))
 
 	settings, err := store.GetFeeParamsSettings(token)
@@ -253,7 +253,7 @@ func TestOpeningStore_Lsps2BuyRegistration_RoundTrip(t *testing.T) {
 	scid := uint64(800_000)<<40 | uint64(1234)<<16 | uint64(1)
 	paymentSize := uint64(50_000_000)
 
-	reg := &common.Lsps2BuyRegistration{
+	reg := &core.Lsps2BuyRegistration{
 		Id:                         newOrderId(t),
 		LspId:                      "lsp-pubkey",
 		PeerId:                     "peer-pubkey",
@@ -297,7 +297,7 @@ func TestOpeningStore_Lsps2BuyRegistration_HighBitScid(t *testing.T) {
 	require.Negative(t, int64(scid), "sanity: this SCID must be negative when reinterpreted as int64, same as the store does internally")
 
 	paymentSize := uint64(50_000_000)
-	reg := &common.Lsps2BuyRegistration{
+	reg := &core.Lsps2BuyRegistration{
 		Id:                         newOrderId(t),
 		LspId:                      "lsp-pubkey-highbit",
 		PeerId:                     "peer-pubkey-highbit",

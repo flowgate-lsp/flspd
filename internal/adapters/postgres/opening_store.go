@@ -5,15 +5,15 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/flowgate-lsp/flspd/common"
+	"github.com/flowgate-lsp/flspd/core"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog/log"
 )
 
 type extendedParams struct {
-	Token   string                  `json:"token"`
-	OrderId string                  `json:"order_id,omitempty"`
-	Params  common.OpeningFeeParams `json:"fees_params"`
+	Token   string                `json:"token"`
+	OrderId string                `json:"order_id,omitempty"`
+	Params  core.OpeningFeeParams `json:"fees_params"`
 }
 
 type PostgresOpeningStore struct {
@@ -24,7 +24,7 @@ func NewPostgresOpeningStore(pool *pgxpool.Pool) *PostgresOpeningStore {
 	return &PostgresOpeningStore{pool: pool}
 }
 
-func (s *PostgresOpeningStore) GetFeeParamsSettings(token string) ([]*common.OpeningFeeParamsSetting, error) {
+func (s *PostgresOpeningStore) GetFeeParamsSettings(token string) ([]*core.OpeningFeeParamsSetting, error) {
 	rows, err := s.pool.Query(context.Background(),
 		`SELECT validity, params FROM new_channel_params WHERE (token=$1 OR token IS NULL) AND validity>0`, token)
 	if err != nil {
@@ -33,7 +33,7 @@ func (s *PostgresOpeningStore) GetFeeParamsSettings(token string) ([]*common.Ope
 	}
 	defer rows.Close()
 
-	var settings []*common.OpeningFeeParamsSetting
+	var settings []*core.OpeningFeeParamsSetting
 	for rows.Next() {
 		var validity int64
 		var param string
@@ -42,7 +42,7 @@ func (s *PostgresOpeningStore) GetFeeParamsSettings(token string) ([]*common.Ope
 			return nil, err
 		}
 
-		var params *common.OpeningFeeParams
+		var params *core.OpeningFeeParams
 		err := json.Unmarshal([]byte(param), &params)
 		if err != nil {
 			log.Error().Msgf("Failed to unmarshal fee param '%v': %v", param, err)
@@ -50,7 +50,7 @@ func (s *PostgresOpeningStore) GetFeeParamsSettings(token string) ([]*common.Ope
 		}
 
 		duration := time.Second * time.Duration(validity)
-		settings = append(settings, &common.OpeningFeeParamsSetting{
+		settings = append(settings, &core.OpeningFeeParamsSetting{
 			Validity: duration,
 			Params:   params,
 		})
@@ -59,7 +59,7 @@ func (s *PostgresOpeningStore) GetFeeParamsSettings(token string) ([]*common.Ope
 	return settings, nil
 }
 
-func (s *PostgresOpeningStore) SetFeeParams(token string, validity time.Duration, params common.OpeningFeeParams) error {
+func (s *PostgresOpeningStore) SetFeeParams(token string, validity time.Duration, params core.OpeningFeeParams) error {
 	paramsBytes, err := json.Marshal(params)
 	if err != nil {
 		return err
@@ -85,7 +85,7 @@ func (s *PostgresOpeningStore) SetFeeParams(token string, validity time.Duration
 	return tx.Commit(ctx)
 }
 
-func (s *PostgresOpeningStore) RegisterLsps2Buy(reg *common.Lsps2BuyRegistration) error {
+func (s *PostgresOpeningStore) RegisterLsps2Buy(reg *core.Lsps2BuyRegistration) error {
 	// DEBUG LOGGING
 	log.Trace().Msgf("RegisterLsps2Buy inserting int64 SCID: %d (uint64: %d)", int64(reg.Scid), reg.Scid)
 	_, err := s.pool.Exec(context.Background(),
@@ -104,14 +104,14 @@ func (s *PostgresOpeningStore) RegisterLsps2Buy(reg *common.Lsps2BuyRegistration
 	return nil
 }
 
-func (s *PostgresOpeningStore) GetLsps2BuyRegistration(scid uint64) (*common.Lsps2BuyRegistration, error) {
+func (s *PostgresOpeningStore) GetLsps2BuyRegistration(scid uint64) (*core.Lsps2BuyRegistration, error) {
 	row := s.pool.QueryRow(context.Background(),
 		`SELECT id, lsp_id, peer_id, scid, mode, payment_size_mloki, 
 			params_min_fee_mloki, params_proportional, params_valid_until, 
 			params_min_lifetime, params_max_client_to_self_delay, params_promise, token
 		FROM lsps2.buy_registrations WHERE scid=$1`, int64(scid))
 
-	var reg common.Lsps2BuyRegistration
+	var reg core.Lsps2BuyRegistration
 	var scidInt int64
 	err := row.Scan(
 		&reg.Id, &reg.LspId, &reg.PeerId, &scidInt, &reg.Mode, &reg.PaymentSizeMloki,
@@ -125,7 +125,7 @@ func (s *PostgresOpeningStore) GetLsps2BuyRegistration(scid uint64) (*common.Lsp
 	return &reg, nil
 }
 
-func (s *PostgresOpeningStore) RegisterLsps1Order(order *common.Lsps1Order) error {
+func (s *PostgresOpeningStore) RegisterLsps1Order(order *core.Lsps1Order) error {
 	_, err := s.pool.Exec(context.Background(),
 		`INSERT INTO lsps1.orders (
 			order_id, peer_id, lsp_balance_loki, client_balance_loki, 
@@ -146,7 +146,7 @@ func (s *PostgresOpeningStore) RegisterLsps1Order(order *common.Lsps1Order) erro
 	return nil
 }
 
-func (s *PostgresOpeningStore) GetLsps1Order(orderId string) (*common.Lsps1Order, error) {
+func (s *PostgresOpeningStore) GetLsps1Order(orderId string) (*core.Lsps1Order, error) {
 	row := s.pool.QueryRow(context.Background(),
 		`SELECT order_id, peer_id, lsp_balance_loki, client_balance_loki, 
 			funding_confirms_within_blocks, required_channel_confirmations, 
@@ -155,7 +155,7 @@ func (s *PostgresOpeningStore) GetLsps1Order(orderId string) (*common.Lsps1Order
 			COALESCE(refund_onchain_address, ''), COALESCE(order_total_loki, 0), COALESCE(fee_total_loki, 0)
 		FROM lsps1.orders WHERE order_id=$1`, orderId)
 
-	var order common.Lsps1Order
+	var order core.Lsps1Order
 	err := row.Scan(
 		&order.OrderId, &order.PeerId, &order.LspBalanceLoki, &order.ClientBalanceLoki,
 		&order.FundingConfirmsWithinBlocks, &order.RequiredChannelConfirmations,
@@ -169,7 +169,7 @@ func (s *PostgresOpeningStore) GetLsps1Order(orderId string) (*common.Lsps1Order
 	return &order, nil
 }
 
-func (s *PostgresOpeningStore) ListLsps1Orders(limit, offset int) ([]*common.Lsps1Order, error) {
+func (s *PostgresOpeningStore) ListLsps1Orders(limit, offset int) ([]*core.Lsps1Order, error) {
 	rows, err := s.pool.Query(context.Background(),
 		`SELECT order_id, peer_id, lsp_balance_loki, client_balance_loki, 
 			funding_confirms_within_blocks, required_channel_confirmations, 
@@ -184,9 +184,9 @@ func (s *PostgresOpeningStore) ListLsps1Orders(limit, offset int) ([]*common.Lsp
 	}
 	defer rows.Close()
 
-	var orders []*common.Lsps1Order
+	var orders []*core.Lsps1Order
 	for rows.Next() {
-		var o common.Lsps1Order
+		var o core.Lsps1Order
 		err := rows.Scan(
 			&o.OrderId, &o.PeerId, &o.LspBalanceLoki, &o.ClientBalanceLoki,
 			&o.FundingConfirmsWithinBlocks, &o.RequiredChannelConfirmations,
@@ -202,7 +202,7 @@ func (s *PostgresOpeningStore) ListLsps1Orders(limit, offset int) ([]*common.Lsp
 	return orders, nil
 }
 
-func (s *PostgresOpeningStore) RegisterLsps5Webhook(webhook *common.Lsps5Webhook) error {
+func (s *PostgresOpeningStore) RegisterLsps5Webhook(webhook *core.Lsps5Webhook) error {
 	_, err := s.pool.Exec(context.Background(),
 		`INSERT INTO lsps5.webhooks (client_node_id, app_name, url, transport, created_at) 
 		VALUES ($1, $2, $3, $4, $5) 
@@ -215,7 +215,7 @@ func (s *PostgresOpeningStore) RegisterLsps5Webhook(webhook *common.Lsps5Webhook
 	return nil
 }
 
-func (s *PostgresOpeningStore) GetLsps5Webhooks(clientNodeId string) ([]*common.Lsps5Webhook, error) {
+func (s *PostgresOpeningStore) GetLsps5Webhooks(clientNodeId string) ([]*core.Lsps5Webhook, error) {
 	rows, err := s.pool.Query(context.Background(),
 		`SELECT client_node_id, app_name, url, transport, created_at FROM lsps5.webhooks WHERE client_node_id=$1`,
 		clientNodeId)
@@ -224,9 +224,9 @@ func (s *PostgresOpeningStore) GetLsps5Webhooks(clientNodeId string) ([]*common.
 	}
 	defer rows.Close()
 
-	var webhooks []*common.Lsps5Webhook
+	var webhooks []*core.Lsps5Webhook
 	for rows.Next() {
-		var w common.Lsps5Webhook
+		var w core.Lsps5Webhook
 		err := rows.Scan(&w.ClientNodeId, &w.AppName, &w.Url, &w.Transport, &w.CreatedAt)
 		if err != nil {
 			return nil, err

@@ -7,8 +7,8 @@ import (
 
 	"github.com/flokiorg/flnd/lnrpc"
 	btcec "github.com/flokiorg/go-flokicoin/crypto"
-	"github.com/flowgate-lsp/flspd/common"
 	"github.com/flowgate-lsp/flspd/config"
+	"github.com/flowgate-lsp/flspd/core"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )
@@ -162,10 +162,10 @@ func verifyLsps1Capacity(t *testing.T, tc matrixScenario, minFloor uint64) {
 		AdditionalChannelCapacity:            tc.padding,
 	}
 
-	nodes.On("GetNodes").Return([]*common.Node{{NodeConfig: config.NewNodeConfigRef(nodeConfig)}})
+	nodes.On("GetNodes").Return([]*core.Node{{NodeConfig: config.NewNodeConfigRef(nodeConfig)}})
 	nodes.On("GetMinChannelCapacity").Return(minFloor)
 	liquidity.On("CheckOnChainLiquidity", mock.Anything, mock.Anything).Return(nil)
-	store.On("GetFeeParamsMenu", mock.Anything, mock.Anything).Return([]*common.OpeningFeeParams{}, nil)
+	store.On("GetFeeParamsMenu", mock.Anything, mock.Anything).Return([]*core.OpeningFeeParams{}, nil)
 	store.On("CountLsps1Orders", mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
 	lnd.On("AddInvoice", mock.Anything, mock.Anything).Return(&lnrpc.AddInvoiceResponse{}, nil)
 	store.On("RegisterLsps1Order", mock.Anything).Return(nil)
@@ -209,13 +209,13 @@ func verifyLsps2Capacity(t *testing.T, tc matrixScenario, minFloor uint64) {
 		AdditionalChannelCapacity: tc.padding,
 		JitMinChannelBalanceLoki:  &tc.businessLimit,
 	}
-	validNode := &common.Node{
+	validNode := &core.Node{
 		PublicKey:  nodePriv.PubKey(),
 		NodeConfig: config.NewNodeConfigRef(nodeConfig),
 		Tokens:     []string{"token"},
 	}
 
-	nodes.On("GetNodes").Return([]*common.Node{validNode})
+	nodes.On("GetNodes").Return([]*core.Node{validNode})
 	nodes.On("GetMinChannelCapacity").Return(minFloor)
 	liquidity.On("CheckOnChainLiquidity", mock.Anything, mock.Anything).Return(nil)
 	store.On("ValidateOpeningFeeParams", mock.Anything, mock.Anything).Return(true)

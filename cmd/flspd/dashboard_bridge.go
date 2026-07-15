@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/flowgate-lsp/flspd/common"
+	"github.com/flowgate-lsp/flspd/core"
 	"github.com/flowgate-lsp/flspd/dashboard"
 	"github.com/flowgate-lsp/flspd/notifications"
 )
@@ -31,7 +31,7 @@ func (b *DashboardNotificationBridge) Notify(pubkey string, paymenthash string, 
 	return res, err
 }
 
-func (b *DashboardNotificationBridge) NotifyWebhookRegistered(pubkey string, webhook *common.Lsps5Webhook) bool {
+func (b *DashboardNotificationBridge) NotifyWebhookRegistered(pubkey string, webhook *core.Lsps5Webhook) bool {
 	return b.inner.NotifyWebhookRegistered(pubkey, webhook)
 }
 

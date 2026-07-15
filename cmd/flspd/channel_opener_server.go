@@ -13,7 +13,9 @@ import (
 	ecies "github.com/ecies/go/v2"
 	btcec "github.com/flokiorg/go-flokicoin/crypto"
 	"github.com/flowgate-lsp/flspd/common"
+	"github.com/flowgate-lsp/flspd/core"
 	"github.com/flowgate-lsp/flspd/interceptor"
+	"github.com/flowgate-lsp/flspd/ports"
 	rpc "github.com/flowgate-lsp/flspd/rpc"
 	"google.golang.org/protobuf/proto"
 
@@ -24,12 +26,12 @@ import (
 type channelOpenerServer struct {
 	rpc.ChannelOpenerServer
 	store          interceptor.InterceptStore
-	openingService common.OpeningService
+	openingService ports.OpeningService
 }
 
 func NewChannelOpenerServer(
 	store interceptor.InterceptStore,
-	openingService common.OpeningService,
+	openingService ports.OpeningService,
 ) *channelOpenerServer {
 	return &channelOpenerServer{
 		store:          store,
@@ -119,7 +121,7 @@ func (s *channelOpenerServer) RegisterPayment(
 	// clients to use opening_fee_params.
 	if pi.OpeningFeeParams != nil {
 		valid := s.openingService.ValidateOpeningFeeParams(
-			&common.OpeningFeeParams{
+			&core.OpeningFeeParams{
 				MinFeeMloki:          pi.OpeningFeeParams.MinMloki,
 				Proportional:         pi.OpeningFeeParams.Proportional,
 				ValidUntil:           pi.OpeningFeeParams.ValidUntil,
@@ -150,7 +152,7 @@ func (s *channelOpenerServer) RegisterPayment(
 		log.Error().Msgf("checkPayment(%v, %v) error: %v", pi.IncomingAmountMloki, pi.OutgoingAmountMloki, err)
 		return nil, fmt.Errorf("checkPayment(%v, %v) error: %v", pi.IncomingAmountMloki, pi.OutgoingAmountMloki, err)
 	}
-	params := &common.OpeningFeeParams{
+	params := &core.OpeningFeeParams{
 		MinFeeMloki:          pi.OpeningFeeParams.MinMloki,
 		Proportional:         pi.OpeningFeeParams.Proportional,
 		ValidUntil:           pi.OpeningFeeParams.ValidUntil,
@@ -166,7 +168,7 @@ func (s *channelOpenerServer) RegisterPayment(
 	return &rpc.RegisterPaymentReply{}, nil
 }
 
-func getSignedEncryptedData(n *common.Node, in *rpc.Encrypted) (string, []byte, error) {
+func getSignedEncryptedData(n *core.Node, in *rpc.Encrypted) (string, []byte, error) {
 	signedBlob, err := ecies.Decrypt(n.EciesPrivateKey, in.Data)
 	if err != nil {
 		log.Error().Msgf("ecies.Decrypt(%x) error: %v", in.Data, err)

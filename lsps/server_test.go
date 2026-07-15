@@ -9,8 +9,8 @@ import (
 
 	"github.com/flokiorg/flnd/lnrpc"
 	btcec "github.com/flokiorg/go-flokicoin/crypto"
-	"github.com/flowgate-lsp/flspd/common"
 	"github.com/flowgate-lsp/flspd/config"
+	"github.com/flowgate-lsp/flspd/core"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )
@@ -50,17 +50,17 @@ type MockNodesService struct {
 	mock.Mock
 }
 
-func (m *MockNodesService) GetNode(token string) (*common.Node, error) {
+func (m *MockNodesService) GetNode(token string) (*core.Node, error) {
 	args := m.Called(token)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
-	return args.Get(0).(*common.Node), args.Error(1)
+	return args.Get(0).(*core.Node), args.Error(1)
 }
 
-func (m *MockNodesService) GetNodes() []*common.Node {
+func (m *MockNodesService) GetNodes() []*core.Node {
 	args := m.Called()
-	return args.Get(0).([]*common.Node)
+	return args.Get(0).([]*core.Node)
 }
 
 func (m *MockNodesService) GetMinChannelCapacity() uint64 {
@@ -72,50 +72,50 @@ type MockOpeningService struct {
 	mock.Mock
 }
 
-func (m *MockOpeningService) GetFeeParamsMenu(token string, privateKey *btcec.PrivateKey) ([]*common.OpeningFeeParams, error) {
+func (m *MockOpeningService) GetFeeParamsMenu(token string, privateKey *btcec.PrivateKey) ([]*core.OpeningFeeParams, error) {
 	args := m.Called(token, privateKey)
-	return args.Get(0).([]*common.OpeningFeeParams), args.Error(1)
+	return args.Get(0).([]*core.OpeningFeeParams), args.Error(1)
 }
 
-func (m *MockOpeningService) ValidateOpeningFeeParams(params *common.OpeningFeeParams, publicKey *btcec.PublicKey) bool {
+func (m *MockOpeningService) ValidateOpeningFeeParams(params *core.OpeningFeeParams, publicKey *btcec.PublicKey) bool {
 	args := m.Called(params, publicKey)
 	return args.Bool(0)
 }
 
-func (m *MockOpeningService) IsCurrentChainFeeCheaper(token string, params *common.OpeningFeeParams) bool {
+func (m *MockOpeningService) IsCurrentChainFeeCheaper(token string, params *core.OpeningFeeParams) bool {
 	args := m.Called(token, params)
 	return args.Bool(0)
 }
 
-func (m *MockOpeningService) RegisterLsps2Buy(reg *common.Lsps2BuyRegistration) error {
+func (m *MockOpeningService) RegisterLsps2Buy(reg *core.Lsps2BuyRegistration) error {
 	args := m.Called(reg)
 	return args.Error(0)
 }
 
-func (m *MockOpeningService) RegisterLsps1Order(order *common.Lsps1Order) error {
+func (m *MockOpeningService) RegisterLsps1Order(order *core.Lsps1Order) error {
 	args := m.Called(order)
 	return args.Error(0)
 }
 
-func (m *MockOpeningService) GetLsps1Order(orderId string) (*common.Lsps1Order, error) {
+func (m *MockOpeningService) GetLsps1Order(orderId string) (*core.Lsps1Order, error) {
 	args := m.Called(orderId)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
-	return args.Get(0).(*common.Lsps1Order), args.Error(1)
+	return args.Get(0).(*core.Lsps1Order), args.Error(1)
 }
 
-func (m *MockOpeningService) RegisterLsps5Webhook(webhook *common.Lsps5Webhook) error {
+func (m *MockOpeningService) RegisterLsps5Webhook(webhook *core.Lsps5Webhook) error {
 	args := m.Called(webhook)
 	return args.Error(0)
 }
 
-func (m *MockOpeningService) GetLsps5Webhooks(clientNodeId string) ([]*common.Lsps5Webhook, error) {
+func (m *MockOpeningService) GetLsps5Webhooks(clientNodeId string) ([]*core.Lsps5Webhook, error) {
 	args := m.Called(clientNodeId)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
-	return args.Get(0).([]*common.Lsps5Webhook), args.Error(1)
+	return args.Get(0).([]*core.Lsps5Webhook), args.Error(1)
 }
 
 func (m *MockOpeningService) RemoveLsps5Webhook(clientNodeId, appName string) error {
@@ -158,7 +158,7 @@ type MockNotificationService struct {
 	mock.Mock
 }
 
-func (m *MockNotificationService) NotifyWebhookRegistered(pubkey string, webhook *common.Lsps5Webhook) bool {
+func (m *MockNotificationService) NotifyWebhookRegistered(pubkey string, webhook *core.Lsps5Webhook) bool {
 	args := m.Called(pubkey, webhook)
 	return args.Bool(0)
 }
@@ -182,7 +182,7 @@ func TestLsps2Buy(t *testing.T) {
 	// Test Data
 	privKey, pubKey := btcec.PrivKeyFromBytes([]byte("testprivkey1111111111111111111"))
 	nodeId, _ := hex.DecodeString("033333333333333333333333333333333333333333333333333333333333333333")
-	node := &common.Node{
+	node := &core.Node{
 		NodeId:     nodeId,
 		PublicKey:  pubKey,
 		PrivateKey: privKey,
@@ -192,14 +192,14 @@ func TestLsps2Buy(t *testing.T) {
 		}),
 	}
 
-	mockNodes.On("GetNodes").Return([]*common.Node{node})
+	mockNodes.On("GetNodes").Return([]*core.Node{node})
 	mockNodes.On("GetMinChannelCapacity").Return(uint64(20000))
 
 	// Valid Params
 	validUntil := time.Now().Add(24 * time.Hour).Format(time.RFC3339)
 
-	mockOpening.On("ValidateOpeningFeeParams", mock.AnythingOfType("*common.OpeningFeeParams"), pubKey).Return(true)
-	mockOpening.On("RegisterLsps2Buy", mock.AnythingOfType("*common.Lsps2BuyRegistration")).Return(nil)
+	mockOpening.On("ValidateOpeningFeeParams", mock.AnythingOfType("*core.OpeningFeeParams"), pubKey).Return(true)
+	mockOpening.On("RegisterLsps2Buy", mock.AnythingOfType("*core.Lsps2BuyRegistration")).Return(nil)
 
 	// Mock Liquidity Check (Success)
 	mockLiquidity.On("CheckOnChainLiquidity", mock.Anything, mock.Anything).Return(nil)
@@ -261,7 +261,7 @@ func TestLsps2Buy_PaymentSizeValidation(t *testing.T) {
 
 	// Test Data
 	privKey, pubKey := btcec.PrivKeyFromBytes([]byte("testprivkey1111111111111111111"))
-	node := &common.Node{
+	node := &core.Node{
 		PublicKey:  pubKey,
 		PrivateKey: privKey,
 		Tokens:     []string{"test-token"},
@@ -270,10 +270,10 @@ func TestLsps2Buy_PaymentSizeValidation(t *testing.T) {
 		}),
 	}
 
-	mockNodes.On("GetNodes").Return([]*common.Node{node})
+	mockNodes.On("GetNodes").Return([]*core.Node{node})
 
 	validUntil := time.Now().Add(24 * time.Hour).Format(time.RFC3339)
-	mockOpening.On("ValidateOpeningFeeParams", mock.AnythingOfType("*common.OpeningFeeParams"), pubKey).Return(true)
+	mockOpening.On("ValidateOpeningFeeParams", mock.AnythingOfType("*core.OpeningFeeParams"), pubKey).Return(true)
 
 	// Mock Liquidity Checks (Assuming they pass for validation tests unless specific failure tested)
 	// Actually for validation failure BEFORE liquidity check, we don't need to mock it.
@@ -357,7 +357,7 @@ func TestLsps1CreateOrder(t *testing.T) {
 	minChan := uint64(20000)
 	maxChan := uint64(100_000_000)
 
-	node := &common.Node{
+	node := &core.Node{
 		PublicKey:  pubKey,
 		PrivateKey: privKey,
 		Tokens:     []string{"test-token"},
@@ -377,11 +377,11 @@ func TestLsps1CreateOrder(t *testing.T) {
 		}),
 	}
 
-	mockNodes.On("GetNodes").Return([]*common.Node{node})
+	mockNodes.On("GetNodes").Return([]*core.Node{node})
 
 	// Mock Fee Params Menu
 	validUntil := time.Now().Add(24 * time.Hour).Format(time.RFC3339)
-	fees := []*common.OpeningFeeParams{
+	fees := []*core.OpeningFeeParams{
 		{
 			MinFeeMloki:          1000,
 			Proportional:         1000, // 1000 ppm = 0.1%
@@ -408,7 +408,7 @@ func TestLsps1CreateOrder(t *testing.T) {
 	}, nil)
 
 	// Mock Register Order
-	mockOpening.On("RegisterLsps1Order", mock.AnythingOfType("*common.Lsps1Order")).Return(nil)
+	mockOpening.On("RegisterLsps1Order", mock.AnythingOfType("*core.Lsps1Order")).Return(nil)
 
 	// Execute
 	params := Lsps1CreateOrderRequest{

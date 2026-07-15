@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/flokiorg/go-flokicoin/wire"
-	"github.com/flowgate-lsp/flspd/common"
+	"github.com/flowgate-lsp/flspd/core"
 	"github.com/flowgate-lsp/flspd/lightning"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -26,8 +26,8 @@ func (f *fakeExpiryLightningClient) ListChannels() ([]*lightning.Channel, error)
 }
 func (f *fakeExpiryLightningClient) GetBlockHeight() (uint32, error) { return f.blockHeight, nil }
 
-func (f *fakeExpiryLightningClient) GetInfo() (*lightning.GetInfoResult, error)   { return nil, nil }
-func (f *fakeExpiryLightningClient) IsConnected([]byte) (bool, error)             { return false, nil }
+func (f *fakeExpiryLightningClient) GetInfo() (*lightning.GetInfoResult, error) { return nil, nil }
+func (f *fakeExpiryLightningClient) IsConnected([]byte) (bool, error)           { return false, nil }
 func (f *fakeExpiryLightningClient) OpenChannel(*lightning.OpenChannelRequest) (*wire.OutPoint, error) {
 	return nil, nil
 }
@@ -101,7 +101,7 @@ func (f *fakeExpiryNotifier) blocksNotified() []int {
 }
 
 func (f *fakeExpiryNotifier) Notify(string, string, interface{}) (bool, error) { return true, nil }
-func (f *fakeExpiryNotifier) NotifyWebhookRegistered(string, *common.Lsps5Webhook) bool {
+func (f *fakeExpiryNotifier) NotifyWebhookRegistered(string, *core.Lsps5Webhook) bool {
 	return true
 }
 func (f *fakeExpiryNotifier) NotifyOrderStateChanged(string, string, string, string, string) (bool, error) {

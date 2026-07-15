@@ -12,8 +12,8 @@ import (
 	"github.com/flokiorg/flnd/lnrpc"
 	btcec "github.com/flokiorg/go-flokicoin/crypto"
 	"github.com/flokiorg/go-flokicoin/wire"
-	"github.com/flowgate-lsp/flspd/common"
 	"github.com/flowgate-lsp/flspd/config"
+	"github.com/flowgate-lsp/flspd/core"
 	"github.com/flowgate-lsp/flspd/history"
 	"github.com/flowgate-lsp/flspd/lightning"
 	"github.com/flowgate-lsp/flspd/lsps"
@@ -27,17 +27,17 @@ type MockNodesService struct {
 	mock.Mock
 }
 
-func (m *MockNodesService) GetNode(token string) (*common.Node, error) {
+func (m *MockNodesService) GetNode(token string) (*core.Node, error) {
 	args := m.Called(token)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
-	return args.Get(0).(*common.Node), args.Error(1)
+	return args.Get(0).(*core.Node), args.Error(1)
 }
 
-func (m *MockNodesService) GetNodes() []*common.Node {
+func (m *MockNodesService) GetNodes() []*core.Node {
 	args := m.Called()
-	return args.Get(0).([]*common.Node)
+	return args.Get(0).([]*core.Node)
 }
 
 func (m *MockNodesService) GetMinChannelCapacity() uint64 {
@@ -49,52 +49,52 @@ type MockOpeningStore struct {
 	mock.Mock
 }
 
-func (m *MockOpeningStore) GetFeeParamsSettings(token string) ([]*common.OpeningFeeParamsSetting, error) {
+func (m *MockOpeningStore) GetFeeParamsSettings(token string) ([]*core.OpeningFeeParamsSetting, error) {
 	args := m.Called(token)
-	return args.Get(0).([]*common.OpeningFeeParamsSetting), args.Error(1)
+	return args.Get(0).([]*core.OpeningFeeParamsSetting), args.Error(1)
 }
 
-func (m *MockOpeningStore) SetFeeParams(token string, validity time.Duration, params common.OpeningFeeParams) error {
+func (m *MockOpeningStore) SetFeeParams(token string, validity time.Duration, params core.OpeningFeeParams) error {
 	args := m.Called(token, validity, params)
 	return args.Error(0)
 }
 
-func (m *MockOpeningStore) RegisterLsps2Buy(reg *common.Lsps2BuyRegistration) error {
+func (m *MockOpeningStore) RegisterLsps2Buy(reg *core.Lsps2BuyRegistration) error {
 	return m.Called(reg).Error(0)
 }
 
-func (m *MockOpeningStore) GetLsps2BuyRegistration(scid uint64) (*common.Lsps2BuyRegistration, error) {
+func (m *MockOpeningStore) GetLsps2BuyRegistration(scid uint64) (*core.Lsps2BuyRegistration, error) {
 	args := m.Called(scid)
-	return args.Get(0).(*common.Lsps2BuyRegistration), args.Error(1)
+	return args.Get(0).(*core.Lsps2BuyRegistration), args.Error(1)
 }
 
-func (m *MockOpeningStore) RegisterLsps1Order(order *common.Lsps1Order) error {
+func (m *MockOpeningStore) RegisterLsps1Order(order *core.Lsps1Order) error {
 	return m.Called(order).Error(0)
 }
 
-func (m *MockOpeningStore) GetLsps1Order(orderId string) (*common.Lsps1Order, error) {
+func (m *MockOpeningStore) GetLsps1Order(orderId string) (*core.Lsps1Order, error) {
 	args := m.Called(orderId)
-	return args.Get(0).(*common.Lsps1Order), args.Error(1)
+	return args.Get(0).(*core.Lsps1Order), args.Error(1)
 }
 
-func (m *MockOpeningStore) GetLsps1OrderByPaymentInvoice(paymentInvoice string) (*common.Lsps1Order, error) {
+func (m *MockOpeningStore) GetLsps1OrderByPaymentInvoice(paymentInvoice string) (*core.Lsps1Order, error) {
 	args := m.Called(paymentInvoice)
-	return args.Get(0).(*common.Lsps1Order), args.Error(1)
+	return args.Get(0).(*core.Lsps1Order), args.Error(1)
 }
 
-func (m *MockOpeningStore) GetPaidLsps1Order(clientNodeId string) (*common.Lsps1Order, error) {
+func (m *MockOpeningStore) GetPaidLsps1Order(clientNodeId string) (*core.Lsps1Order, error) {
 	args := m.Called(clientNodeId)
-	return args.Get(0).(*common.Lsps1Order), args.Error(1)
+	return args.Get(0).(*core.Lsps1Order), args.Error(1)
 }
 
-func (m *MockOpeningStore) GetPaidLsps1Orders(clientNodeId string) ([]*common.Lsps1Order, error) {
+func (m *MockOpeningStore) GetPaidLsps1Orders(clientNodeId string) ([]*core.Lsps1Order, error) {
 	args := m.Called(clientNodeId)
-	return args.Get(0).([]*common.Lsps1Order), args.Error(1)
+	return args.Get(0).([]*core.Lsps1Order), args.Error(1)
 }
 
-func (m *MockOpeningStore) GetAllPaidLsps1Orders() ([]*common.Lsps1Order, error) {
+func (m *MockOpeningStore) GetAllPaidLsps1Orders() ([]*core.Lsps1Order, error) {
 	args := m.Called()
-	return args.Get(0).([]*common.Lsps1Order), args.Error(1)
+	return args.Get(0).([]*core.Lsps1Order), args.Error(1)
 }
 
 func (m *MockOpeningStore) UpdateLsps1OrderState(orderId string, newState string, newPaymentState string, expectedCurrentState string) (bool, error) {
@@ -106,13 +106,13 @@ func (m *MockOpeningStore) UpdateLsps1OrderFunding(orderId string, fundingTxid s
 	return m.Called(orderId, fundingTxid, fundingOutpoint).Error(0)
 }
 
-func (m *MockOpeningStore) RegisterLsps5Webhook(webhook *common.Lsps5Webhook) error {
+func (m *MockOpeningStore) RegisterLsps5Webhook(webhook *core.Lsps5Webhook) error {
 	return m.Called(webhook).Error(0)
 }
 
-func (m *MockOpeningStore) GetLsps5Webhooks(clientNodeId string) ([]*common.Lsps5Webhook, error) {
+func (m *MockOpeningStore) GetLsps5Webhooks(clientNodeId string) ([]*core.Lsps5Webhook, error) {
 	args := m.Called(clientNodeId)
-	return args.Get(0).([]*common.Lsps5Webhook), args.Error(1)
+	return args.Get(0).([]*core.Lsps5Webhook), args.Error(1)
 }
 
 func (m *MockOpeningStore) RemoveLsps5Webhook(clientNodeId, appName string) error {
@@ -139,53 +139,53 @@ func (m *MockOpeningStore) ExpireStaleOrders() (int64, error) {
 	return args.Get(0).(int64), args.Error(1)
 }
 
-func (m *MockOpeningStore) ListLsps1Orders(limit, offset int) ([]*common.Lsps1Order, error) {
+func (m *MockOpeningStore) ListLsps1Orders(limit, offset int) ([]*core.Lsps1Order, error) {
 	args := m.Called(limit, offset)
-	return args.Get(0).([]*common.Lsps1Order), args.Error(1)
+	return args.Get(0).([]*core.Lsps1Order), args.Error(1)
 }
 
-func (m *MockOpeningStore) GetAllCreatedLsps1Orders() ([]*common.Lsps1Order, error) {
+func (m *MockOpeningStore) GetAllCreatedLsps1Orders() ([]*core.Lsps1Order, error) {
 	args := m.Called()
-	return args.Get(0).([]*common.Lsps1Order), args.Error(1)
+	return args.Get(0).([]*core.Lsps1Order), args.Error(1)
 }
 
 type MockOpeningService struct {
 	mock.Mock
 }
 
-func (m *MockOpeningService) GetFeeParamsMenu(token string, privateKey *btcec.PrivateKey) ([]*common.OpeningFeeParams, error) {
+func (m *MockOpeningService) GetFeeParamsMenu(token string, privateKey *btcec.PrivateKey) ([]*core.OpeningFeeParams, error) {
 	args := m.Called(token, privateKey)
-	return args.Get(0).([]*common.OpeningFeeParams), args.Error(1)
+	return args.Get(0).([]*core.OpeningFeeParams), args.Error(1)
 }
 
-func (m *MockOpeningService) ValidateOpeningFeeParams(params *common.OpeningFeeParams, publicKey *btcec.PublicKey) bool {
+func (m *MockOpeningService) ValidateOpeningFeeParams(params *core.OpeningFeeParams, publicKey *btcec.PublicKey) bool {
 	return m.Called(params, publicKey).Bool(0)
 }
 
-func (m *MockOpeningService) IsCurrentChainFeeCheaper(token string, params *common.OpeningFeeParams) bool {
+func (m *MockOpeningService) IsCurrentChainFeeCheaper(token string, params *core.OpeningFeeParams) bool {
 	return m.Called(token, params).Bool(0)
 }
 
-func (m *MockOpeningService) RegisterLsps2Buy(reg *common.Lsps2BuyRegistration) error {
+func (m *MockOpeningService) RegisterLsps2Buy(reg *core.Lsps2BuyRegistration) error {
 	return m.Called(reg).Error(0)
 }
 
-func (m *MockOpeningService) RegisterLsps1Order(order *common.Lsps1Order) error {
+func (m *MockOpeningService) RegisterLsps1Order(order *core.Lsps1Order) error {
 	return m.Called(order).Error(0)
 }
 
-func (m *MockOpeningService) GetLsps1Order(orderId string) (*common.Lsps1Order, error) {
+func (m *MockOpeningService) GetLsps1Order(orderId string) (*core.Lsps1Order, error) {
 	args := m.Called(orderId)
-	return args.Get(0).(*common.Lsps1Order), args.Error(1)
+	return args.Get(0).(*core.Lsps1Order), args.Error(1)
 }
 
-func (m *MockOpeningService) RegisterLsps5Webhook(webhook *common.Lsps5Webhook) error {
+func (m *MockOpeningService) RegisterLsps5Webhook(webhook *core.Lsps5Webhook) error {
 	return m.Called(webhook).Error(0)
 }
 
-func (m *MockOpeningService) GetLsps5Webhooks(clientNodeId string) ([]*common.Lsps5Webhook, error) {
+func (m *MockOpeningService) GetLsps5Webhooks(clientNodeId string) ([]*core.Lsps5Webhook, error) {
 	args := m.Called(clientNodeId)
-	return args.Get(0).([]*common.Lsps5Webhook), args.Error(1)
+	return args.Get(0).([]*core.Lsps5Webhook), args.Error(1)
 }
 
 func (m *MockOpeningService) RemoveLsps5Webhook(clientNodeId, appName string) error {
@@ -331,7 +331,7 @@ func TestDashboardService_RPC(t *testing.T) {
 	mockLnd := new(MockLightningClient)
 
 	// Setup a test node
-	testNode := &common.Node{
+	testNode := &core.Node{
 		NodeId: []byte("testnode"),
 		Client: mockLnd,
 		NodeConfig: config.NewNodeConfigRef(&config.NodeConfig{
@@ -340,7 +340,7 @@ func TestDashboardService_RPC(t *testing.T) {
 		}),
 	}
 
-	mockNodes.On("GetNodes").Return([]*common.Node{testNode})
+	mockNodes.On("GetNodes").Return([]*core.Node{testNode})
 	mockStore.On("GetReservedLiquidity").Return(uint64(10000), nil)
 
 	s := NewDashboardService(mockNodes, mockOpeningSvc, mockStore, mockHistory, "pubkey_test", "/tmp/nodes.test.yaml")
@@ -357,7 +357,7 @@ func TestDashboardService_RPC(t *testing.T) {
 		// since handleListPeers (next subtest) calls it too. Distinct from
 		// list_orders' own (defaultListLimit, 0) expectation below, since
 		// summaryListLimit != defaultListLimit.
-		mockStore.On("ListLsps1Orders", 1000, 0).Return([]*common.Lsps1Order{}, nil)
+		mockStore.On("ListLsps1Orders", 1000, 0).Return([]*core.Lsps1Order{}, nil)
 		mockLnd.On("GetBlockHeight").Return(uint32(100), nil).Once()
 		mockLnd.On("ListPeers").Return([]*lightning.Peer{}, nil).Once()
 
@@ -367,7 +367,7 @@ func TestDashboardService_RPC(t *testing.T) {
 		}
 		resp := s.handleGetSummary(req)
 		assert.Nil(t, resp.Error)
-		
+
 		result := resp.Result.(SummaryResponse)
 		assert.Equal(t, "Test Node", result.NodeName)
 		assert.Equal(t, uint64(10000), result.LiquidityBlocked)
@@ -384,13 +384,13 @@ func TestDashboardService_RPC(t *testing.T) {
 		}
 		resp := s.handleListPeers(req)
 		assert.Nil(t, resp.Error)
-		
+
 		peers := resp.Result.([]interface{})
 		assert.Equal(t, 1, len(peers))
 	})
 
 	t.Run("list_orders", func(t *testing.T) {
-		mockStore.On("ListLsps1Orders", 100, 0).Return([]*common.Lsps1Order{
+		mockStore.On("ListLsps1Orders", 100, 0).Return([]*core.Lsps1Order{
 			{OrderId: "order1", OrderState: "CREATED"},
 		}, nil)
 		// order1's PeerId ("") doesn't match any peer from ListPeers, so
@@ -403,18 +403,18 @@ func TestDashboardService_RPC(t *testing.T) {
 		}
 		resp := s.handleListOrders(req)
 		assert.Nil(t, resp.Error)
-		
-		orders := resp.Result.([]*common.Lsps1Order)
+
+		orders := resp.Result.([]*core.Lsps1Order)
 		assert.Equal(t, 1, len(orders))
 	})
-	
+
 	t.Run("get_config", func(t *testing.T) {
 		// Mock YAML file for config
 		configPath := "/tmp/nodes.test.yaml"
 		err := os.WriteFile(configPath, []byte("nodes:\n  - name: Test Node\n"), 0644)
 		assert.NoError(t, err)
 		defer os.Remove(configPath)
-		
+
 		req := &lsps.JsonRpcRequest{
 			Id:     json.RawMessage(`4`),
 			Method: "get_config",
@@ -430,7 +430,7 @@ func TestDashboardService_RPC(t *testing.T) {
 // (macaroon + TLS cert), to any authenticated dashboard client.
 func TestHandleGetConfig_StripsSecrets(t *testing.T) {
 	mockNodes := new(MockNodesService)
-	node := &common.Node{
+	node := &core.Node{
 		NodeConfig: config.NewNodeConfigRef(&config.NodeConfig{
 			Name:            "Secret Node",
 			NodePubkey:      "02abc...",
@@ -443,7 +443,7 @@ func TestHandleGetConfig_StripsSecrets(t *testing.T) {
 			},
 		}),
 	}
-	mockNodes.On("GetNodes").Return([]*common.Node{node})
+	mockNodes.On("GetNodes").Return([]*core.Node{node})
 
 	s := NewDashboardService(mockNodes, nil, nil, nil, "pubkey_test", "")
 
@@ -473,7 +473,7 @@ func TestHandleGetConfig_StripsSecrets(t *testing.T) {
 // multi-node deployment.
 func TestHandleUpdateConfig_PreservesOtherNodes(t *testing.T) {
 	mockNodes := new(MockNodesService)
-	nodeA := &common.Node{
+	nodeA := &core.Node{
 		NodeConfig: config.NewNodeConfigRef(&config.NodeConfig{
 			Name:                   "Node A",
 			NodePubkey:             "02aaa...",
@@ -481,7 +481,7 @@ func TestHandleUpdateConfig_PreservesOtherNodes(t *testing.T) {
 			ChannelMinimumFeeMloki: 1000,
 		}),
 	}
-	nodeB := &common.Node{
+	nodeB := &core.Node{
 		NodeConfig: config.NewNodeConfigRef(&config.NodeConfig{
 			Name:                   "Node B",
 			NodePubkey:             "02bbb...",
@@ -489,7 +489,7 @@ func TestHandleUpdateConfig_PreservesOtherNodes(t *testing.T) {
 			ChannelMinimumFeeMloki: 1000,
 		}),
 	}
-	mockNodes.On("GetNodes").Return([]*common.Node{nodeA, nodeB})
+	mockNodes.On("GetNodes").Return([]*core.Node{nodeA, nodeB})
 
 	configPath := "/tmp/nodes-c2-test.yaml"
 	defer os.Remove(configPath)

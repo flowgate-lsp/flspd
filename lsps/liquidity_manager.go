@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/flowgate-lsp/flspd/common"
 	"github.com/flowgate-lsp/flspd/lightning"
+	"github.com/flowgate-lsp/flspd/ports"
 	"github.com/rs/zerolog/log"
 )
 
@@ -23,10 +23,10 @@ type LiquidityManager interface {
 
 type liquidityManager struct {
 	lndClient lightning.Client
-	store     common.OpeningStore
+	store     ports.OpeningStore
 }
 
-func NewLiquidityManager(lndClient lightning.Client, store common.OpeningStore) LiquidityManager {
+func NewLiquidityManager(lndClient lightning.Client, store ports.OpeningStore) LiquidityManager {
 	return &liquidityManager{
 		lndClient: lndClient,
 		store:     store,

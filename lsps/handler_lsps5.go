@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/flowgate-lsp/flspd/common"
+	"github.com/flowgate-lsp/flspd/core"
 	lsps5 "github.com/flowgate-lsp/nostr-lsps5"
 	"github.com/rs/zerolog/log"
 )
@@ -164,7 +165,7 @@ func (s *Server) handleLsps5SetWebhook(req *JsonRpcRequest, peer []byte) *JsonRp
 		return NewJsonRpcErrorResponse(req.Id, Lsps5ErrorTooManyWebhooks, "too_many_webhooks", map[string]int{"max_webhooks": s.config.Lsps5MaxWebhooks})
 	}
 
-	webhook := &common.Lsps5Webhook{
+	webhook := &core.Lsps5Webhook{
 		ClientNodeId: peerId,
 		AppName:      params.AppName,
 		Url:          params.Webhook,

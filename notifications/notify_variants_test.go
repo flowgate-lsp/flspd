@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/flowgate-lsp/flspd/common"
+	"github.com/flowgate-lsp/flspd/core"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -22,7 +22,7 @@ func TestNotifyWebhookRegistered_SendsToTheGivenWebhookOnly(t *testing.T) {
 	svc := NewNotificationService(store, nil, newFakeNotifStore())
 	svc.AddTransport(transport)
 
-	webhook := &common.Lsps5Webhook{ClientNodeId: "peer1", AppName: "wallet-a", Url: "https://a.example", Transport: "push"}
+	webhook := &core.Lsps5Webhook{ClientNodeId: "peer1", AppName: "wallet-a", Url: "https://a.example", Transport: "push"}
 
 	notified := svc.NotifyWebhookRegistered("peer1", webhook)
 	assert.True(t, notified)
@@ -31,7 +31,7 @@ func TestNotifyWebhookRegistered_SendsToTheGivenWebhookOnly(t *testing.T) {
 
 func TestNotifyExpirySoon_DispatchesToAllRegisteredWebhooks(t *testing.T) {
 	store := newFakeOpeningStore()
-	store.webhooks["peer1"] = []*common.Lsps5Webhook{
+	store.webhooks["peer1"] = []*core.Lsps5Webhook{
 		{ClientNodeId: "peer1", AppName: "a", Url: "https://a.example", Transport: "push"},
 		{ClientNodeId: "peer1", AppName: "b", Url: "https://b.example", Transport: "push"},
 	}
@@ -66,7 +66,7 @@ func TestNotifyExpirySoon_StoreErrorPropagates(t *testing.T) {
 
 func TestNotifyLiquidityManagementRequest_DispatchesToAllRegisteredWebhooks(t *testing.T) {
 	store := newFakeOpeningStore()
-	store.webhooks["peer1"] = []*common.Lsps5Webhook{
+	store.webhooks["peer1"] = []*core.Lsps5Webhook{
 		{ClientNodeId: "peer1", AppName: "a", Url: "https://a.example", Transport: "push"},
 	}
 	transport := alwaysOkTransport()
@@ -81,7 +81,7 @@ func TestNotifyLiquidityManagementRequest_DispatchesToAllRegisteredWebhooks(t *t
 
 func TestNotifyOrderStateChanged_DispatchesWithCorrectParams(t *testing.T) {
 	store := newFakeOpeningStore()
-	store.webhooks["peer1"] = []*common.Lsps5Webhook{
+	store.webhooks["peer1"] = []*core.Lsps5Webhook{
 		{ClientNodeId: "peer1", AppName: "a", Url: "https://a.example", Transport: "push"},
 	}
 
@@ -119,7 +119,7 @@ func TestNotifyOrderStateChanged_StoreErrorPropagates(t *testing.T) {
 
 func TestNotifyOnionMessageIncoming_DispatchesToAllRegisteredWebhooks(t *testing.T) {
 	store := newFakeOpeningStore()
-	store.webhooks["peer1"] = []*common.Lsps5Webhook{
+	store.webhooks["peer1"] = []*core.Lsps5Webhook{
 		{ClientNodeId: "peer1", AppName: "a", Url: "https://a.example", Transport: "push"},
 		{ClientNodeId: "peer1", AppName: "b", Url: "https://b.example", Transport: "push"},
 	}

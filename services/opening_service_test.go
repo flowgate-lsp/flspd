@@ -1,9 +1,10 @@
-package common
+package services
 
 import (
 	"testing"
 
 	btcec "github.com/flokiorg/go-flokicoin/crypto"
+	"github.com/flowgate-lsp/flspd/core"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -14,8 +15,8 @@ func testKeypair(t *testing.T) (*btcec.PrivateKey, *btcec.PublicKey) {
 	return priv, pub
 }
 
-func sampleParams() *OpeningFeeParams {
-	return &OpeningFeeParams{
+func sampleParams() *core.OpeningFeeParams {
+	return &core.OpeningFeeParams{
 		MinFeeMloki:          1000,
 		Proportional:         4000,
 		ValidUntil:           "2099-01-01T00:00:00.000Z",

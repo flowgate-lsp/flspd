@@ -5,7 +5,7 @@ import (
 	"encoding/hex"
 	"time"
 
-	"github.com/flowgate-lsp/flspd/common"
+	"github.com/flowgate-lsp/flspd/core"
 	"github.com/flowgate-lsp/flspd/notifications"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -48,7 +48,7 @@ func (s *NotificationsStore) Register(
 func (s *NotificationsStore) GetRegistrations(
 	ctx context.Context,
 	pubkey string,
-) ([]common.NotificationRegistration, error) {
+) ([]core.NotificationRegistration, error) {
 	pk, err := hex.DecodeString(pubkey)
 	if err != nil {
 		return nil, err
@@ -66,9 +66,9 @@ func (s *NotificationsStore) GetRegistrations(
 	}
 	defer rows.Close()
 
-	var result []common.NotificationRegistration
+	var result []core.NotificationRegistration
 	for rows.Next() {
-		var reg common.NotificationRegistration
+		var reg core.NotificationRegistration
 		err = rows.Scan(&reg.Url, &reg.Transport)
 		if err != nil {
 			return nil, err

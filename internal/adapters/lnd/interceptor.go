@@ -10,15 +10,16 @@ import (
 
 	"github.com/flokiorg/flnd/lnrpc"
 	"github.com/flokiorg/flnd/lnrpc/routerrpc"
-	"github.com/flowgate-lsp/flspd/common"
 	"github.com/flowgate-lsp/flspd/config"
+	"github.com/flowgate-lsp/flspd/core"
 	"github.com/flowgate-lsp/flspd/lightning"
+	"github.com/flowgate-lsp/flspd/ports"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
 
 type LndHtlcInterceptor struct {
-	interceptor   common.InterceptHandler
+	interceptor   ports.InterceptHandler
 	config        *config.NodeConfigRef
 	client        *LndClient
 	stopRequested bool
@@ -31,7 +32,7 @@ type LndHtlcInterceptor struct {
 func NewLndHtlcInterceptor(
 	conf *config.NodeConfigRef,
 	client *LndClient,
-	interceptor common.InterceptHandler,
+	interceptor ports.InterceptHandler,
 ) (*LndHtlcInterceptor, error) {
 	i := &LndHtlcInterceptor{
 		config:      conf,
@@ -127,7 +128,7 @@ func (i *LndHtlcInterceptor) intercept() error {
 			i.doneWg.Add(1)
 			go func() {
 				scid := lightning.ShortChannelID(request.OutgoingRequestedChanId)
-				interceptResult := i.interceptor.Intercept(common.InterceptRequest{
+				interceptResult := i.interceptor.Intercept(core.InterceptRequest{
 					Identifier:          request.IncomingCircuitKey.String(),
 					Scid:                scid,
 					PaymentHash:         request.PaymentHash,
@@ -137,7 +138,7 @@ func (i *LndHtlcInterceptor) intercept() error {
 					OutgoingExpiry:      request.OutgoingExpiry,
 				})
 				switch interceptResult.Action {
-				case common.INTERCEPT_RESUME_WITH_ONION:
+				case core.INTERCEPT_RESUME_WITH_ONION:
 					phantomSCID := request.OutgoingRequestedChanId
 					realSCID := uint64(interceptResult.Scid)
 					if phantomSCID != 0 && phantomSCID != realSCID {
@@ -149,14 +150,14 @@ func (i *LndHtlcInterceptor) intercept() error {
 						}
 					}
 					interceptorClient.Send(i.createOnionResponse(interceptResult, request))
-				case common.INTERCEPT_FAIL_HTLC_WITH_CODE:
+				case core.INTERCEPT_FAIL_HTLC_WITH_CODE:
 					log.Error().Str("payment_hash", hex.EncodeToString(request.PaymentHash)).Msgf("LND: Failing HTLC with code %x", interceptResult.FailureCode)
 					interceptorClient.Send(&routerrpc.ForwardHtlcInterceptResponse{
 						IncomingCircuitKey: request.IncomingCircuitKey,
 						Action:             routerrpc.ResolveHoldForwardAction_FAIL,
 						FailureCode:        i.mapFailureCode(interceptResult.FailureCode),
 					})
-				case common.INTERCEPT_RESUME:
+				case core.INTERCEPT_RESUME:
 					fallthrough
 				default:
 					interceptorClient.Send(&routerrpc.ForwardHtlcInterceptResponse{
@@ -189,14 +190,14 @@ func (i *LndHtlcInterceptor) intercept() error {
 // value maps to TEMPORARY_CHANNEL_FAILURE, the one code this interceptor
 // path can actually deliver, regardless of which flspd-level rejection
 // reason triggered it.
-func (i *LndHtlcInterceptor) mapFailureCode(original common.InterceptFailureCode) lnrpc.Failure_FailureCode {
-	if original != common.FAILURE_TEMPORARY_CHANNEL_FAILURE {
+func (i *LndHtlcInterceptor) mapFailureCode(original core.InterceptFailureCode) lnrpc.Failure_FailureCode {
+	if original != core.FAILURE_TEMPORARY_CHANNEL_FAILURE {
 		log.Debug().Msgf("LND: failure code %v has no working flnd interceptor mapping, using temporary channel failure", original)
 	}
 	return lnrpc.Failure_TEMPORARY_CHANNEL_FAILURE
 }
 
-func (i *LndHtlcInterceptor) createOnionResponse(interceptResult common.InterceptResult, request *routerrpc.ForwardHtlcInterceptRequest) *routerrpc.ForwardHtlcInterceptResponse {
+func (i *LndHtlcInterceptor) createOnionResponse(interceptResult core.InterceptResult, request *routerrpc.ForwardHtlcInterceptRequest) *routerrpc.ForwardHtlcInterceptResponse {
 	return &routerrpc.ForwardHtlcInterceptResponse{
 		IncomingCircuitKey: request.IncomingCircuitKey,
 		Action:             routerrpc.ResolveHoldForwardAction_RESUME_MODIFIED,

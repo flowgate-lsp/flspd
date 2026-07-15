@@ -8,8 +8,8 @@ import (
 	"github.com/flokiorg/go-flokicoin/chaincfg/chainhash"
 	"github.com/flokiorg/go-flokicoin/wire"
 	"github.com/flowgate-lsp/flspd/chain"
-	"github.com/flowgate-lsp/flspd/common"
 	"github.com/flowgate-lsp/flspd/config"
+	"github.com/flowgate-lsp/flspd/core"
 	"github.com/flowgate-lsp/flspd/lightning"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -27,7 +27,7 @@ func TestMatrixProcessSettledInvoice(t *testing.T) {
 	tests := []struct {
 		name                 string
 		invoice              string
-		order                *common.Lsps1Order // nil if unknown invoice
+		order                *core.Lsps1Order // nil if unknown invoice
 		peerConnected        bool
 		connError            error
 		feeError             error
@@ -40,7 +40,7 @@ func TestMatrixProcessSettledInvoice(t *testing.T) {
 		{
 			name:                 "Happy Path - Standard Success",
 			invoice:              "lnbc1...valid",
-			order:                &common.Lsps1Order{OrderId: "o1", PeerId: "02677063d89856f4d04be859e9a4d3393165b6f3cd78641bc3c4ef9ca2fde37f", OrderState: string(Lsps1OrderStateCreated), ClientBalanceLoki: 1000},
+			order:                &core.Lsps1Order{OrderId: "o1", PeerId: "02677063d89856f4d04be859e9a4d3393165b6f3cd78641bc3c4ef9ca2fde37f", OrderState: string(Lsps1OrderStateCreated), ClientBalanceLoki: 1000},
 			peerConnected:        true,
 			expectStateUpdate:    true,
 			expectChannelAttempt: true,
@@ -57,14 +57,14 @@ func TestMatrixProcessSettledInvoice(t *testing.T) {
 		{
 			name:                 "Ignored - Already Paid Order",
 			invoice:              "lnbc1...paid",
-			order:                &common.Lsps1Order{OrderId: "o2", PeerId: "02677063d89856f4d04be859e9a4d3393165b6f3cd78641bc3c4ef9ca2fde37f", OrderState: string(Lsps1OrderStatePaid)},
+			order:                &core.Lsps1Order{OrderId: "o2", PeerId: "02677063d89856f4d04be859e9a4d3393165b6f3cd78641bc3c4ef9ca2fde37f", OrderState: string(Lsps1OrderStatePaid)},
 			expectStateUpdate:    false,
 			expectChannelAttempt: false,
 		},
 		{
 			name:                 "Deferred - Peer Disconnected",
 			invoice:              "lnbc1...disco",
-			order:                &common.Lsps1Order{OrderId: "o3", PeerId: "02677063d89856f4d04be859e9a4d3393165b6f3cd78641bc3c4ef9ca2fde37f", OrderState: string(Lsps1OrderStateCreated), ClientBalanceLoki: 1000},
+			order:                &core.Lsps1Order{OrderId: "o3", PeerId: "02677063d89856f4d04be859e9a4d3393165b6f3cd78641bc3c4ef9ca2fde37f", OrderState: string(Lsps1OrderStateCreated), ClientBalanceLoki: 1000},
 			peerConnected:        false,
 			expectStateUpdate:    true,
 			expectChannelAttempt: true, // It attempts, but returns early
@@ -73,7 +73,7 @@ func TestMatrixProcessSettledInvoice(t *testing.T) {
 		{
 			name:                 "Fallback - Fee Estimation Fails",
 			invoice:              "lnbc1...nofee",
-			order:                &common.Lsps1Order{OrderId: "o4", PeerId: "02677063d89856f4d04be859e9a4d3393165b6f3cd78641bc3c4ef9ca2fde37f", OrderState: string(Lsps1OrderStateCreated), ClientBalanceLoki: 1000},
+			order:                &core.Lsps1Order{OrderId: "o4", PeerId: "02677063d89856f4d04be859e9a4d3393165b6f3cd78641bc3c4ef9ca2fde37f", OrderState: string(Lsps1OrderStateCreated), ClientBalanceLoki: 1000},
 			peerConnected:        true,
 			feeError:             assert.AnError,
 			expectStateUpdate:    true,
@@ -84,7 +84,7 @@ func TestMatrixProcessSettledInvoice(t *testing.T) {
 		{
 			name:                 "Retry/Fail - Channel Open Fails",
 			invoice:              "lnbc1...openfail",
-			order:                &common.Lsps1Order{OrderId: "o5", PeerId: "02677063d89856f4d04be859e9a4d3393165b6f3cd78641bc3c4ef9ca2fde37f", OrderState: string(Lsps1OrderStateCreated), ClientBalanceLoki: 1000},
+			order:                &core.Lsps1Order{OrderId: "o5", PeerId: "02677063d89856f4d04be859e9a4d3393165b6f3cd78641bc3c4ef9ca2fde37f", OrderState: string(Lsps1OrderStateCreated), ClientBalanceLoki: 1000},
 			peerConnected:        true,
 			openChannelError:     assert.AnError,
 			expectStateUpdate:    true,

@@ -6,14 +6,16 @@ import (
 	"time"
 
 	"github.com/flowgate-lsp/flspd/common"
+	"github.com/flowgate-lsp/flspd/core"
 	"github.com/flowgate-lsp/flspd/lightning"
+	"github.com/flowgate-lsp/flspd/ports"
 	"github.com/rs/zerolog/log"
 )
 
 // Notifier is an interface for sending LSPS5 webhook notifications and other alerts.
 type Notifier interface {
 	Notify(pubkey string, paymenthash string, nodePrivKey interface{}) (bool, error)
-	NotifyWebhookRegistered(pubkey string, webhook *common.Lsps5Webhook) bool
+	NotifyWebhookRegistered(pubkey string, webhook *core.Lsps5Webhook) bool
 	NotifyOrderStateChanged(pubkey string, orderId string, state string, channelPoint string, errorMsg string) (bool, error)
 	NotifyExpirySoon(pubkey string, timeout int, nodePrivKey interface{}, paymentHash string) (bool, error)
 	NotifyLiquidityManagementRequest(pubkey string, nodePrivKey interface{}) (bool, error)
@@ -26,13 +28,13 @@ var cleanInterval time.Duration = time.Minute * 2
 type NotificationService struct {
 	mtx                 sync.Mutex
 	recentNotifications map[string]time.Time
-	openingStore        common.OpeningStore
-	nodesService        common.NodesService
+	openingStore        ports.OpeningStore
+	nodesService        ports.NodesService
 	store               Store
 	transports          map[TransportType]NotificationTransport
 }
 
-func NewNotificationService(openingStore common.OpeningStore, nodesService common.NodesService, store Store) *NotificationService {
+func NewNotificationService(openingStore ports.OpeningStore, nodesService ports.NodesService, store Store) *NotificationService {
 	s := &NotificationService{
 		openingStore:        openingStore,
 		recentNotifications: make(map[string]time.Time),
@@ -108,7 +110,7 @@ func (s *NotificationService) processPending(ctx context.Context) {
 
 	for _, item := range items {
 		// Prepare temp webhook
-		webhook := &common.Lsps5Webhook{
+		webhook := &core.Lsps5Webhook{
 			Url:       item.TargetURL,
 			Transport: item.Transport,
 		}
@@ -180,7 +182,7 @@ func (s *NotificationService) Notify(
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*7)
 
 	for _, w := range webhooks {
-		go func(w *common.Lsps5Webhook) {
+		go func(w *core.Lsps5Webhook) {
 			defer wg.Done()
 			log.Trace().
 				Str("component", string(common.LogComponentNotifications)).
@@ -221,7 +223,7 @@ func (s *NotificationService) Notify(
 // webhook, not to all webhooks.
 func (s *NotificationService) NotifyWebhookRegistered(
 	pubkey string,
-	webhook *common.Lsps5Webhook,
+	webhook *core.Lsps5Webhook,
 ) bool {
 	log.Info().
 		Str("component", string(common.LogComponentNotifications)).
@@ -264,7 +266,7 @@ func (s *NotificationService) NotifyExpirySoon(
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*7)
 
 	for _, w := range webhooks {
-		go func(w *common.Lsps5Webhook) {
+		go func(w *core.Lsps5Webhook) {
 			defer wg.Done()
 			currentNotified := s.enqueueAndDeliver(ctx, pubkey, w, lightning.Lsps5MethodExpirySoon, params)
 			if currentNotified {
@@ -297,7 +299,7 @@ func (s *NotificationService) NotifyLiquidityManagementRequest(
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*7)
 
 	for _, w := range webhooks {
-		go func(w *common.Lsps5Webhook) {
+		go func(w *core.Lsps5Webhook) {
 			defer wg.Done()
 			currentNotified := s.enqueueAndDeliver(ctx, pubkey, w, lightning.Lsps5MethodLiquidityManagementRequest, map[string]interface{}{})
 			if currentNotified {
@@ -364,7 +366,7 @@ func (s *NotificationService) NotifyOrderStateChanged(
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*7)
 
 	for _, w := range webhooks {
-		go func(w *common.Lsps5Webhook) {
+		go func(w *core.Lsps5Webhook) {
 			defer wg.Done()
 			log.Trace().
 				Str("component", string(common.LogComponentNotifications)).
@@ -403,7 +405,7 @@ func (s *NotificationService) NotifyOnionMessageIncoming(
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*7)
 
 	for _, w := range webhooks {
-		go func(w *common.Lsps5Webhook) {
+		go func(w *core.Lsps5Webhook) {
 			defer wg.Done()
 			currentNotified := s.enqueueAndDeliver(ctx, pubkey, w, lightning.Lsps5MethodOnionMessageIncoming, map[string]interface{}{})
 			if currentNotified {
@@ -424,7 +426,7 @@ func (s *NotificationService) deliverOne(
 	ctx context.Context,
 	method string,
 	params interface{},
-	webhook *common.Lsps5Webhook,
+	webhook *core.Lsps5Webhook,
 ) bool {
 	s.mtx.Lock()
 	transport, ok := s.transports[TransportType(webhook.Transport)]
@@ -473,7 +475,7 @@ func (s *NotificationService) deliverOne(
 func (s *NotificationService) enqueueAndDeliver(
 	ctx context.Context,
 	pubkey string,
-	webhook *common.Lsps5Webhook,
+	webhook *core.Lsps5Webhook,
 	method string,
 	params interface{},
 ) bool {

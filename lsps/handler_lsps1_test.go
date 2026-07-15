@@ -6,8 +6,8 @@ import (
 	"testing"
 
 	"github.com/flokiorg/flnd/lnrpc"
-	"github.com/flowgate-lsp/flspd/common"
 	"github.com/flowgate-lsp/flspd/config"
+	"github.com/flowgate-lsp/flspd/core"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )
@@ -42,11 +42,11 @@ func TestTableHandleLsps1CreateOrder(t *testing.T) {
 				lnd.On("AddInvoice", mock.Anything, mock.MatchedBy(func(inv *lnrpc.Invoice) bool {
 					return inv.Value >= 100 // Client balance + fee
 				})).Return(&lnrpc.AddInvoiceResponse{PaymentRequest: "lnbc1..."}, nil)
-				store.On("RegisterLsps1Order", mock.MatchedBy(func(order *common.Lsps1Order) bool {
+				store.On("RegisterLsps1Order", mock.MatchedBy(func(order *core.Lsps1Order) bool {
 					return order.ClientBalanceLoki == 100 && order.LspBalanceLoki == 0 &&
 						order.OrderState == string(Lsps1OrderStateCreated)
 				})).Return(nil)
-				store.On("GetFeeParamsMenu", mock.Anything, mock.Anything).Return([]*common.OpeningFeeParams{}, nil)
+				store.On("GetFeeParamsMenu", mock.Anything, mock.Anything).Return([]*core.OpeningFeeParams{}, nil)
 
 				minClient := uint64(0)
 				maxClient := uint64(100_000_000)
@@ -60,7 +60,7 @@ func TestTableHandleLsps1CreateOrder(t *testing.T) {
 				maxExpiry := uint32(201600)
 				orderExpiry := uint32(86400)
 
-				nodes.On("GetNodes").Return([]*common.Node{{NodeConfig: config.NewNodeConfigRef(&config.NodeConfig{
+				nodes.On("GetNodes").Return([]*core.Node{{NodeConfig: config.NewNodeConfigRef(&config.NodeConfig{
 					Lsps1MinRequiredChannelConfirmations: &minReqConf,
 					Lsps1MinFundingConfirmsWithinBlocks:  &minFundingConf,
 					Lsps1SupportsZeroChannelReserve:      &supportsZeroReserve,
@@ -99,12 +99,12 @@ func TestTableHandleLsps1CreateOrder(t *testing.T) {
 				lnd.On("AddInvoice", mock.Anything, mock.MatchedBy(func(inv *lnrpc.Invoice) bool {
 					return inv.Value >= 1000000 // At least client balance + fee
 				})).Return(&lnrpc.AddInvoiceResponse{PaymentRequest: "lnbc1..."}, nil)
-				store.On("RegisterLsps1Order", mock.MatchedBy(func(order *common.Lsps1Order) bool {
+				store.On("RegisterLsps1Order", mock.MatchedBy(func(order *core.Lsps1Order) bool {
 					return order.ClientBalanceLoki == 1000000 && order.LspBalanceLoki == 5000000 &&
 						order.OrderState == string(Lsps1OrderStateCreated) &&
 						order.PaymentState == string(Lsps1PaymentStateExpectPayment)
 				})).Return(nil)
-				store.On("GetFeeParamsMenu", mock.Anything, mock.Anything).Return([]*common.OpeningFeeParams{}, nil)
+				store.On("GetFeeParamsMenu", mock.Anything, mock.Anything).Return([]*core.OpeningFeeParams{}, nil)
 
 				minClient := uint64(0)
 				maxClient := uint64(100_000_000)
@@ -118,7 +118,7 @@ func TestTableHandleLsps1CreateOrder(t *testing.T) {
 				maxExpiry := uint32(201600)
 				orderExpiry := uint32(86400)
 
-				nodes.On("GetNodes").Return([]*common.Node{{NodeConfig: config.NewNodeConfigRef(&config.NodeConfig{
+				nodes.On("GetNodes").Return([]*core.Node{{NodeConfig: config.NewNodeConfigRef(&config.NodeConfig{
 					FeeRate:                              0.000001,
 					Lsps1MinRequiredChannelConfirmations: &minReqConf,
 					Lsps1MinFundingConfirmsWithinBlocks:  &minFundingConf,
@@ -160,7 +160,7 @@ func TestTableHandleLsps1CreateOrder(t *testing.T) {
 				orderExpiry := uint32(86400)
 				minChan := uint64(20000)
 				maxChan := uint64(100_000_000)
-				nodes.On("GetNodes").Return([]*common.Node{{NodeConfig: config.NewNodeConfigRef(&config.NodeConfig{
+				nodes.On("GetNodes").Return([]*core.Node{{NodeConfig: config.NewNodeConfigRef(&config.NodeConfig{
 					Lsps1MinRequiredChannelConfirmations: &minReqConf,
 					Lsps1MinFundingConfirmsWithinBlocks:  &minFundingConf,
 					Lsps1SupportsZeroChannelReserve:      &supportsZeroReserve,
@@ -198,7 +198,7 @@ func TestTableHandleLsps1CreateOrder(t *testing.T) {
 				orderExpiry := uint32(86400)
 				minChan := uint64(20000)
 				maxChan := uint64(100_000_000)
-				nodes.On("GetNodes").Return([]*common.Node{{NodeConfig: config.NewNodeConfigRef(&config.NodeConfig{
+				nodes.On("GetNodes").Return([]*core.Node{{NodeConfig: config.NewNodeConfigRef(&config.NodeConfig{
 					Lsps1MinRequiredChannelConfirmations: &minReqConf,
 					Lsps1MinFundingConfirmsWithinBlocks:  &minFundingConf,
 					Lsps1SupportsZeroChannelReserve:      &supportsZeroReserve,
@@ -223,9 +223,9 @@ func TestTableHandleLsps1CreateOrder(t *testing.T) {
 			},
 			peerId: "02677063d89856f4d04be859e9a4d3393165b6f3cd78641bc3c4ef9ca2fde37f",
 			mockSetup: func(store *MockOpeningStore, lnd *MockLightningClient, nodes *MockNodesService, liquidity *MockLiquidityManager, notif *MockNotificationService) {
-				store.On("GetFeeParamsMenu", mock.Anything, mock.Anything).Return([]*common.OpeningFeeParams{}, nil)
+				store.On("GetFeeParamsMenu", mock.Anything, mock.Anything).Return([]*core.OpeningFeeParams{}, nil)
 				store.On("CountLsps1Orders", mock.Anything, string(Lsps1OrderStateCreated), mock.Anything).Return(5, nil) // Already 5
-				store.On("GetFeeParamsMenu", mock.Anything, mock.Anything).Return([]*common.OpeningFeeParams{}, nil)
+				store.On("GetFeeParamsMenu", mock.Anything, mock.Anything).Return([]*core.OpeningFeeParams{}, nil)
 				store.On("CountLsps1Orders", mock.Anything, string(Lsps1OrderStateCreated), mock.Anything).Return(5, nil) // Already 5
 				minClient := uint64(0)
 				maxClient := uint64(100_000_000)
@@ -239,7 +239,7 @@ func TestTableHandleLsps1CreateOrder(t *testing.T) {
 				minChan := uint64(20000)
 				maxChan := uint64(100_000_000)
 
-				nodes.On("GetNodes").Return([]*common.Node{{NodeConfig: config.NewNodeConfigRef(&config.NodeConfig{
+				nodes.On("GetNodes").Return([]*core.Node{{NodeConfig: config.NewNodeConfigRef(&config.NodeConfig{
 					FeeRate:                              0.000001,
 					Lsps1MinRequiredChannelConfirmations: &minReqConf,
 					Lsps1MinFundingConfirmsWithinBlocks:  &minFundingConf,

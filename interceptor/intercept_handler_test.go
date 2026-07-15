@@ -5,8 +5,8 @@ import (
 	"time"
 
 	"github.com/flokiorg/go-flokicoin/wire"
-	"github.com/flowgate-lsp/flspd/common"
 	"github.com/flowgate-lsp/flspd/config"
+	"github.com/flowgate-lsp/flspd/core"
 	"github.com/flowgate-lsp/flspd/lightning"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -17,21 +17,21 @@ type MockStore struct {
 	mock.Mock
 }
 
-func (m *MockStore) PaymentInfo(paymentHash []byte) (string, string, *common.OpeningFeeParams, []byte, []byte, []byte, int64, int64, *wire.OutPoint, *string, error) {
+func (m *MockStore) PaymentInfo(paymentHash []byte) (string, string, *core.OpeningFeeParams, []byte, []byte, []byte, int64, int64, *wire.OutPoint, *string, error) {
 	args := m.Called(paymentHash)
 	// Return default nil/empty for not found
 	return args.String(0), args.String(1), nil, nil, nil, nil, 0, 0, nil, nil, args.Error(10)
 }
 
-func (m *MockStore) GetLsps2Order(scid uint64) (*common.Lsps2BuyRegistration, error) {
+func (m *MockStore) GetLsps2Order(scid uint64) (*core.Lsps2BuyRegistration, error) {
 	args := m.Called(scid)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
-	return args.Get(0).(*common.Lsps2BuyRegistration), args.Error(1)
+	return args.Get(0).(*core.Lsps2BuyRegistration), args.Error(1)
 }
 
-func (m *MockStore) RegisterPayment(token, orderId string, params *common.OpeningFeeParams, destination, paymentHash, paymentSecret []byte, incomingAmountMloki, outgoingAmountMloki int64, tag string) error {
+func (m *MockStore) RegisterPayment(token, orderId string, params *core.OpeningFeeParams, destination, paymentHash, paymentSecret []byte, incomingAmountMloki, outgoingAmountMloki int64, tag string) error {
 	args := m.Called(token, orderId, params, destination, paymentHash, paymentSecret, incomingAmountMloki, outgoingAmountMloki, tag)
 	return args.Error(0)
 }
@@ -40,7 +40,7 @@ func (m *MockStore) SetFundingTx(paymentHash []byte, channelPoint *wire.OutPoint
 	return nil
 }
 
-func (m *MockStore) GetPaidLsps1Order(clientNodeId string) (*common.Lsps1Order, error) {
+func (m *MockStore) GetPaidLsps1Order(clientNodeId string) (*core.Lsps1Order, error) {
 	return nil, nil // Not testing LSPS1 here
 }
 
@@ -61,7 +61,7 @@ func TestResolvePayment_JIT_Success(t *testing.T) {
 	validUntil := time.Now().Add(1 * time.Hour).Format(time.RFC3339)
 
 	// Mock Order Lookup
-	order := &common.Lsps2BuyRegistration{
+	order := &core.Lsps2BuyRegistration{
 		Id:                 "order_1",
 		Scid:               scid,
 		PaymentSizeMloki:   &paymentSize,
@@ -92,7 +92,7 @@ func TestResolvePayment_JIT_Success(t *testing.T) {
 	).Return(nil)
 
 	// Call
-	req := common.InterceptRequest{
+	req := core.InterceptRequest{
 		Scid:                lightning.ShortChannelID(scid),
 		IncomingAmountMloki: 20000000,
 		PaymentHash:         []byte("hash"),
@@ -114,7 +114,7 @@ func TestResolvePayment_JIT_Underpayment(t *testing.T) {
 	scid := uint64(123456)
 	paymentSize := uint64(20000000) // 20k
 
-	order := &common.Lsps2BuyRegistration{
+	order := &core.Lsps2BuyRegistration{
 		Id:                 "order_1",
 		Scid:               scid,
 		PaymentSizeMloki:   &paymentSize,
@@ -126,7 +126,7 @@ func TestResolvePayment_JIT_Underpayment(t *testing.T) {
 	mockStore.On("GetLsps2Order", scid).Return(order, nil)
 
 	// Sender pays only 19920000 (Net)
-	req := common.InterceptRequest{
+	req := core.InterceptRequest{
 		Scid:                lightning.ShortChannelID(scid),
 		IncomingAmountMloki: 19920000,
 		PaymentHash:         []byte("hash"),

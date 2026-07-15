@@ -6,7 +6,7 @@ import (
 
 	"github.com/flokiorg/go-flokicoin/wire"
 	"github.com/flowgate-lsp/flspd/chain"
-	"github.com/flowgate-lsp/flspd/common"
+	"github.com/flowgate-lsp/flspd/core"
 	"github.com/flowgate-lsp/flspd/lightning"
 	"github.com/stretchr/testify/mock"
 )
@@ -21,7 +21,7 @@ func (m *MockNotifier) Notify(pubkey string, paymenthash string, nodePrivKey int
 	return args.Bool(0), args.Error(1)
 }
 
-func (m *MockNotifier) NotifyWebhookRegistered(pubkey string, webhook *common.Lsps5Webhook) bool {
+func (m *MockNotifier) NotifyWebhookRegistered(pubkey string, webhook *core.Lsps5Webhook) bool {
 	args := m.Called(pubkey, webhook)
 	return args.Bool(0)
 }

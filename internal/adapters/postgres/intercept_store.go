@@ -6,7 +6,7 @@ import (
 	"fmt"
 
 	"github.com/flokiorg/go-flokicoin/wire"
-	"github.com/flowgate-lsp/flspd/common"
+	"github.com/flowgate-lsp/flspd/core"
 	"github.com/flowgate-lsp/flspd/lightning"
 	"github.com/jackc/pgtype"
 	"github.com/jackc/pgx/v5"
@@ -22,7 +22,7 @@ func NewPostgresInterceptStore(pool *pgxpool.Pool) *PostgresInterceptStore {
 	return &PostgresInterceptStore{pool: pool}
 }
 
-func (s *PostgresInterceptStore) PaymentInfo(htlcPaymentHash []byte) (string, string, *common.OpeningFeeParams, []byte, []byte, []byte, int64, int64, *wire.OutPoint, *string, error) {
+func (s *PostgresInterceptStore) PaymentInfo(htlcPaymentHash []byte) (string, string, *core.OpeningFeeParams, []byte, []byte, []byte, int64, int64, *wire.OutPoint, *string, error) {
 	var (
 		p, tag                                   *string
 		paymentHash, paymentSecret, destination  []byte
@@ -78,7 +78,7 @@ func (s *PostgresInterceptStore) SetFundingTx(paymentHash []byte, channelPoint *
 	return err
 }
 
-func (s *PostgresInterceptStore) RegisterPayment(token string, orderId string, params *common.OpeningFeeParams, destination, paymentHash, paymentSecret []byte, incomingAmountMloki, outgoingAmountMloki int64, tag string) error {
+func (s *PostgresInterceptStore) RegisterPayment(token string, orderId string, params *core.OpeningFeeParams, destination, paymentHash, paymentSecret []byte, incomingAmountMloki, outgoingAmountMloki int64, tag string) error {
 	var t *string
 	if tag != "" {
 		t = &tag
@@ -109,7 +109,7 @@ func (s *PostgresInterceptStore) RegisterPayment(token string, orderId string, p
 	return nil
 }
 
-func (s *PostgresInterceptStore) GetLsps2Order(scid uint64) (*common.Lsps2BuyRegistration, error) {
+func (s *PostgresInterceptStore) GetLsps2Order(scid uint64) (*core.Lsps2BuyRegistration, error) {
 	// DEBUG LOGGING
 	log.Trace().Msgf("GetLsps2Order querying int64 SCID: %d (uint64: %d)", int64(scid), scid)
 	row := s.pool.QueryRow(context.Background(),
@@ -118,7 +118,7 @@ func (s *PostgresInterceptStore) GetLsps2Order(scid uint64) (*common.Lsps2BuyReg
 			params_min_lifetime, params_max_client_to_self_delay, params_promise, token
 		FROM lsps2.buy_registrations WHERE scid=$1`, int64(scid))
 
-	var reg common.Lsps2BuyRegistration
+	var reg core.Lsps2BuyRegistration
 	var scidInt int64
 	err := row.Scan(
 		&reg.Id, &reg.LspId, &reg.PeerId, &scidInt, &reg.Mode, &reg.PaymentSizeMloki,
@@ -136,7 +136,7 @@ func (s *PostgresInterceptStore) GetLsps2Order(scid uint64) (*common.Lsps2BuyReg
 }
 
 // GetPaidLsps1Order finds the oldest PAID order for a client that hasn't been fulfilled yet
-func (s *PostgresInterceptStore) GetPaidLsps1Order(clientNodeId string) (*common.Lsps1Order, error) {
+func (s *PostgresInterceptStore) GetPaidLsps1Order(clientNodeId string) (*core.Lsps1Order, error) {
 	// We want orders that are PAID but don't have a channel (FundingTxid is null/empty)
 	// Ordered by created_at ASC to process oldest first (FIFO)
 	row := s.pool.QueryRow(context.Background(),
@@ -149,7 +149,7 @@ func (s *PostgresInterceptStore) GetPaidLsps1Order(clientNodeId string) (*common
 		 WHERE peer_id=$1 AND order_state='PAID' AND (funding_txid IS NULL OR funding_txid = '')
 		 ORDER BY created_at ASC LIMIT 1`, clientNodeId)
 
-	var order common.Lsps1Order
+	var order core.Lsps1Order
 	err := row.Scan(
 		&order.OrderId, &order.PeerId, &order.LspBalanceLoki, &order.ClientBalanceLoki,
 		&order.FundingConfirmsWithinBlocks, &order.RequiredChannelConfirmations,

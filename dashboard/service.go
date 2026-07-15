@@ -8,16 +8,16 @@ import (
 	"os"
 	"time"
 
-	"gopkg.in/yaml.v3"
-	"github.com/gorilla/websocket"
 	"github.com/flowgate-lsp/flspd/auth"
 	"github.com/flowgate-lsp/flspd/build"
-	"github.com/flowgate-lsp/flspd/common"
 	"github.com/flowgate-lsp/flspd/config"
 	"github.com/flowgate-lsp/flspd/history"
 	"github.com/flowgate-lsp/flspd/lightning"
 	"github.com/flowgate-lsp/flspd/lsps"
+	"github.com/flowgate-lsp/flspd/ports"
+	"github.com/gorilla/websocket"
 	"github.com/rs/zerolog/log"
+	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -30,9 +30,9 @@ const (
 )
 
 type DashboardService struct {
-	nodesService   common.NodesService
-	openingService common.OpeningService
-	openingStore   common.OpeningStore
+	nodesService   ports.NodesService
+	openingService ports.OpeningService
+	openingStore   ports.OpeningStore
 	historyStore   history.Store
 	adminPubKey    string // Authorized Nostr pubkey for dashboard access
 	configPath     string // Path to nodes.yaml for persistence
@@ -48,25 +48,25 @@ var upgrader = websocket.Upgrader{
 }
 
 type SummaryResponse struct {
-	NodeName         string            `json:"node_name"`
-	NodePubkey       string            `json:"node_pubkey"`
-	Version          string            `json:"version"`
-	Revenue24h       uint64            `json:"revenue_24h"`
-	LiquidityTotal   uint64            `json:"liquidity_total"`
-	LiquidityFree    uint64            `json:"liquidity_free"`
-	LiquidityBlocked uint64            `json:"liquidity_blocked"`
-	ActiveOrders     map[string]int    `json:"active_orders"`
-	NodeStatus       string            `json:"node_status"`
-	SyncHeight       uint32            `json:"sync_height"`
-	UptimeScore      float64           `json:"uptime_score"`
-	RevenueTrend     string            `json:"revenue_trend"`
-	VolumeTrend      string            `json:"volume_trend"`
+	NodeName         string         `json:"node_name"`
+	NodePubkey       string         `json:"node_pubkey"`
+	Version          string         `json:"version"`
+	Revenue24h       uint64         `json:"revenue_24h"`
+	LiquidityTotal   uint64         `json:"liquidity_total"`
+	LiquidityFree    uint64         `json:"liquidity_free"`
+	LiquidityBlocked uint64         `json:"liquidity_blocked"`
+	ActiveOrders     map[string]int `json:"active_orders"`
+	NodeStatus       string         `json:"node_status"`
+	SyncHeight       uint32         `json:"sync_height"`
+	UptimeScore      float64        `json:"uptime_score"`
+	RevenueTrend     string         `json:"revenue_trend"`
+	VolumeTrend      string         `json:"volume_trend"`
 }
 
 func NewDashboardService(
-	nodesService common.NodesService,
-	openingService common.OpeningService,
-	openingStore common.OpeningStore,
+	nodesService ports.NodesService,
+	openingService ports.OpeningService,
+	openingStore ports.OpeningStore,
 	historyStore history.Store,
 	adminPubKey string,
 	configPath string,
@@ -232,7 +232,7 @@ func (s *DashboardService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (s *DashboardService) handleGetRadarData(req *lsps.JsonRpcRequest) *lsps.JsonRpcResponse {
 	// Calculate real metrics
 	totalCapacity, _, reserved := s.getLiquidityMetrics(context.Background())
-	
+
 	// 1. Liquidity Score (0-radarFullMark)
 	liquidityScore := radarFullMark
 	if totalCapacity > 0 {
@@ -298,15 +298,15 @@ func (s *DashboardService) handleGetAnalytics(req *lsps.JsonRpcRequest) *lsps.Js
 		string(lsps.Lsps1OrderStateFailed):    0,
 		string(lsps.Lsps1OrderStateExpired):   0,
 	}
-	
+
 	var totalRevenue int64 = 0
 	var completedCount int64 = 0
-	
+
 	// 2. History maps
 	revenueMap := make(map[string]int64)
 	volumeMap := make(map[string]int64)
 	countMap := make(map[string]int)
-	
+
 	now := time.Now()
 	for i := 0; i < analyticsHistoryDays; i++ {
 		day := now.AddDate(0, 0, -i).Format("2006-01-02")
@@ -317,9 +317,9 @@ func (s *DashboardService) handleGetAnalytics(req *lsps.JsonRpcRequest) *lsps.Js
 
 	for _, o := range orders {
 		volume[o.OrderState]++
-		
+
 		day := o.CreatedAt.Format("2006-01-02")
-		
+
 		// Map revenue and volume history (Completed or Paid)
 		if o.OrderState == string(lsps.Lsps1OrderStateCompleted) || o.OrderState == string(lsps.Lsps1OrderStatePaid) {
 			if _, ok := revenueMap[day]; ok {
@@ -381,11 +381,11 @@ func (s *DashboardService) handleGetAnalytics(req *lsps.JsonRpcRequest) *lsps.Js
 	}
 
 	return lsps.NewJsonRpcResponse(req.Id, map[string]interface{}{
-		"total_revenue":     totalRevenue,
-		"success_rate":      successRate,
-		"avg_order_size":    avgOrderSize,
-		"active_peers":      activePeers,
-		"revenue_history":   history,
+		"total_revenue":   totalRevenue,
+		"success_rate":    successRate,
+		"avg_order_size":  avgOrderSize,
+		"active_peers":    activePeers,
+		"revenue_history": history,
 		"order_distribution": []map[string]interface{}{
 			{"name": "CREATED", "value": volume[string(lsps.Lsps1OrderStateCreated)], "color": "#94a3b8"},
 			{"name": "PAID", "value": volume[string(lsps.Lsps1OrderStatePaid)], "color": "#00baff"},
@@ -406,7 +406,7 @@ func (s *DashboardService) handleGetSummary(req *lsps.JsonRpcRequest) *lsps.Json
 
 	// Aggregate metrics
 	totalCapacity, free, reserved := s.getLiquidityMetrics(context.Background())
-	
+
 	// Real Metrics for Summary
 	var revenue24h int64 = 0
 	var revenuePrev24h int64 = 0
@@ -425,7 +425,7 @@ func (s *DashboardService) handleGetSummary(req *lsps.JsonRpcRequest) *lsps.Json
 	now := time.Now()
 	last24h := now.Add(-24 * time.Hour)
 	prev24h := now.Add(-48 * time.Hour)
-	
+
 	for _, o := range orders {
 		if o.CreatedAt.After(last24h) {
 			if o.OrderState == string(lsps.Lsps1OrderStateCompleted) || o.OrderState == string(lsps.Lsps1OrderStatePaid) {
@@ -438,7 +438,7 @@ func (s *DashboardService) handleGetSummary(req *lsps.JsonRpcRequest) *lsps.Json
 				volumePrev24h += o.LspBalanceLoki
 			}
 		}
-		
+
 		// Count current "active" states (from recent 1000 orders)
 		if _, ok := orderStates[o.OrderState]; ok {
 			orderStates[o.OrderState]++
@@ -480,19 +480,19 @@ func (s *DashboardService) handleGetSummary(req *lsps.JsonRpcRequest) *lsps.Json
 
 	// Create simplified summary
 	summary := SummaryResponse{
-		NodeName:       mainNode.NodeConfig.Load().Name,
-		NodePubkey:     mainNode.NodeConfig.Load().NodePubkey,
-		Version:        build.GetTag(),
-		Revenue24h:     uint64(revenue24h),
-		LiquidityTotal: totalCapacity,
-		LiquidityFree:  free,
+		NodeName:         mainNode.NodeConfig.Load().Name,
+		NodePubkey:       mainNode.NodeConfig.Load().NodePubkey,
+		Version:          build.GetTag(),
+		Revenue24h:       uint64(revenue24h),
+		LiquidityTotal:   totalCapacity,
+		LiquidityFree:    free,
 		LiquidityBlocked: reserved,
-		ActiveOrders:   orderStates,
-		NodeStatus:     "online",
-		SyncHeight:     syncHeight,
-		UptimeScore:    uptimeScore,
-		RevenueTrend:   revenueTrend,
-		VolumeTrend:    volumeTrend,
+		ActiveOrders:     orderStates,
+		NodeStatus:       "online",
+		SyncHeight:       syncHeight,
+		UptimeScore:      uptimeScore,
+		RevenueTrend:     revenueTrend,
+		VolumeTrend:      volumeTrend,
 	}
 
 	return lsps.NewJsonRpcResponse(req.Id, summary)
@@ -528,7 +528,7 @@ func (s *DashboardService) handleListOrders(req *lsps.JsonRpcRequest) *lsps.Json
 			if err == nil && info != nil {
 				orders[i].PeerAlias = info.Alias
 				orders[i].PeerColor = info.Color
-				
+
 				// Cache to prevent duplicate graph lookups for the same offline peer
 				peerMap[orders[i].PeerId] = &lightning.Peer{
 					Pubkey: info.Pubkey,
@@ -562,18 +562,18 @@ func (s *DashboardService) handleListPeers(req *lsps.JsonRpcRequest) *lsps.JsonR
 		for _, p := range peers {
 			// Enrich with order count
 			count := orderCounts[p.Pubkey]
-			
+
 			// Map to consistent JSON structure
 			enriched := map[string]interface{}{
-				"pub_key":        p.Pubkey,
-				"alias":          p.Alias,
-				"color":          p.Color,
-				"address":        p.Address,
-				"inbound":        p.Inbound,
-				"active":         p.Active,
-				"in_loki":        p.LokiReceived, // Money received FROM peer (inbound for us)
-				"out_loki":       p.LokiSent,     // Money sent TO peer (outbound for us)
-				"order_count":    count,
+				"pub_key":     p.Pubkey,
+				"alias":       p.Alias,
+				"color":       p.Color,
+				"address":     p.Address,
+				"inbound":     p.Inbound,
+				"active":      p.Active,
+				"in_loki":     p.LokiReceived, // Money received FROM peer (inbound for us)
+				"out_loki":    p.LokiSent,     // Money sent TO peer (outbound for us)
+				"order_count": count,
 			}
 			allPeers = append(allPeers, enriched)
 		}
@@ -621,7 +621,7 @@ func (s *DashboardService) handleListJitChannels(req *lsps.JsonRpcRequest) *lsps
 		}
 
 		activeCh, ok := activeChannels[outpointStr]
-		
+
 		status := "OFFLINE"
 		scid := ""
 		if ok {
@@ -844,7 +844,7 @@ func (s *DashboardService) handleWS(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Forbidden", http.StatusForbidden)
 		return
 	}
-	
+
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to upgrade to websocket")
@@ -859,7 +859,7 @@ func (s *DashboardService) handleWS(w http.ResponseWriter, r *http.Request) {
 
 func (s *DashboardService) getLiquidityMetrics(ctx context.Context) (total, free, reserved uint64) {
 	reserved, _ = s.openingStore.GetReservedLiquidity()
-	
+
 	nodes := s.nodesService.GetNodes()
 	if len(nodes) > 0 {
 		balance, err := nodes[0].Client.WalletBalance(ctx)
@@ -869,7 +869,7 @@ func (s *DashboardService) getLiquidityMetrics(ctx context.Context) (total, free
 			return
 		}
 	}
-	
+
 	// Fallback to placeholder if node not available or error
 	total = 500000000
 	free = 500000000 - reserved

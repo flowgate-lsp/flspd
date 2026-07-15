@@ -10,8 +10,8 @@ import (
 	"github.com/caddyserver/certmagic"
 	"github.com/rs/zerolog/log"
 
-	"github.com/flowgate-lsp/flspd/common"
 	"github.com/flowgate-lsp/flspd/notifications"
+	"github.com/flowgate-lsp/flspd/ports"
 	rpc "github.com/flowgate-lsp/flspd/rpc"
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	"google.golang.org/grpc"
@@ -21,7 +21,7 @@ import (
 )
 
 type grpcServer struct {
-	nodesService    common.NodesService
+	nodesService    ports.NodesService
 	address         string
 	certmagicDomain string
 	lis             net.Listener
@@ -31,7 +31,7 @@ type grpcServer struct {
 }
 
 func NewGrpcServer(
-	nodesService common.NodesService,
+	nodesService ports.NodesService,
 	address string,
 	certmagicDomain string,
 	c rpc.ChannelOpenerServer,

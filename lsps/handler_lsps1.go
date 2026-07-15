@@ -9,6 +9,7 @@ import (
 
 	"github.com/flokiorg/flnd/lnrpc"
 	"github.com/flowgate-lsp/flspd/common"
+	"github.com/flowgate-lsp/flspd/core"
 	"github.com/rs/zerolog/log"
 )
 
@@ -280,7 +281,7 @@ func (s *Server) handleLsps1CreateOrder(req *JsonRpcRequest, peer []byte) *JsonR
 	// NOTE: We need a policy. Let's try to get one from openingService using params.Token.
 	var feeLoki uint64
 	nodes := s.nodesService.GetNodes()
-	var usedNode *common.Node
+	var usedNode *core.Node
 	for _, node := range nodes {
 		// Just take the first valid one if no token, or match token
 		if params.Token != "" {
@@ -361,7 +362,7 @@ func (s *Server) handleLsps1CreateOrder(req *JsonRpcRequest, peer []byte) *JsonR
 	expiry := now.Add(orderExpiry)
 
 	// Persist Order
-	order := &common.Lsps1Order{
+	order := &core.Lsps1Order{
 		OrderId:                      orderID,
 		PeerId:                       hex.EncodeToString(peer),
 		LspBalanceLoki:               int64(lspBalance),

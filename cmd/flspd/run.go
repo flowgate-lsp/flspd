@@ -24,6 +24,7 @@ import (
 	"github.com/flowgate-lsp/flspd/chain"
 	"github.com/flowgate-lsp/flspd/common"
 	"github.com/flowgate-lsp/flspd/config"
+	"github.com/flowgate-lsp/flspd/core"
 	"github.com/flowgate-lsp/flspd/dashboard"
 	"github.com/flowgate-lsp/flspd/history"
 	"github.com/flowgate-lsp/flspd/interceptor"
@@ -33,6 +34,7 @@ import (
 	"github.com/flowgate-lsp/flspd/lightning"
 	"github.com/flowgate-lsp/flspd/lsps"
 	"github.com/flowgate-lsp/flspd/notifications"
+	"github.com/flowgate-lsp/flspd/services"
 	"github.com/urfave/cli"
 )
 
@@ -79,7 +81,7 @@ func runLspd(cliCtx *cli.Context) error {
 		log.Fatal().Msgf("failed to initialize nodes: %v", err)
 	}
 
-	nodesService, err := common.NewNodesService(nodes)
+	nodesService, err := services.NewNodesService(nodes)
 	if err != nil {
 		log.Fatal().Msgf("failed to create nodes service: %v", err)
 	}
@@ -145,7 +147,7 @@ func runLspd(cliCtx *cli.Context) error {
 			// ChannelFeePermyriad is per 10,000. PPM is per 1,000,000. So multiply by 100.
 			proportional := uint32(cfg.ChannelFeePermyriad * 100)
 
-			params := common.OpeningFeeParams{
+			params := core.OpeningFeeParams{
 				MinFeeMloki:          uint64(cfg.ChannelMinimumFeeMloki),
 				Proportional:         proportional,
 				ValidUntil:           "",
@@ -184,7 +186,7 @@ func runLspd(cliCtx *cli.Context) error {
 	}
 
 	go notificationService.Start(ctx)
-	openingService := common.NewOpeningService(openingStore, nodesService)
+	openingService := services.NewOpeningService(openingStore, nodesService)
 
 	// Initialize Dashboard Service
 	dashboardAdminPubkey := os.Getenv("DASHBOARD_ADMIN_PUBKEY")
@@ -256,7 +258,7 @@ func runLspd(cliCtx *cli.Context) error {
 		go forwardSync.ForwardsSynchronize(ctx)
 		notificationService.SetNodePrivKey(node.PrivateKey)
 		handler := interceptor.NewInterceptHandler(client, node.NodeConfig, interceptStore, historyStore, openingService, feeEstimator, feeStrategy, dashBridge, node.PrivateKey)
-		combinedHandler := common.NewCombinedHandler(handler)
+		combinedHandler := services.NewCombinedHandler(handler)
 		htlcInterceptor, err = lnd.NewLndHtlcInterceptor(node.NodeConfig, client, combinedHandler)
 		if err != nil {
 			log.Fatal().Msgf("failed to initialize LND interceptor: %v", err)
@@ -387,12 +389,12 @@ func runLspd(cliCtx *cli.Context) error {
 	return nil
 }
 
-func initializeNodes(configs []*config.NodeConfig) ([]*common.Node, error) {
+func initializeNodes(configs []*config.NodeConfig) ([]*core.Node, error) {
 	if len(configs) == 0 {
 		return nil, fmt.Errorf("no nodes supplied")
 	}
 
-	nodes := []*common.Node{}
+	nodes := []*core.Node{}
 	// Named cfg, not config, so the config package import stays reachable
 	// inside the loop body (needed below to construct the NodeConfigRef).
 	for _, cfg := range configs {
@@ -477,7 +479,7 @@ func initializeNodes(configs []*config.NodeConfig) ([]*common.Node, error) {
 			return nil, fmt.Errorf("failed to parse node id %s", info.Pubkey)
 		}
 
-		node := &common.Node{
+		node := &core.Node{
 			NodeConfig:      config.NewNodeConfigRef(cfg),
 			PrivateKey:      privateKey,
 			PublicKey:       publicKey,

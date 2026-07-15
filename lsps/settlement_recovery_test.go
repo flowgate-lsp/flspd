@@ -7,8 +7,8 @@ import (
 	"github.com/flokiorg/go-flokicoin/chaincfg/chainhash"
 	"github.com/flokiorg/go-flokicoin/wire"
 	"github.com/flowgate-lsp/flspd/chain"
-	"github.com/flowgate-lsp/flspd/common"
 	"github.com/flowgate-lsp/flspd/config"
+	"github.com/flowgate-lsp/flspd/core"
 	"github.com/flowgate-lsp/flspd/lightning"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -32,8 +32,8 @@ func newRecoveryTestService(client *MockLightningClient, store *MockOpeningStore
 	return svc
 }
 
-func createdOrder(orderId, invoice string) *common.Lsps1Order {
-	return &common.Lsps1Order{
+func createdOrder(orderId, invoice string) *core.Lsps1Order {
+	return &core.Lsps1Order{
 		OrderId:        orderId,
 		PeerId:         "02677063d89856f4d04be859e9a4d3393165b6f3cd78641bc3c4ef9ca2fde37f",
 		OrderState:     "CREATED",
@@ -48,7 +48,7 @@ func TestRecoverSettledCreatedOrders_SettledInvoiceProcessesOrder(t *testing.T) 
 	store := new(MockOpeningStore)
 	order := createdOrder("order-settled", "inv-settled")
 
-	store.On("GetAllCreatedLsps1Orders").Return([]*common.Lsps1Order{order}, nil)
+	store.On("GetAllCreatedLsps1Orders").Return([]*core.Lsps1Order{order}, nil)
 	client.On("LookupInvoiceState", mock.Anything, "inv-settled").Return(lightning.InvoiceStateSettled, nil)
 	client.On("IsConnected", mock.Anything).Return(true, nil)
 
@@ -71,7 +71,7 @@ func TestRecoverSettledCreatedOrders_CanceledInvoiceIsNotProcessed(t *testing.T)
 	store := new(MockOpeningStore)
 	order := createdOrder("order-canceled", "inv-canceled")
 
-	store.On("GetAllCreatedLsps1Orders").Return([]*common.Lsps1Order{order}, nil)
+	store.On("GetAllCreatedLsps1Orders").Return([]*core.Lsps1Order{order}, nil)
 	client.On("LookupInvoiceState", mock.Anything, "inv-canceled").Return(lightning.InvoiceStateCanceled, nil)
 
 	svc := newRecoveryTestService(client, store, nil)
@@ -86,7 +86,7 @@ func TestRecoverSettledCreatedOrders_OpenInvoiceIsNotProcessed(t *testing.T) {
 	store := new(MockOpeningStore)
 	order := createdOrder("order-open", "inv-open")
 
-	store.On("GetAllCreatedLsps1Orders").Return([]*common.Lsps1Order{order}, nil)
+	store.On("GetAllCreatedLsps1Orders").Return([]*core.Lsps1Order{order}, nil)
 	client.On("LookupInvoiceState", mock.Anything, "inv-open").Return(lightning.InvoiceStateOpen, nil)
 
 	svc := newRecoveryTestService(client, store, nil)
@@ -101,7 +101,7 @@ func TestRecoverSettledCreatedOrders_EmptyPaymentInvoiceSkipsLndLookup(t *testin
 	store := new(MockOpeningStore)
 	order := createdOrder("order-no-invoice", "") // never got as far as generating an invoice
 
-	store.On("GetAllCreatedLsps1Orders").Return([]*common.Lsps1Order{order}, nil)
+	store.On("GetAllCreatedLsps1Orders").Return([]*core.Lsps1Order{order}, nil)
 
 	svc := newRecoveryTestService(client, store, nil)
 	svc.recoverSettledCreatedOrders()
@@ -115,7 +115,7 @@ func TestRecoverSettledCreatedOrders_LookupErrorSkipsOrderButContinuesOthers(t *
 	broken := createdOrder("order-broken", "inv-broken")
 	healthy := createdOrder("order-healthy", "inv-healthy")
 
-	store.On("GetAllCreatedLsps1Orders").Return([]*common.Lsps1Order{broken, healthy}, nil)
+	store.On("GetAllCreatedLsps1Orders").Return([]*core.Lsps1Order{broken, healthy}, nil)
 	client.On("LookupInvoiceState", mock.Anything, "inv-broken").Return(lightning.InvoiceStateOpen, assert.AnError)
 	client.On("LookupInvoiceState", mock.Anything, "inv-healthy").Return(lightning.InvoiceStateOpen, nil)
 
@@ -128,7 +128,7 @@ func TestRecoverSettledCreatedOrders_LookupErrorSkipsOrderButContinuesOthers(t *
 func TestRecoverSettledCreatedOrders_EmptyListSkipsLndEntirely(t *testing.T) {
 	client := new(MockLightningClient)
 	store := new(MockOpeningStore)
-	store.On("GetAllCreatedLsps1Orders").Return([]*common.Lsps1Order{}, nil)
+	store.On("GetAllCreatedLsps1Orders").Return([]*core.Lsps1Order{}, nil)
 
 	svc := newRecoveryTestService(client, store, nil)
 	svc.recoverSettledCreatedOrders()
@@ -139,7 +139,7 @@ func TestRecoverSettledCreatedOrders_EmptyListSkipsLndEntirely(t *testing.T) {
 func TestRecoverStuckOrders_PaidStoreErrorSkipsCreatedOrderCheck(t *testing.T) {
 	client := new(MockLightningClient)
 	store := new(MockOpeningStore)
-	store.On("GetAllPaidLsps1Orders").Return([]*common.Lsps1Order{}, assert.AnError)
+	store.On("GetAllPaidLsps1Orders").Return([]*core.Lsps1Order{}, assert.AnError)
 
 	svc := newRecoveryTestService(client, store, nil)
 	svc.recoverStuckOrders()
@@ -150,8 +150,8 @@ func TestRecoverStuckOrders_PaidStoreErrorSkipsCreatedOrderCheck(t *testing.T) {
 func TestRecoverStuckOrders_NoStuckOrdersStillChecksCreatedOrders(t *testing.T) {
 	client := new(MockLightningClient)
 	store := new(MockOpeningStore)
-	store.On("GetAllPaidLsps1Orders").Return([]*common.Lsps1Order{}, nil)
-	store.On("GetAllCreatedLsps1Orders").Return([]*common.Lsps1Order{}, nil)
+	store.On("GetAllPaidLsps1Orders").Return([]*core.Lsps1Order{}, nil)
+	store.On("GetAllCreatedLsps1Orders").Return([]*core.Lsps1Order{}, nil)
 
 	svc := newRecoveryTestService(client, store, nil)
 	svc.recoverStuckOrders()

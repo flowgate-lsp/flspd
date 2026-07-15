@@ -12,8 +12,8 @@ import (
 	btcec "github.com/flokiorg/go-flokicoin/crypto"
 	"github.com/flokiorg/go-flokicoin/wire"
 	"github.com/flowgate-lsp/flspd/chain"
-	"github.com/flowgate-lsp/flspd/common"
 	"github.com/flowgate-lsp/flspd/config"
+	"github.com/flowgate-lsp/flspd/core"
 	"github.com/flowgate-lsp/flspd/history"
 	"github.com/flowgate-lsp/flspd/lightning"
 	"github.com/stretchr/testify/assert"
@@ -126,48 +126,48 @@ type MockOpeningStore struct {
 	mock.Mock
 }
 
-func (m *MockOpeningStore) GetFeeParamsSettings(token string) ([]*common.OpeningFeeParamsSetting, error) {
+func (m *MockOpeningStore) GetFeeParamsSettings(token string) ([]*core.OpeningFeeParamsSetting, error) {
 	args := m.Called(token)
-	return args.Get(0).([]*common.OpeningFeeParamsSetting), args.Error(1)
+	return args.Get(0).([]*core.OpeningFeeParamsSetting), args.Error(1)
 }
 
-func (m *MockOpeningStore) SetFeeParams(token string, validity time.Duration, params common.OpeningFeeParams) error {
+func (m *MockOpeningStore) SetFeeParams(token string, validity time.Duration, params core.OpeningFeeParams) error {
 	args := m.Called(token, validity, params)
 	return args.Error(0)
 }
 
-func (m *MockOpeningStore) RegisterLsps2Buy(reg *common.Lsps2BuyRegistration) error {
+func (m *MockOpeningStore) RegisterLsps2Buy(reg *core.Lsps2BuyRegistration) error {
 	args := m.Called(reg)
 	return args.Error(0)
 }
 
-func (m *MockOpeningStore) GetLsps2BuyRegistration(scid uint64) (*common.Lsps2BuyRegistration, error) {
+func (m *MockOpeningStore) GetLsps2BuyRegistration(scid uint64) (*core.Lsps2BuyRegistration, error) {
 	args := m.Called(scid)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
-	return args.Get(0).(*common.Lsps2BuyRegistration), args.Error(1)
+	return args.Get(0).(*core.Lsps2BuyRegistration), args.Error(1)
 }
 
-func (m *MockOpeningStore) RegisterLsps1Order(order *common.Lsps1Order) error {
+func (m *MockOpeningStore) RegisterLsps1Order(order *core.Lsps1Order) error {
 	args := m.Called(order)
 	return args.Error(0)
 }
 
-func (m *MockOpeningStore) GetLsps1Order(orderId string) (*common.Lsps1Order, error) {
+func (m *MockOpeningStore) GetLsps1Order(orderId string) (*core.Lsps1Order, error) {
 	args := m.Called(orderId)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
-	return args.Get(0).(*common.Lsps1Order), args.Error(1)
+	return args.Get(0).(*core.Lsps1Order), args.Error(1)
 }
 
-func (m *MockOpeningStore) GetLsps1OrderByPaymentInvoice(paymentInvoice string) (*common.Lsps1Order, error) {
+func (m *MockOpeningStore) GetLsps1OrderByPaymentInvoice(paymentInvoice string) (*core.Lsps1Order, error) {
 	args := m.Called(paymentInvoice)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
-	return args.Get(0).(*common.Lsps1Order), args.Error(1)
+	return args.Get(0).(*core.Lsps1Order), args.Error(1)
 }
 
 func (m *MockOpeningStore) UpdateLsps1OrderState(orderId string, newState string, newPaymentState string, expectedCurrentState string) (bool, error) {
@@ -175,14 +175,14 @@ func (m *MockOpeningStore) UpdateLsps1OrderState(orderId string, newState string
 	return args.Bool(0), args.Error(1)
 }
 
-func (m *MockOpeningStore) RegisterLsps5Webhook(webhook *common.Lsps5Webhook) error {
+func (m *MockOpeningStore) RegisterLsps5Webhook(webhook *core.Lsps5Webhook) error {
 	args := m.Called(webhook)
 	return args.Error(0)
 }
 
-func (m *MockOpeningStore) GetLsps5Webhooks(clientNodeId string) ([]*common.Lsps5Webhook, error) {
+func (m *MockOpeningStore) GetLsps5Webhooks(clientNodeId string) ([]*core.Lsps5Webhook, error) {
 	args := m.Called(clientNodeId)
-	return args.Get(0).([]*common.Lsps5Webhook), args.Error(1)
+	return args.Get(0).([]*core.Lsps5Webhook), args.Error(1)
 }
 
 func (m *MockOpeningStore) RemoveLsps5Webhook(clientNodeId, appName string) error {
@@ -200,32 +200,32 @@ func (m *MockOpeningStore) CountLsps5Webhooks(clientNodeId string) (int, error) 
 	return args.Int(0), args.Error(1)
 }
 
-func (m *MockOpeningStore) GetPaidLsps1Order(clientNodeId string) (*common.Lsps1Order, error) {
+func (m *MockOpeningStore) GetPaidLsps1Order(clientNodeId string) (*core.Lsps1Order, error) {
 	args := m.Called(clientNodeId)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
-	return args.Get(0).(*common.Lsps1Order), args.Error(1)
+	return args.Get(0).(*core.Lsps1Order), args.Error(1)
 }
 
-func (m *MockOpeningStore) GetPaidLsps1Orders(clientNodeId string) ([]*common.Lsps1Order, error) {
+func (m *MockOpeningStore) GetPaidLsps1Orders(clientNodeId string) ([]*core.Lsps1Order, error) {
 	args := m.Called(clientNodeId)
-	return args.Get(0).([]*common.Lsps1Order), args.Error(1)
+	return args.Get(0).([]*core.Lsps1Order), args.Error(1)
 }
 
-func (m *MockOpeningStore) GetAllPaidLsps1Orders() ([]*common.Lsps1Order, error) {
+func (m *MockOpeningStore) GetAllPaidLsps1Orders() ([]*core.Lsps1Order, error) {
 	args := m.Called()
-	return args.Get(0).([]*common.Lsps1Order), args.Error(1)
+	return args.Get(0).([]*core.Lsps1Order), args.Error(1)
 }
 
-func (m *MockOpeningStore) ListLsps1Orders(limit, offset int) ([]*common.Lsps1Order, error) {
+func (m *MockOpeningStore) ListLsps1Orders(limit, offset int) ([]*core.Lsps1Order, error) {
 	args := m.Called(limit, offset)
-	return args.Get(0).([]*common.Lsps1Order), args.Error(1)
+	return args.Get(0).([]*core.Lsps1Order), args.Error(1)
 }
 
-func (m *MockOpeningStore) GetAllCreatedLsps1Orders() ([]*common.Lsps1Order, error) {
+func (m *MockOpeningStore) GetAllCreatedLsps1Orders() ([]*core.Lsps1Order, error) {
 	args := m.Called()
-	return args.Get(0).([]*common.Lsps1Order), args.Error(1)
+	return args.Get(0).([]*core.Lsps1Order), args.Error(1)
 }
 
 func (m *MockOpeningStore) UpdateLsps1OrderFunding(orderId string, fundingTxid string, fundingOutpoint int) error {
@@ -233,21 +233,20 @@ func (m *MockOpeningStore) UpdateLsps1OrderFunding(orderId string, fundingTxid s
 	return args.Error(0)
 }
 
-
-func (m *MockOpeningStore) GetFeeParamsMenu(token string, privateKey *btcec.PrivateKey) ([]*common.OpeningFeeParams, error) {
+func (m *MockOpeningStore) GetFeeParamsMenu(token string, privateKey *btcec.PrivateKey) ([]*core.OpeningFeeParams, error) {
 	args := m.Called(token, privateKey)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
-	return args.Get(0).([]*common.OpeningFeeParams), args.Error(1)
+	return args.Get(0).([]*core.OpeningFeeParams), args.Error(1)
 }
 
-func (m *MockOpeningStore) ValidateOpeningFeeParams(params *common.OpeningFeeParams, publicKey *btcec.PublicKey) bool {
+func (m *MockOpeningStore) ValidateOpeningFeeParams(params *core.OpeningFeeParams, publicKey *btcec.PublicKey) bool {
 	args := m.Called(params, publicKey)
 	return args.Bool(0)
 }
 
-func (m *MockOpeningStore) IsCurrentChainFeeCheaper(token string, params *common.OpeningFeeParams) bool {
+func (m *MockOpeningStore) IsCurrentChainFeeCheaper(token string, params *core.OpeningFeeParams) bool {
 	args := m.Called(token, params)
 	return args.Bool(0)
 }
@@ -330,7 +329,7 @@ func TestProcessSettledInvoice_Success(t *testing.T) {
 	mockStore := new(MockOpeningStore)
 
 	invoice := "lnbc1test..."
-	order := &common.Lsps1Order{
+	order := &core.Lsps1Order{
 		OrderId:           "test-order-123",
 		PeerId:            "deadbeef",
 		OrderState:        "CREATED",
@@ -418,7 +417,7 @@ func TestProcessSettledInvoice_TriggerChannelOpen(t *testing.T) {
 	}
 
 	invoice := "lnbc1test..."
-	order := &common.Lsps1Order{
+	order := &core.Lsps1Order{
 		OrderId:           "test-order-123",
 		PeerId:            "02677063d89856f4d04be859e9a4d3393165b6f3cd78641bc3c4ef9ca2fde37f", // Valid hex for peer ID
 		OrderState:        "CREATED",
@@ -490,7 +489,7 @@ func TestProcessSettledInvoice_AlreadyPaid(t *testing.T) {
 	mockStore := new(MockOpeningStore)
 
 	invoice := "lnbc1test..."
-	order := &common.Lsps1Order{
+	order := &core.Lsps1Order{
 		OrderId:      "test-order-123",
 		OrderState:   "PAID", // Already paid
 		PaymentState: "PAID",
@@ -524,8 +523,8 @@ func TestGracefulShutdown(t *testing.T) {
 	errChan := make(chan error, 1)
 
 	mockClient.On("SubscribeInvoices").Return((<-chan *lightning.InvoiceUpdate)(invoiceChan), (<-chan error)(errChan), nil)
-	mockStore.On("GetAllPaidLsps1Orders").Return([]*common.Lsps1Order{}, nil)
-	mockStore.On("GetAllCreatedLsps1Orders").Return([]*common.Lsps1Order{}, nil)
+	mockStore.On("GetAllPaidLsps1Orders").Return([]*core.Lsps1Order{}, nil)
+	mockStore.On("GetAllCreatedLsps1Orders").Return([]*core.Lsps1Order{}, nil)
 
 	historyStore := new(MockHistoryStore)
 	feeEstimator := new(MockFeeEstimator)
@@ -563,7 +562,7 @@ func TestLsps1SettlementService_StartupRecovery(t *testing.T) {
 	peerPubkey := "02677063d89856f4d04be859e9a4d3393165b6f3cd78641bc3c4ef9ca2fde37f"
 	peerIdBytes, _ := hex.DecodeString(peerPubkey)
 
-	staleOrder := &common.Lsps1Order{
+	staleOrder := &core.Lsps1Order{
 		OrderId:           "stale-order-001",
 		PeerId:            peerPubkey,
 		OrderState:        "PAID",
@@ -573,8 +572,8 @@ func TestLsps1SettlementService_StartupRecovery(t *testing.T) {
 	}
 
 	// 1. Return the stale order during recovery check; no CREATED orders with settled invoices
-	mockStore.On("GetAllPaidLsps1Orders").Return([]*common.Lsps1Order{staleOrder}, nil)
-	mockStore.On("GetAllCreatedLsps1Orders").Return([]*common.Lsps1Order{}, nil)
+	mockStore.On("GetAllPaidLsps1Orders").Return([]*core.Lsps1Order{staleOrder}, nil)
+	mockStore.On("GetAllCreatedLsps1Orders").Return([]*core.Lsps1Order{}, nil)
 
 	// 2. Mock the channel opening process
 	mockClient.On("IsConnected", peerIdBytes).Return(true, nil)
@@ -655,7 +654,7 @@ func TestF1_ConcurrentSettlementAndRecoveryOpenExactlyOneChannel(t *testing.T) {
 	// CREATED in the returned struct, matching what a real DB read would
 	// return before either writer has moved it) — this is the stale read
 	// that made the race possible pre-fix.
-	order := &common.Lsps1Order{
+	order := &core.Lsps1Order{
 		OrderId:           orderId,
 		PeerId:            peerId,
 		OrderState:        "CREATED",
@@ -710,4 +709,3 @@ func TestF1_ConcurrentSettlementAndRecoveryOpenExactlyOneChannel(t *testing.T) {
 	mockStore.mu.Unlock()
 	assert.Equal(t, "COMPLETED", finalState, "order should end up COMPLETED via exactly one winner, not stuck or double-processed")
 }
-

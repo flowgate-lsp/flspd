@@ -4,20 +4,20 @@ import (
 	"context"
 	"time"
 
-	"github.com/flowgate-lsp/flspd/common"
+	"github.com/flowgate-lsp/flspd/ports"
 	"github.com/rs/zerolog/log"
 )
 
 // OrderCleanupService runs a background job to expire stale LSPS1 orders
 type OrderCleanupService struct {
-	store    common.OpeningStore
+	store    ports.OpeningStore
 	interval time.Duration
 	stopCh   chan struct{}
 	doneCh   chan struct{}
 }
 
 // NewOrderCleanupService creates a new cleanup service
-func NewOrderCleanupService(store common.OpeningStore, interval time.Duration) *OrderCleanupService {
+func NewOrderCleanupService(store ports.OpeningStore, interval time.Duration) *OrderCleanupService {
 	return &OrderCleanupService{
 		store:    store,
 		interval: interval,

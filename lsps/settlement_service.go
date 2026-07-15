@@ -9,15 +9,17 @@ import (
 	"github.com/flowgate-lsp/flspd/chain"
 	"github.com/flowgate-lsp/flspd/common"
 	"github.com/flowgate-lsp/flspd/config"
+	"github.com/flowgate-lsp/flspd/core"
 	"github.com/flowgate-lsp/flspd/history"
 	"github.com/flowgate-lsp/flspd/lightning"
+	"github.com/flowgate-lsp/flspd/ports"
 	"github.com/rs/zerolog/log"
 )
 
 // Lsps1SettlementService monitors LND invoice settlements and processes LSPS1 orders
 type Lsps1SettlementService struct {
 	client       lightning.Client
-	openingStore common.OpeningStore
+	openingStore ports.OpeningStore
 	historyStore history.Store
 	// config is an atomic ref, not a raw pointer, so it can be hot-swapped
 	// by the dashboard's config-update handler without racing settlement's
@@ -34,7 +36,7 @@ type Lsps1SettlementService struct {
 // NewLsps1SettlementService creates a new settlement monitoring service
 func NewLsps1SettlementService(
 	client lightning.Client,
-	openingStore common.OpeningStore,
+	openingStore ports.OpeningStore,
 	historyStore history.Store,
 	config *config.NodeConfigRef,
 	feeEstimator chain.FeeEstimator,
@@ -181,7 +183,7 @@ func (s *Lsps1SettlementService) processSettledInvoice(update *lightning.Invoice
 	go s.openChannelForOrder(order)
 }
 
-func (s *Lsps1SettlementService) openChannelForOrder(order *common.Lsps1Order) {
+func (s *Lsps1SettlementService) openChannelForOrder(order *core.Lsps1Order) {
 	// Snapshot once so this channel-open decision is made against one
 	// internally consistent config even if the dashboard updates it
 	// concurrently mid-flight (C-3).
@@ -406,7 +408,7 @@ func (s *Lsps1SettlementService) recoverSettledCreatedOrders() {
 // processSettledOrder is the DB-update + channel-open logic factored out of
 // processSettledInvoice so that recoverSettledCreatedOrders can reuse it
 // without needing the full InvoiceUpdate.
-func (s *Lsps1SettlementService) processSettledOrder(order *common.Lsps1Order) {
+func (s *Lsps1SettlementService) processSettledOrder(order *core.Lsps1Order) {
 	// Compare-and-set on CREATED, mirroring processSettledInvoice: this is
 	// the other side of the F-1 race, where the live SubscribeInvoices
 	// event and this startup recovery sweep can both observe the same
@@ -437,4 +439,3 @@ func (s *Lsps1SettlementService) processSettledOrder(order *common.Lsps1Order) {
 
 	s.openChannelForOrder(order)
 }
-

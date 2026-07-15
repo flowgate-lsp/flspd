@@ -3,12 +3,12 @@ package postgres
 import (
 	"context"
 
-	"github.com/flowgate-lsp/flspd/common"
+	"github.com/flowgate-lsp/flspd/core"
 	"github.com/rs/zerolog/log"
 )
 
 // GetLsps1OrderByPaymentInvoice retrieves an LSPS1 order by its payment invoice string
-func (s *PostgresOpeningStore) GetLsps1OrderByPaymentInvoice(paymentInvoice string) (*common.Lsps1Order, error) {
+func (s *PostgresOpeningStore) GetLsps1OrderByPaymentInvoice(paymentInvoice string) (*core.Lsps1Order, error) {
 	row := s.pool.QueryRow(context.Background(),
 		`SELECT order_id, peer_id, lsp_balance_loki, client_balance_loki, 
 			funding_confirms_within_blocks, required_channel_confirmations, 
@@ -17,7 +17,7 @@ func (s *PostgresOpeningStore) GetLsps1OrderByPaymentInvoice(paymentInvoice stri
 			COALESCE(refund_onchain_address, ''), COALESCE(order_total_loki, 0), COALESCE(fee_total_loki, 0)
 		FROM lsps1.orders WHERE payment_invoice=$1`, paymentInvoice)
 
-	var order common.Lsps1Order
+	var order core.Lsps1Order
 	err := row.Scan(
 		&order.OrderId, &order.PeerId, &order.LspBalanceLoki, &order.ClientBalanceLoki,
 		&order.FundingConfirmsWithinBlocks, &order.RequiredChannelConfirmations,
@@ -59,7 +59,7 @@ func (s *PostgresOpeningStore) UpdateLsps1OrderState(orderId string, newState st
 }
 
 // GetPaidLsps1Order finds the oldest PAID order for a client that hasn't been fulfilled yet
-func (s *PostgresOpeningStore) GetPaidLsps1Order(clientNodeId string) (*common.Lsps1Order, error) {
+func (s *PostgresOpeningStore) GetPaidLsps1Order(clientNodeId string) (*core.Lsps1Order, error) {
 	// We want orders that are PAID but don't have a channel (FundingTxid is null/empty)
 	// Ordered by created_at ASC to process oldest first (FIFO)
 	row := s.pool.QueryRow(context.Background(),
@@ -72,7 +72,7 @@ func (s *PostgresOpeningStore) GetPaidLsps1Order(clientNodeId string) (*common.L
 		 WHERE peer_id=$1 AND order_state='PAID' AND (funding_txid IS NULL OR funding_txid = '')
 		 ORDER BY created_at ASC LIMIT 1`, clientNodeId)
 
-	var order common.Lsps1Order
+	var order core.Lsps1Order
 	err := row.Scan(
 		&order.OrderId, &order.PeerId, &order.LspBalanceLoki, &order.ClientBalanceLoki,
 		&order.FundingConfirmsWithinBlocks, &order.RequiredChannelConfirmations,
@@ -88,7 +88,7 @@ func (s *PostgresOpeningStore) GetPaidLsps1Order(clientNodeId string) (*common.L
 
 // GetPaidLsps1Orders finds all PAID orders for a client that haven't been fulfilled yet,
 // ordered by created_at ASC (FIFO).
-func (s *PostgresOpeningStore) GetPaidLsps1Orders(clientNodeId string) ([]*common.Lsps1Order, error) {
+func (s *PostgresOpeningStore) GetPaidLsps1Orders(clientNodeId string) ([]*core.Lsps1Order, error) {
 	rows, err := s.pool.Query(context.Background(),
 		`SELECT order_id, peer_id, lsp_balance_loki, client_balance_loki, 
 			funding_confirms_within_blocks, required_channel_confirmations, 
@@ -103,9 +103,9 @@ func (s *PostgresOpeningStore) GetPaidLsps1Orders(clientNodeId string) ([]*commo
 	}
 	defer rows.Close()
 
-	var orders []*common.Lsps1Order
+	var orders []*core.Lsps1Order
 	for rows.Next() {
-		var order common.Lsps1Order
+		var order core.Lsps1Order
 		err := rows.Scan(
 			&order.OrderId, &order.PeerId, &order.LspBalanceLoki, &order.ClientBalanceLoki,
 			&order.FundingConfirmsWithinBlocks, &order.RequiredChannelConfirmations,
@@ -123,7 +123,7 @@ func (s *PostgresOpeningStore) GetPaidLsps1Orders(clientNodeId string) ([]*commo
 
 // GetAllPaidLsps1Orders finds all PAID orders across all peers that haven't been fulfilled yet.
 // Used for startup recovery to retry orders that were stuck when flspd was down.
-func (s *PostgresOpeningStore) GetAllPaidLsps1Orders() ([]*common.Lsps1Order, error) {
+func (s *PostgresOpeningStore) GetAllPaidLsps1Orders() ([]*core.Lsps1Order, error) {
 	rows, err := s.pool.Query(context.Background(),
 		`SELECT order_id, peer_id, lsp_balance_loki, client_balance_loki, 
 			funding_confirms_within_blocks, required_channel_confirmations, 
@@ -138,9 +138,9 @@ func (s *PostgresOpeningStore) GetAllPaidLsps1Orders() ([]*common.Lsps1Order, er
 	}
 	defer rows.Close()
 
-	var orders []*common.Lsps1Order
+	var orders []*core.Lsps1Order
 	for rows.Next() {
-		var order common.Lsps1Order
+		var order core.Lsps1Order
 		err := rows.Scan(
 			&order.OrderId, &order.PeerId, &order.LspBalanceLoki, &order.ClientBalanceLoki,
 			&order.FundingConfirmsWithinBlocks, &order.RequiredChannelConfirmations,
@@ -158,7 +158,7 @@ func (s *PostgresOpeningStore) GetAllPaidLsps1Orders() ([]*common.Lsps1Order, er
 
 // GetAllCreatedLsps1Orders returns all orders still in CREATED state that have not expired.
 // Used during startup to check whether any invoice was settled in LND while flspd was down.
-func (s *PostgresOpeningStore) GetAllCreatedLsps1Orders() ([]*common.Lsps1Order, error) {
+func (s *PostgresOpeningStore) GetAllCreatedLsps1Orders() ([]*core.Lsps1Order, error) {
 	rows, err := s.pool.Query(context.Background(),
 		`SELECT order_id, peer_id, lsp_balance_loki, client_balance_loki,
 			funding_confirms_within_blocks, required_channel_confirmations,
@@ -173,9 +173,9 @@ func (s *PostgresOpeningStore) GetAllCreatedLsps1Orders() ([]*common.Lsps1Order,
 	}
 	defer rows.Close()
 
-	var orders []*common.Lsps1Order
+	var orders []*core.Lsps1Order
 	for rows.Next() {
-		var order common.Lsps1Order
+		var order core.Lsps1Order
 		err := rows.Scan(
 			&order.OrderId, &order.PeerId, &order.LspBalanceLoki, &order.ClientBalanceLoki,
 			&order.FundingConfirmsWithinBlocks, &order.RequiredChannelConfirmations,

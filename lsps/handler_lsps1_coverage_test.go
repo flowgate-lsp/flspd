@@ -6,8 +6,8 @@ import (
 	"testing"
 
 	"github.com/flokiorg/flnd/lnrpc"
-	"github.com/flowgate-lsp/flspd/common"
 	"github.com/flowgate-lsp/flspd/config"
+	"github.com/flowgate-lsp/flspd/core"
 
 	// "github.com/flowgate-lsp/flspd/lsps/mocks" // Removed
 	"github.com/stretchr/testify/assert"
@@ -75,8 +75,8 @@ func TestHandleLsps1CreateOrder_Matrix(t *testing.T) {
 			mockSetup: func(lm *MockLiquidityManager, ns *MockNodesService, os *MockOpeningService, lc *MockLndClient, notif *MockNotificationService) {
 				lm.On("CheckOnChainLiquidity", mock.Anything, uint64(50000)).Return(nil)
 				ns.On("GetMinChannelCapacity").Return(MinChan)
-				ns.On("GetNodes").Return([]*common.Node{{NodeConfig: config.NewNodeConfigRef(&config.NodeConfig{})}})
-				os.On("GetFeeParamsMenu", mock.Anything, mock.Anything).Return([]*common.OpeningFeeParams{{
+				ns.On("GetNodes").Return([]*core.Node{{NodeConfig: config.NewNodeConfigRef(&config.NodeConfig{})}})
+				os.On("GetFeeParamsMenu", mock.Anything, mock.Anything).Return([]*core.OpeningFeeParams{{
 					MinFeeMloki: 1000, Proportional: 100,
 				}}, nil)
 				os.On("CountLsps1Orders", mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
@@ -110,7 +110,7 @@ func TestHandleLsps1CreateOrder_Matrix(t *testing.T) {
 			maxExpiry := uint32(201600)
 			orderExpiry := uint32(86400)
 
-			mockNS.On("GetNodes").Return([]*common.Node{{NodeConfig: config.NewNodeConfigRef(&config.NodeConfig{
+			mockNS.On("GetNodes").Return([]*core.Node{{NodeConfig: config.NewNodeConfigRef(&config.NodeConfig{
 				Lsps1MinRequiredChannelConfirmations: &minReqConf,
 				Lsps1MinFundingConfirmsWithinBlocks:  &minFundingConf,
 				Lsps1SupportsZeroChannelReserve:      &supportsZeroReserve,
@@ -222,7 +222,7 @@ func TestHandleLsps1CreateOrder_FeeMatchesUnifiedFeeFunction(t *testing.T) {
 	supportsZeroReserve := true
 	maxExpiry, orderExpiry := uint32(201_600), uint32(86_400)
 
-	mockNS.On("GetNodes").Return([]*common.Node{{NodeConfig: config.NewNodeConfigRef(&config.NodeConfig{
+	mockNS.On("GetNodes").Return([]*core.Node{{NodeConfig: config.NewNodeConfigRef(&config.NodeConfig{
 		Lsps1MinRequiredChannelConfirmations: &minReqConf,
 		Lsps1MinFundingConfirmsWithinBlocks:  &minFundingConf,
 		Lsps1SupportsZeroChannelReserve:      &supportsZeroReserve,
@@ -237,14 +237,14 @@ func TestHandleLsps1CreateOrder_FeeMatchesUnifiedFeeFunction(t *testing.T) {
 	})}})
 	mockNS.On("GetMinChannelCapacity").Return(minChan)
 	mockLM.On("CheckOnChainLiquidity", mock.Anything, lspBalanceLoki).Return(nil)
-	mockOS.On("GetFeeParamsMenu", mock.Anything, mock.Anything).Return([]*common.OpeningFeeParams{{
+	mockOS.On("GetFeeParamsMenu", mock.Anything, mock.Anything).Return([]*core.OpeningFeeParams{{
 		MinFeeMloki: minFeeMloki, Proportional: proportional,
 	}}, nil)
 	mockOS.On("CountLsps1Orders", mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
 	mockLC.On("AddInvoice", mock.Anything, mock.MatchedBy(func(inv *lnrpc.Invoice) bool {
 		return inv.Value == wantFeeLoki // clientBalance is 0, so order total == fee
 	})).Return(&lnrpc.AddInvoiceResponse{PaymentRequest: "lnbc..."}, nil)
-	mockOS.On("RegisterLsps1Order", mock.MatchedBy(func(order *common.Lsps1Order) bool {
+	mockOS.On("RegisterLsps1Order", mock.MatchedBy(func(order *core.Lsps1Order) bool {
 		return order.FeeTotalLoki == wantFeeLoki
 	})).Return(nil)
 	mockNotif.On("NotifyOrderStateChanged", mock.Anything, mock.Anything, "CREATED", "", "").Return(true, nil)

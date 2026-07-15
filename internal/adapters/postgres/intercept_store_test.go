@@ -4,12 +4,12 @@ import (
 	"context"
 	"testing"
 
-	"github.com/flowgate-lsp/flspd/common"
+	"github.com/flowgate-lsp/flspd/core"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-var openingFeeParamsFixture = common.OpeningFeeParams{
+var openingFeeParamsFixture = core.OpeningFeeParams{
 	MinFeeMloki:  1000,
 	Proportional: 4000,
 	ValidUntil:   "2099-01-01T00:00:00.000Z",
@@ -90,7 +90,7 @@ func TestInterceptStore_GetLsps2Order_RoundTrip(t *testing.T) {
 	require.Negative(t, int64(scid), "sanity: fixture must set bit 63")
 
 	paymentSize := uint64(25_000_000)
-	reg := &common.Lsps2BuyRegistration{
+	reg := &core.Lsps2BuyRegistration{
 		Id:                         newOrderId(t),
 		LspId:                      "lsp-pubkey-intercept",
 		PeerId:                     "peer-pubkey-intercept",

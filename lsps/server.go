@@ -12,6 +12,8 @@ import (
 
 	"github.com/flokiorg/flnd/lnrpc"
 	"github.com/flowgate-lsp/flspd/common"
+	"github.com/flowgate-lsp/flspd/core"
+	"github.com/flowgate-lsp/flspd/ports"
 	"github.com/rs/zerolog/log"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -27,7 +29,7 @@ type LndClientWrapper interface {
 
 // NotificationService interface for sending LSPS5 webhook notifications
 type NotificationService interface {
-	NotifyWebhookRegistered(pubkey string, webhook *common.Lsps5Webhook) bool
+	NotifyWebhookRegistered(pubkey string, webhook *core.Lsps5Webhook) bool
 	NotifyOrderStateChanged(pubkey string, orderId string, state string, channelPoint string, errorMsg string) (bool, error)
 }
 
@@ -42,8 +44,8 @@ type Config struct {
 type Server struct {
 	config              Config
 	lndClient           LndClientWrapper
-	nodesService        common.NodesService
-	openingService      common.OpeningService
+	nodesService        ports.NodesService
+	openingService      ports.OpeningService
 	liquidityManager    LiquidityManager
 	notificationService NotificationService
 
@@ -55,8 +57,8 @@ type Server struct {
 func NewServer(
 	config Config,
 	lndClient LndClientWrapper,
-	nodesService common.NodesService,
-	openingService common.OpeningService,
+	nodesService ports.NodesService,
+	openingService ports.OpeningService,
 	liquidityManager LiquidityManager,
 	notificationService NotificationService,
 ) *Server {

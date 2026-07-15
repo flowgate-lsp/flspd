@@ -1,4 +1,4 @@
-package common
+package core
 
 import (
 	"fmt"
@@ -92,8 +92,4 @@ func (r *InterceptResult) String() string {
 		cp,
 		r.Scid.ToString(),
 	)
-}
-
-type InterceptHandler interface {
-	Intercept(req InterceptRequest) InterceptResult
 }
