@@ -41,7 +41,7 @@ number-soup and then get reorganized a second time.
 | 3 | Unit-test coverage buildout | Critical-four packages ≥70–80% | ✅ Done: F-5, F-6, F-7, F-8, F-9, F-12, F-13, T1-4/T3-2..T3-6 all done. All four critical packages now clear the target: **postgresql 69.1%→81.2%, notifications 54.3%→70.3%, lsps 50.1%→78.6%, interceptor 58.3%→73.4%**. Notable finds along the way, not just coverage: `lsps1_settlement_store.go`'s `UpdateLsps1OrderFunding` silently no-ops on an unknown order_id; two near-duplicate `GetPaidLsps1Order` implementations disagree on their not-found contract (only one is actually reachable in production); `notification_service.go`'s `Notify()` return value is a real fast-fail signal `notifyAndWait` depends on (relevant background for the still-open Performance-backlog P-4 write-up below); a genuine data race in a `lsps` test itself (reading `mock.Mock.Calls` from a different goroutine than the one appending to it) caught by `-race`, not just written defensively. `handler_lsps2.go`'s `lsps2Buy` and `server.go`'s core JSON-RPC dispatch (`subscribeAndListen`/`handleMessage`/`route`) remain the largest *remaining* gaps in `lsps` specifically, but the package-level target is already met. `lnd` 4.7%, `common` 36.0%, `config` 93.4%, `lightning` 86.9%, `auth` 76.5% are not part of the critical four and untouched this round. |
 | 4 | YAML-driven integration tests | Runner + 3 seed scenarios merged | ✅ Runner built + all 3 seed scenarios landed (T4-1/T4-2). LSPS1 test client added; `lsps1_order_settle_and_open.yaml` and `lsps1_recovery_after_restart.yaml` (F-1 regression, real kill/restart) both pass on real flspd/flnd/chain processes. `lsps2_jit_happy_path.yaml` intentionally left known-failing on the distinct zero-conf-balance-sync race documented in T4-1 — not swept under the rug. `kill_lsp`/`restart_lsp` fault injection landed (T4-3, partial); relay-failure/mempool-fee fault injection not started. This package isn't wired into the CI gate yet (path-filtered out of `ci.yml`), so "pass in CI" is still open follow-up work. |
 | 5 | Config model + secrets-by-reference | New model shipped behind compat shim | ✅ T5-1..T5-7 done (secrets-by-reference, unit/fee/channel-size model, profiles, CLI tooling, Settings.tsx re-skin — frontend not browser-verified, no automation tooling available) |
-| 6 | Repo structure / arbo migration | Tree matches target layout, build green throughout | ◐ T6-1..T6-3 done (format/ folded into common/, internal/adapters/ introduced, common/ split into core/ports/services/); T6-4 partial (rpc/→api/proto/rpc/, config/→platform/config/, build/→platform/build/, auth/→transport/auth/, notifications/ proto split→api/proto/notifications/, common/logger.go+log_enums.go→platform/logging/ all done; notifications/server.go transport classification resolved as "stays put" — naming collision with notifications/'s own transport.go; lsps/ and dashboard/ transport-vs-logic splits deliberately deferred — genuine symbol-level ambiguity, not mechanical risk); T6-5 done (configs/examples/, test/itest/, deploy/, web/ all landed — deploy/+web/ landed on explicit user go-ahead, stashed+reapplied someone else's uncommitted dev-tooling edits with re-derived paths) |
+| 6 | Repo structure / arbo migration | Tree matches target layout, build green throughout | ◐ T6-1..T6-3 done (format/ folded into common/, internal/adapters/ introduced, common/ split into core/ports/services/); T6-4 partial (rpc/→api/proto/rpc/, config/→platform/config/, build/→platform/build/, auth/→transport/auth/, notifications/ proto split→api/proto/notifications/, common/logger.go+log_enums.go→platform/logging/ all done; notifications/server.go transport classification resolved as "stays put" — naming collision with notifications/'s own transport.go; lsps/→lsps+transport/lsps/ split done (Server/route split from Handlers/Route on the real subscription-loop-vs-protocol-handler seam, verified live against devnet); dashboard/ transport-vs-logic split deliberately deferred — genuine symbol-level ambiguity, not mechanical risk); T6-5 done (configs/examples/, test/itest/, deploy/, web/ all landed — deploy/+web/ landed on explicit user go-ahead, stashed+reapplied someone else's uncommitted dev-tooling edits with re-derived paths) |
 | — | Performance backlog (parallel, non-blocking) | — | ◐ Investigated, not implemented: P-3 verified as no-op (never called hot); P-1/P-2 have concrete fix paths documented but need dedicated live-devnet regression verification; P-4's literal fix would regress `notifyAndWait`'s fast-fail behavior — narrower fix documented instead |
 
 ---
@@ -1379,16 +1379,38 @@ delivery-mechanism abstraction) — the same "thin transport surface
 over real logic, don't force it" shape as `lsps/`/`dashboard/` below
 — leaving it in place is the deliberate call, not an unresolved one.
 
+**`lsps/`'s transport (JSON-RPC plumbing) vs. business logic split —
+done (2026-07-15).** The "wholesale move would misclassify the bulk
+of the package" concern below was correct about a *wholesale* move,
+but not about there being no real seam at all: `lsps/server.go`'s
+`Server` struct straddled the boundary — its message-loop methods
+(`Start`/`Stop`/`messageLoop`/`subscribeAndListen`/`handleMessage`)
+are pure lnd-custom-message-subscription plumbing, but its `route()`
+dispatch table called directly into the 13 `handler_lsps*.go` methods
+implementing the actual protocol rules, on the *same* struct. Traced
+the real dependency shape instead of guessing further: every handler
+method uses `nodesService`/`openingService`/`liquidityManager`/
+`notificationService`/`config`, and `lndClient` only for `AddInvoice`
+— none of them touch the subscription loop's own state or call
+`SubscribeCustomMessages`/`SendCustomMessage`. That's a clean, real
+seam. Landed as `lsps/` (business logic, stays — `Server` renamed
+`Handlers`, `route` exported as `Route`, the one cross-package entry
+point) + new `transport/lsps/` (the subscription loop + JSON-RPC wire
+envelope, depending on a small `Router` interface rather than the
+concrete `*lsps.Handlers` — partly because that's the better shape,
+partly because Go test files can't be imported across a package
+boundary, so `transport/lsps`'s own tests needed *some* seam not
+requiring `lsps`'s `_test.go`-only mocks). `JsonRpcRequest`/
+`Response`/`Error` deliberately stayed in `lsps/` rather than moving
+to `transport/lsps/` to avoid an import cycle (`lsps` → `transport/
+lsps` → `lsps`). Verified beyond build/vet/test/lint: re-ran both
+real-devnet LSPS1 scenarios (including the F-1 kill-mid-settlement
+regression test) against live `flspd`/`flnd`/chain processes — both
+pass. `lsps` coverage 78.6%→89.5%, `transport/lsps` 80.4% (new).
+
 **Deliberately not done, same reasoning as T6-5's own precedent below**
 (genuine architectural ambiguity needing careful per-symbol work, not
 mechanical risk):
-- `lsps/`'s transport (JSON-RPC plumbing) vs. business logic
-  (LSPS0/1/2/5 protocol implementation, order/settlement handling) split
-  — flagged as genuinely ambiguous when T4-1 first ran into this same
-  question; still true here. `lsps/` is mostly protocol business logic
-  wearing a JSON-RPC transport on top, not a thin transport layer with
-  logic accidentally leaking in — a wholesale move to `transport/lsps/`
-  would misclassify the bulk of the package.
 - `dashboard/`'s HTTP-handler (transport) vs. config-update/analytics
   (business logic) split — same shape of problem as `lsps/`; recall
   C-1/C-2/C-3 (Phase 2) were all bugs *in* `dashboard/service.go`'s
