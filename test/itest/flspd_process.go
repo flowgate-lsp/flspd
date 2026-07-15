@@ -40,7 +40,7 @@ func buildFlspdBinary(t *testing.T) string {
 		out := filepath.Join(dir, "flspd")
 
 		cmd := exec.Command("go", "build", "-o", out, "./cmd/flspd")
-		cmd.Dir = filepath.Join(devnetDir(t), "..", "..") // itest/../test/devnet/../.. -> repo root
+		cmd.Dir = filepath.Join(devnetDir(t), "..", "..") // test/devnet/../.. -> repo root
 		combined, err := cmd.CombinedOutput()
 		if err != nil {
 			flspdBinaryErr = fmt.Errorf("go build ./cmd/flspd: %w\n%s", err, combined)

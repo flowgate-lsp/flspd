@@ -93,7 +93,9 @@ func devnetDir(t *testing.T) string {
 	if err != nil {
 		t.Fatalf("os.Getwd(): %v", err)
 	}
-	return filepath.Join(wd, "..", "test", "devnet")
+	// itest/ lives at test/itest/ (T6-5); devnet/ is its sibling at
+	// test/devnet/.
+	return filepath.Join(wd, "..", "devnet")
 }
 
 func (d *Devnet) roleDataDir(role string) string {

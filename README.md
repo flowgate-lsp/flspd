@@ -50,17 +50,12 @@ When a client (Alice) wants to receive a payment but lacks sufficient inbound ca
 The difference represents the LSP fee. `flspd` intercepts the incoming HTLC from the upstream node and opens a channel to Alice on-the-fly (Zero-Conf) to fulfill the payment.
 
 ## Integration Tests
-To run integration tests, you need:
-*   Docker
-*   `flnd` binary
-*   `lokid` binary
+Integration tests run against a real, disposable Flokicoin regtest devnet
+(native `lokid` + `flnd`, no Bitcoin Core) — see `test/devnet/README.md`
+for the devnet itself. You need Docker; the devnet builds `flnd`/`lokid`
+from source on first run, no separate binary paths to configure.
 
 Run tests from the root directory:
 ```bash
-go test -timeout 20m -v ./itest \
-  --lndexec /path/to/flnd \
-  --lndmobileexec /path/to/flnd \
-  --bitcoindexec /path/to/lokid \
-  --bitcoincliexec /path/to/lokicli \
-  --flspdexec /path/to/built/flspd
+go test -timeout 20m -v ./test/itest/...
 ```
