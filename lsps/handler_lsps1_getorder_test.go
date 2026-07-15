@@ -12,10 +12,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// newGetOrderTestServer builds a *Server with a NodeConfig fixture that
+// newGetOrderTestServer builds a *Handlers with a NodeConfig fixture that
 // satisfies getLsps1ConfigValues (isOrderExpired/handleLsps1GetOrder both
 // call it), with orderExpirySeconds configurable per test.
-func newGetOrderTestServer(t *testing.T, mockOS *MockOpeningService, orderExpirySeconds uint32) *Server {
+func newGetOrderTestServer(t *testing.T, mockOS *MockOpeningService, orderExpirySeconds uint32) *Handlers {
 	t.Helper()
 	mockNS := new(MockNodesService)
 	minReqConf := uint16(0)
@@ -40,7 +40,7 @@ func newGetOrderTestServer(t *testing.T, mockOS *MockOpeningService, orderExpiry
 		Lsps1MaxChannelBalanceLoki:           &maxChan,
 	})}}).Maybe()
 
-	return NewServer(Config{}, new(MockLndClient), mockNS, mockOS, new(MockLiquidityManager), new(MockNotificationService))
+	return NewHandlers(Config{}, new(MockLndClient), mockNS, mockOS, new(MockLiquidityManager), new(MockNotificationService))
 }
 
 func TestHandleLsps1GetInfo(t *testing.T) {

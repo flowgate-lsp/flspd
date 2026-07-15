@@ -39,7 +39,7 @@ type Lsps2BuyResult struct {
 	LspNodeId          string `json:"lsp_node_id"`
 }
 
-func (s *Server) handleLsps2GetVersions(req *JsonRpcRequest) *JsonRpcResponse {
+func (s *Handlers) handleLsps2GetVersions(req *JsonRpcRequest) *JsonRpcResponse {
 	log.Trace().
 		Str("component", string(logging.LogComponentLSPS2)).
 		Str("action", string(logging.LogActionRequest)).
@@ -54,7 +54,7 @@ func (s *Server) handleLsps2GetVersions(req *JsonRpcRequest) *JsonRpcResponse {
 	return NewJsonRpcResponse(req.Id, result)
 }
 
-func (s *Server) lsps2GetInfo(req *JsonRpcRequest) *JsonRpcResponse {
+func (s *Handlers) lsps2GetInfo(req *JsonRpcRequest) *JsonRpcResponse {
 	var params Lsps2GetInfoLegacyParams
 	// params might be empty or null
 	if len(req.Params) > 0 {
@@ -132,7 +132,7 @@ func (s *Server) lsps2GetInfo(req *JsonRpcRequest) *JsonRpcResponse {
 	})
 }
 
-func (s *Server) lsps2Buy(req *JsonRpcRequest, peer []byte) *JsonRpcResponse {
+func (s *Handlers) lsps2Buy(req *JsonRpcRequest, peer []byte) *JsonRpcResponse {
 	log.Trace().Msgf("LSPS2: lsps2Buy raw params: %s", string(req.Params))
 	var params Lsps2BuyParams
 	if err := json.Unmarshal(req.Params, &params); err != nil {

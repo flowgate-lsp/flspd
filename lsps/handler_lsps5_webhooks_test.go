@@ -11,8 +11,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func newLsps5TestServer(cfg Config, mockOS *MockOpeningService, mockNotif *MockNotificationService) *Server {
-	return NewServer(cfg, new(MockLndClient), new(MockNodesService), mockOS, new(MockLiquidityManager), mockNotif)
+func newLsps5TestServer(cfg Config, mockOS *MockOpeningService, mockNotif *MockNotificationService) *Handlers {
+	return NewHandlers(cfg, new(MockLndClient), new(MockNodesService), mockOS, new(MockLiquidityManager), mockNotif)
 }
 
 var testPeerBytes, _ = hex.DecodeString("03aabbccddeeff00112233445566778899aabbccddeeff0011223344556677")

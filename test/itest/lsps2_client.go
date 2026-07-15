@@ -15,13 +15,14 @@ import (
 	"github.com/flokiorg/flnd/lnrpc/routerrpc"
 	"github.com/flowgate-lsp/flspd/lightning"
 	"github.com/flowgate-lsp/flspd/lsps"
+	translsps "github.com/flowgate-lsp/flspd/transport/lsps"
 )
 
 // CustomMessageBus is a minimal LSPS0 (bLIP-50) transport client: it sends
-// JSON-RPC requests as custom messages (TLV type lsps.LspsMessageId) to a
-// peer and correlates replies by JSON-RPC id, mirroring exactly what
-// lsps.Server does on the LSP side (see lsps/server.go's subscribeAndListen
-// /handleMessage) but from the client's side of the wire.
+// JSON-RPC requests as custom messages (TLV type translsps.LspsMessageId)
+// to a peer and correlates replies by JSON-RPC id, mirroring exactly what
+// transport/lsps.Server does on the LSP side (see transport/lsps/server.go's
+// subscribeAndListen/handleMessage) but from the client's side of the wire.
 type CustomMessageBus struct {
 	raw lnrpc.LightningClient
 
@@ -60,7 +61,7 @@ func NewCustomMessageBus(ctx context.Context, raw lnrpc.LightningClient) (*Custo
 			if err != nil {
 				return
 			}
-			if msg.Type != lsps.LspsMessageId {
+			if msg.Type != translsps.LspsMessageId {
 				continue
 			}
 			b.dispatch(msg.Data)
@@ -126,7 +127,7 @@ func (b *CustomMessageBus) Call(ctx context.Context, peer []byte, method string,
 
 	_, err = b.raw.SendCustomMessage(ctx, &lnrpc.SendCustomMessageRequest{
 		Peer: peer,
-		Type: lsps.LspsMessageId,
+		Type: translsps.LspsMessageId,
 		Data: reqBytes,
 	})
 	if err != nil {

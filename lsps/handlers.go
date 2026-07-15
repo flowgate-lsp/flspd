@@ -7,23 +7,19 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
-	"sync"
-	"time"
 
 	"github.com/flokiorg/flnd/lnrpc"
 	"github.com/flowgate-lsp/flspd/core"
-	"github.com/flowgate-lsp/flspd/platform/logging"
 	"github.com/flowgate-lsp/flspd/ports"
-	"github.com/rs/zerolog/log"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
-const LspsMessageId = 51610
-
+// LndClientWrapper is the subset of the lnd client Handlers itself needs
+// directly -- issuing the bolt11 invoice an LSPS1 order is paid against.
+// The message-transport methods (SubscribeCustomMessages/SendCustomMessage)
+// live on transport/lsps's own, narrower interface instead: Handlers never
+// touches the wire, only what a JSON-RPC method handler needs to do its
+// job.
 type LndClientWrapper interface {
-	SubscribeCustomMessages(ctx context.Context, req *lnrpc.SubscribeCustomMessagesRequest) (lnrpc.Lightning_SubscribeCustomMessagesClient, error)
-	SendCustomMessage(ctx context.Context, msg *lnrpc.SendCustomMessageRequest) (*lnrpc.SendCustomMessageResponse, error)
 	AddInvoice(ctx context.Context, req *lnrpc.Invoice) (*lnrpc.AddInvoiceResponse, error)
 }
 
@@ -41,108 +37,37 @@ type Config struct {
 	Lsps5NostrPubkey      string // Hex-encoded Nostr public key for notifications
 }
 
-type Server struct {
+// Handlers implements the LSPS0/1/2/5 protocol methods: parsing a
+// method's params, applying its business rules, and returning a result or
+// error -- everything downstream of "a JSON-RPC request already arrived
+// addressed to this method name." How that request arrived (the
+// lnd-custom-message subscription loop, JSON-RPC envelope parsing, method
+// dispatch) is transport/lsps's job, not this type's; see Route below for
+// the one seam between them.
+type Handlers struct {
 	config              Config
 	lndClient           LndClientWrapper
 	nodesService        ports.NodesService
 	openingService      ports.OpeningService
 	liquidityManager    LiquidityManager
 	notificationService NotificationService
-
-	quit     chan struct{}
-	quitOnce sync.Once
-	wg       sync.WaitGroup
 }
 
-func NewServer(
+func NewHandlers(
 	config Config,
 	lndClient LndClientWrapper,
 	nodesService ports.NodesService,
 	openingService ports.OpeningService,
 	liquidityManager LiquidityManager,
 	notificationService NotificationService,
-) *Server {
-	return &Server{
+) *Handlers {
+	return &Handlers{
 		config:              config,
 		lndClient:           lndClient,
 		nodesService:        nodesService,
 		openingService:      openingService,
 		liquidityManager:    liquidityManager,
 		notificationService: notificationService,
-		quit:                make(chan struct{}),
-	}
-}
-
-func (s *Server) Start() {
-	s.wg.Add(1)
-	go s.messageLoop()
-}
-
-func (s *Server) Stop() {
-	s.quitOnce.Do(func() {
-		close(s.quit)
-	})
-	s.wg.Wait()
-}
-
-func (s *Server) messageLoop() {
-	defer s.wg.Done()
-
-	for {
-		select {
-		case <-s.quit:
-			return
-		default:
-		}
-
-		err := s.subscribeAndListen()
-		if err != nil {
-			log.Error().
-				Err(err).
-				Str("component", string(logging.LogComponentLSPS0)).
-				Msg("LSPS: Connection lost, retrying in 5s")
-			select {
-			case <-s.quit:
-				return
-			case <-time.After(5 * time.Second):
-				continue
-			}
-		}
-	}
-}
-
-func (s *Server) subscribeAndListen() error {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// Monitor quit channel to cancel context
-	go func() {
-		<-s.quit
-		cancel()
-	}()
-
-	stream, err := s.lndClient.SubscribeCustomMessages(ctx, &lnrpc.SubscribeCustomMessagesRequest{})
-	if err != nil {
-		return fmt.Errorf("failed to subscribe: %w", err)
-	}
-
-	log.Info().
-		Str("component", string(logging.LogComponentLSPS0)).
-		Msg("LSPS: Service started, listening for custom messages")
-
-	for {
-		msg, err := stream.Recv()
-		if err != nil {
-			if status.Code(err) == codes.Canceled || ctx.Err() != nil {
-				return nil // Normal shutdown
-			}
-			return fmt.Errorf("recv error: %w", err)
-		}
-
-		if msg.Type == LspsMessageId {
-			// Process in a goroutine to not block the receiver
-			go s.handleMessage(msg)
-		}
 	}
 }
 
@@ -194,49 +119,13 @@ func NewJsonRpcErrorResponse(id interface{}, code int, message string, data inte
 	}
 }
 
-func (s *Server) handleMessage(msg *lnrpc.CustomMessage) {
-	var req JsonRpcRequest
-	err := json.Unmarshal(msg.Data, &req)
-	if err != nil {
-		log.Warn().
-			Err(err).
-			Str("component", string(logging.LogComponentLSPS0)).
-			Str("peer", fmt.Sprintf("%x", msg.Peer)).
-			Msg("LSPS: Failed to parse incoming JSON-RPC request")
-		// Cannot reply if we can't parse the ID, so just ignore valid malformed JSON as per spec
-		// (Spec says: if parse error, respond with parse error but we need to know it's a valid JSON object first...
-		// Actually spec says "In case of a bad message format error ... the LSP MUST respond with a JSON-RPC 2.0 error response")
-		// But if we can't even unmarshal it, we might try to send a generic error if we can construct a response.
-		// For now, logging is safer to avoid loops with bad peers.
-		return
-	}
-
-	response := s.route(&req, msg.Peer)
-
-	// Send Response
-	respBytes, err := json.Marshal(response)
-	if err != nil {
-		log.Error().
-			Err(err).
-			Str("component", string(logging.LogComponentLSPS0)).
-			Msg("LSPS: Failed to marshal JSON-RPC response")
-		return
-	}
-
-	_, err = s.lndClient.SendCustomMessage(context.Background(), &lnrpc.SendCustomMessageRequest{
-		Peer: msg.Peer,
-		Type: LspsMessageId,
-		Data: respBytes,
-	})
-	if err != nil {
-		log.Error().
-			Err(err).
-			Str("component", string(logging.LogComponentLSPS0)).
-			Msg("LSPS: Failed to send custom message to peer")
-	}
-}
-
-func (s *Server) route(req *JsonRpcRequest, peer []byte) *JsonRpcResponse {
+// Route dispatches an already-decoded JSON-RPC request to the handler for
+// its method, by name. The only seam between transport/lsps (which owns
+// the lnd-custom-message subscription loop and JSON-RPC envelope
+// marshal/unmarshal) and Handlers (this type): transport/lsps calls Route
+// once it has a *JsonRpcRequest, and does nothing else with the method
+// name itself.
+func (s *Handlers) Route(req *JsonRpcRequest, peer []byte) *JsonRpcResponse {
 	switch req.Method {
 	case "lsps0.list_protocols":
 		return s.handleLsps0ListProtocols(req)

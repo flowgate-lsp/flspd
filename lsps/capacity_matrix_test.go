@@ -136,7 +136,7 @@ func verifyLsps1Capacity(t *testing.T, tc matrixScenario, minFloor uint64) {
 	cfg := Config{
 		Lsps1MaxPendingOrders: 5,
 	}
-	s := NewServer(cfg, lnd, nodes, nil, liquidity, notif)
+	s := NewHandlers(cfg, lnd, nodes, nil, liquidity, notif)
 	s.openingService = store
 
 	zeroU16 := uint16(0)
@@ -198,7 +198,7 @@ func verifyLsps2Capacity(t *testing.T, tc matrixScenario, minFloor uint64) {
 	store := new(MockOpeningStore)
 
 	cfg := Config{}
-	s := NewServer(cfg, nil, nodes, nil, liquidity, nil)
+	s := NewHandlers(cfg, nil, nodes, nil, liquidity, nil)
 	s.openingService = store
 
 	pubkeyBytes := make([]byte, 32)

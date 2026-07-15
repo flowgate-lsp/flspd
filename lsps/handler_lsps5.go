@@ -41,7 +41,7 @@ type Lsps5SetWebhookResponse struct {
 	NoChange    bool `json:"no_change"`
 }
 
-func (s *Server) handleLsps5SetWebhook(req *JsonRpcRequest, peer []byte) *JsonRpcResponse {
+func (s *Handlers) handleLsps5SetWebhook(req *JsonRpcRequest, peer []byte) *JsonRpcResponse {
 	var params Lsps5SetWebhookRequest
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		log.Trace().
@@ -226,7 +226,7 @@ type Lsps5ListWebhooksResponse struct {
 	MaxWebhooks int      `json:"max_webhooks"`
 }
 
-func (s *Server) handleLsps5ListWebhooks(req *JsonRpcRequest, peer []byte) *JsonRpcResponse {
+func (s *Handlers) handleLsps5ListWebhooks(req *JsonRpcRequest, peer []byte) *JsonRpcResponse {
 	peerId := hex.EncodeToString(peer)
 	log.Trace().
 		Str("component", string(logging.LogComponentLSPS5)).
@@ -264,7 +264,7 @@ type Lsps5RemoveWebhookRequest struct {
 	AppName string `json:"app_name"`
 }
 
-func (s *Server) handleLsps5RemoveWebhook(req *JsonRpcRequest, peer []byte) *JsonRpcResponse {
+func (s *Handlers) handleLsps5RemoveWebhook(req *JsonRpcRequest, peer []byte) *JsonRpcResponse {
 	var params Lsps5RemoveWebhookRequest
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		log.Trace().

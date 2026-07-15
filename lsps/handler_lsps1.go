@@ -57,7 +57,7 @@ type Lsps1GetInfoResponse struct {
 	MaxChannelBalanceLoki           string                   `json:"max_channel_balance_loki"`
 }
 
-func (s *Server) getLsps1ConfigValues() (uint16, uint16, bool, uint32, time.Duration, uint64, uint64, uint64, uint64, uint64, uint64, int64) {
+func (s *Handlers) getLsps1ConfigValues() (uint16, uint16, bool, uint32, time.Duration, uint64, uint64, uint64, uint64, uint64, uint64, int64) {
 	nodes := s.nodesService.GetNodes()
 	if len(nodes) == 0 || nodes[0].NodeConfig == nil {
 		// Should not happen if validation passed at startup
@@ -82,7 +82,7 @@ func (s *Server) getLsps1ConfigValues() (uint16, uint16, bool, uint32, time.Dura
 	return minReqConf, fundingConf, supportsZeroReserve, maxExpiry, orderExpiry, minClient, maxClient, minLsp, maxLsp, minChan, maxChan, additional
 }
 
-func (s *Server) handleLsps1GetInfo(req *JsonRpcRequest) *JsonRpcResponse {
+func (s *Handlers) handleLsps1GetInfo(req *JsonRpcRequest) *JsonRpcResponse {
 	log.Trace().
 		Str("component", string(logging.LogComponentLSPS1)).
 		Str("action", string(logging.LogActionRequest)).
@@ -136,7 +136,7 @@ func (s *Server) handleLsps1GetInfo(req *JsonRpcRequest) *JsonRpcResponse {
 }
 
 // isOrderExpired checks if an order is expired based on the invoice expiry duration
-func (s *Server) isOrderExpired(createdAt time.Time) bool {
+func (s *Handlers) isOrderExpired(createdAt time.Time) bool {
 	_, _, _, _, orderExpiry, _, _, _, _, _, _, _ := s.getLsps1ConfigValues()
 	expiryTime := createdAt.Add(orderExpiry)
 	return time.Now().After(expiryTime)
@@ -180,7 +180,7 @@ type Lsps1PaymentBolt11 struct {
 	Invoice        string `json:"invoice"`
 }
 
-func (s *Server) handleLsps1CreateOrder(req *JsonRpcRequest, peer []byte) *JsonRpcResponse {
+func (s *Handlers) handleLsps1CreateOrder(req *JsonRpcRequest, peer []byte) *JsonRpcResponse {
 	var params Lsps1CreateOrderRequest
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		log.Trace().
@@ -430,7 +430,7 @@ type Lsps1GetOrderRequest struct {
 	OrderId string `json:"order_id"`
 }
 
-func (s *Server) handleLsps1GetOrder(req *JsonRpcRequest) *JsonRpcResponse {
+func (s *Handlers) handleLsps1GetOrder(req *JsonRpcRequest) *JsonRpcResponse {
 	var params Lsps1GetOrderRequest
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		log.Trace().

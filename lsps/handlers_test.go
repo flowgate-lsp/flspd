@@ -180,7 +180,7 @@ func TestLsps2Buy(t *testing.T) {
 	mockLiquidity := new(MockLiquidityManager)
 	mockNotification := new(MockNotificationService)
 
-	server := NewServer(Config{Lsps1MaxPendingOrders: 5, Lsps5MaxWebhooks: 10}, mockLnd, mockNodes, mockOpening, mockLiquidity, mockNotification)
+	server := NewHandlers(Config{Lsps1MaxPendingOrders: 5, Lsps5MaxWebhooks: 10}, mockLnd, mockNodes, mockOpening, mockLiquidity, mockNotification)
 
 	// Test Data
 	privKey, pubKey := btcec.PrivKeyFromBytes([]byte("testprivkey1111111111111111111"))
@@ -229,7 +229,7 @@ func TestLsps2Buy(t *testing.T) {
 	}
 
 	// Execute via route (bypassing listener loop for unit test)
-	resp := server.route(req, []byte("peer_id"))
+	resp := server.Route(req, []byte("peer_id"))
 
 	// Verify
 	assert.Nil(t, resp.Error)
@@ -260,7 +260,7 @@ func TestLsps2Buy_PaymentSizeValidation(t *testing.T) {
 	mockLiquidity := new(MockLiquidityManager)
 	mockNotification := new(MockNotificationService)
 
-	server := NewServer(Config{Lsps1MaxPendingOrders: 5, Lsps5MaxWebhooks: 10}, mockLnd, mockNodes, mockOpening, mockLiquidity, mockNotification)
+	server := NewHandlers(Config{Lsps1MaxPendingOrders: 5, Lsps5MaxWebhooks: 10}, mockLnd, mockNodes, mockOpening, mockLiquidity, mockNotification)
 
 	// Test Data
 	privKey, pubKey := btcec.PrivKeyFromBytes([]byte("testprivkey1111111111111111111"))
@@ -310,7 +310,7 @@ func TestLsps2Buy_PaymentSizeValidation(t *testing.T) {
 	}
 	paramsBytes1, _ := json.Marshal(buyParams1)
 	req1 := &JsonRpcRequest{Method: "lsps2.buy", Params: paramsBytes1, Id: "1"}
-	resp1 := server.route(req1, []byte("peer"))
+	resp1 := server.Route(req1, []byte("peer"))
 	assert.NotNil(t, resp1.Error)
 	assert.Equal(t, 202, resp1.Error.Code)
 
@@ -331,7 +331,7 @@ func TestLsps2Buy_PaymentSizeValidation(t *testing.T) {
 	}
 	paramsBytes2, _ := json.Marshal(buyParams2)
 	req2 := &JsonRpcRequest{Method: "lsps2.buy", Params: paramsBytes2, Id: "2"}
-	resp2 := server.route(req2, []byte("peer"))
+	resp2 := server.Route(req2, []byte("peer"))
 	assert.NotNil(t, resp2.Error)
 	assert.Equal(t, 203, resp2.Error.Code)
 }
@@ -344,7 +344,7 @@ func TestLsps1CreateOrder(t *testing.T) {
 	mockLiquidity := new(MockLiquidityManager)
 	mockNotification := new(MockNotificationService)
 
-	server := NewServer(Config{Lsps1MaxPendingOrders: 5, Lsps5MaxWebhooks: 10}, mockLnd, mockNodes, mockOpening, mockLiquidity, mockNotification)
+	server := NewHandlers(Config{Lsps1MaxPendingOrders: 5, Lsps5MaxWebhooks: 10}, mockLnd, mockNodes, mockOpening, mockLiquidity, mockNotification)
 
 	// Test Data
 	privKey, pubKey := btcec.PrivKeyFromBytes([]byte("testprivkey1111111111111111111"))
@@ -433,7 +433,7 @@ func TestLsps1CreateOrder(t *testing.T) {
 		close(done)
 	})
 
-	resp := server.route(req, []byte("peer"))
+	resp := server.Route(req, []byte("peer"))
 
 	select {
 	case <-done:

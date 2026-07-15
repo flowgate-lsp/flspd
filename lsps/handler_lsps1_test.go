@@ -272,7 +272,7 @@ func TestTableHandleLsps1CreateOrder(t *testing.T) {
 
 			tt.mockSetup(mockStore, mockLnd, mockNodes, mockLiquidity, mockNotif)
 
-			server := &Server{
+			server := &Handlers{
 				config:              Config{Lsps1MaxPendingOrders: tt.config.Lsps1MaxPendingOrders},
 				lndClient:           mockLnd,
 				nodesService:        mockNodes,

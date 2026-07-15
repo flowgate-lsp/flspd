@@ -66,7 +66,7 @@ func TestHandleLsps2Buy_CapacityChecks(t *testing.T) {
 				tt.mockSetup(mockNS, mockOS, mockLM)
 			}
 
-			server := NewServer(Config{}, mockLC, mockNS, mockOS, mockLM, mockNotif)
+			server := NewHandlers(Config{}, mockLC, mockNS, mockOS, mockLM, mockNotif)
 
 			// Construct request
 			// We need a dummy opening_fee_params structure to pass unmarshalling

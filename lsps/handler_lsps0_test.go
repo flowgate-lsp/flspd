@@ -9,7 +9,7 @@ import (
 )
 
 func TestHandleLsps0ListProtocols(t *testing.T) {
-	server := &Server{}
+	server := &Handlers{}
 	req := &JsonRpcRequest{Id: json.RawMessage(`"list-protocols-id"`), Method: "lsps0.list_protocols"}
 
 	resp := server.handleLsps0ListProtocols(req)
@@ -22,7 +22,7 @@ func TestHandleLsps0ListProtocols(t *testing.T) {
 }
 
 func TestHandleLsps0GetInfo_WithoutNostrPubkey(t *testing.T) {
-	server := &Server{config: Config{}}
+	server := &Handlers{config: Config{}}
 	req := &JsonRpcRequest{Id: json.RawMessage(`"get-info-id"`), Method: "lsps0.get_info"}
 
 	resp := server.handleLsps0GetInfo(req)
@@ -36,7 +36,7 @@ func TestHandleLsps0GetInfo_WithoutNostrPubkey(t *testing.T) {
 }
 
 func TestHandleLsps0GetInfo_WithNostrPubkey(t *testing.T) {
-	server := &Server{config: Config{Lsps5NostrPubkey: "deadbeef"}}
+	server := &Handlers{config: Config{Lsps5NostrPubkey: "deadbeef"}}
 	req := &JsonRpcRequest{Id: json.RawMessage(`"get-info-id"`), Method: "lsps0.get_info"}
 
 	resp := server.handleLsps0GetInfo(req)

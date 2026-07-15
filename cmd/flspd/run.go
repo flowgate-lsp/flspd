@@ -31,6 +31,7 @@ import (
 	"github.com/flowgate-lsp/flspd/internal/adapters/postgres"
 	"github.com/flowgate-lsp/flspd/lightning"
 	"github.com/flowgate-lsp/flspd/lsps"
+	translsps "github.com/flowgate-lsp/flspd/transport/lsps"
 	"github.com/flowgate-lsp/flspd/notifications"
 	"github.com/flowgate-lsp/flspd/platform/build"
 	"github.com/flowgate-lsp/flspd/platform/config"
@@ -224,7 +225,7 @@ func runLspd(cliCtx *cli.Context) error {
 
 	var settlementServices []*lsps.Lsps1SettlementService
 	var interceptors []interceptor.HtlcInterceptor
-	var lspsServers []*lsps.Server
+	var lspsServers []*translsps.Server
 	for _, node := range nodes {
 		nodeCfg := node.NodeConfig.Load()
 		var htlcInterceptor interceptor.HtlcInterceptor
@@ -294,7 +295,8 @@ func runLspd(cliCtx *cli.Context) error {
 		}
 
 		liquidityManager := lsps.NewLiquidityManager(client, openingStore)
-		lspsServer := lsps.NewServer(lspsConfig, client, nodesService, openingService, liquidityManager, dashBridge)
+		lspsHandlers := lsps.NewHandlers(lspsConfig, client, nodesService, openingService, liquidityManager, dashBridge)
+		lspsServer := translsps.NewServer(client, lspsHandlers)
 		lspsServer.Start()
 		lspsServers = append(lspsServers, lspsServer)
 	}

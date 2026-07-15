@@ -6,7 +6,7 @@ import (
 )
 
 // handleLsps0ListProtocols returns the list of supported protocols (2 for now, soon 1 and 5)
-func (s *Server) handleLsps0ListProtocols(req *JsonRpcRequest) *JsonRpcResponse {
+func (s *Handlers) handleLsps0ListProtocols(req *JsonRpcRequest) *JsonRpcResponse {
 	log.Trace().
 		Str("component", string(logging.LogComponentLSPS0)).
 		Str("action", string(logging.LogActionRequest)).
@@ -27,7 +27,7 @@ type Lsps0GetInfoResponse struct {
 	NotificationNostrPubkey string `json:"notification_nostr_pubkey,omitempty"`
 }
 
-func (s *Server) handleLsps0GetInfo(req *JsonRpcRequest) *JsonRpcResponse {
+func (s *Handlers) handleLsps0GetInfo(req *JsonRpcRequest) *JsonRpcResponse {
 	log.Trace().
 		Str("component", string(logging.LogComponentLSPS0)).
 		Str("action", string(logging.LogActionRequest)).

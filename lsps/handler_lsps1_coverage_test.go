@@ -134,7 +134,7 @@ func TestHandleLsps1CreateOrder_Matrix(t *testing.T) {
 
 			// Server setup
 			cfg := Config{Lsps1MaxPendingOrders: 10}
-			server := NewServer(cfg, mockLC, mockNS, mockOS, mockLM, mockNotif)
+			server := NewHandlers(cfg, mockLC, mockNS, mockOS, mockLM, mockNotif)
 
 			// Request construction
 			reqData := map[string]interface{}{
@@ -249,7 +249,7 @@ func TestHandleLsps1CreateOrder_FeeMatchesUnifiedFeeFunction(t *testing.T) {
 	})).Return(nil)
 	mockNotif.On("NotifyOrderStateChanged", mock.Anything, mock.Anything, "CREATED", "", "").Return(true, nil)
 
-	server := NewServer(Config{Lsps1MaxPendingOrders: 10}, mockLC, mockNS, mockOS, mockLM, mockNotif)
+	server := NewHandlers(Config{Lsps1MaxPendingOrders: 10}, mockLC, mockNS, mockOS, mockLM, mockNotif)
 
 	reqData := map[string]interface{}{
 		"client_balance_loki":            "0",

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/flokiorg/flnd/lnrpc"
+	lspslogic "github.com/flowgate-lsp/flspd/lsps"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -61,28 +62,70 @@ func (f *fakeCustomMessagesStream) Recv() (*lnrpc.CustomMessage, error) {
 	select {}
 }
 
+// mockMessageClient is a local MessageClient mock -- lsps.MockLndClient
+// (the equivalent used by lsps' own tests) lives in a _test.go file and
+// so isn't importable across the package boundary; this narrower mock
+// only needs the two methods MessageClient itself declares.
+type mockMessageClient struct {
+	mock.Mock
+}
+
+func (m *mockMessageClient) SubscribeCustomMessages(ctx context.Context, req *lnrpc.SubscribeCustomMessagesRequest) (lnrpc.Lightning_SubscribeCustomMessagesClient, error) {
+	args := m.Called(ctx, req)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(lnrpc.Lightning_SubscribeCustomMessagesClient), args.Error(1)
+}
+
+func (m *mockMessageClient) SendCustomMessage(ctx context.Context, msg *lnrpc.SendCustomMessageRequest) (*lnrpc.SendCustomMessageResponse, error) {
+	args := m.Called(ctx, msg)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*lnrpc.SendCustomMessageResponse), args.Error(1)
+}
+
 func lspsMessage(peer []byte, payload interface{}) *lnrpc.CustomMessage {
 	data, _ := json.Marshal(payload)
 	return &lnrpc.CustomMessage{Peer: peer, Type: LspsMessageId, Data: data}
 }
 
+// fakeRouter is a minimal Router: these tests are about the transport
+// loop's own behavior (message-type filtering, shutdown,
+// marshal/unmarshal, and that handleMessage calls Route and sends back
+// whatever it returns), not about the real LSPS0/1/2/5 dispatch logic
+// (lsps.Handlers' own tests cover that). It always returns the same
+// canned response, echoing the request's Id like a real handler would.
+type fakeRouter struct {
+	result interface{}
+}
+
+func (f *fakeRouter) Route(req *lspslogic.JsonRpcRequest, peer []byte) *lspslogic.JsonRpcResponse {
+	return lspslogic.NewJsonRpcResponse(req.Id, f.result)
+}
+
+func newTestServer(messageClient MessageClient) *Server {
+	return NewServer(messageClient, &fakeRouter{result: map[string]string{"ok": "true"}})
+}
+
 // TestHandleMessage_ValidRequest_RoutesAndReplies covers handleMessage's
 // full round trip: unmarshal -> route -> marshal -> SendCustomMessage.
 func TestHandleMessage_ValidRequest_RoutesAndReplies(t *testing.T) {
-	mockLnd := new(MockLndClient)
+	mockLnd := new(mockMessageClient)
 	var sentData []byte
 	mockLnd.On("SendCustomMessage", mock.Anything, mock.MatchedBy(func(req *lnrpc.SendCustomMessageRequest) bool {
 		sentData = req.Data
 		return req.Type == LspsMessageId
 	})).Return(&lnrpc.SendCustomMessageResponse{}, nil)
 
-	server := NewServer(Config{}, mockLnd, new(MockNodesService), new(MockOpeningService), new(MockLiquidityManager), new(MockNotificationService))
-	msg := lspsMessage([]byte{0x01}, JsonRpcRequest{JsonRpc: "2.0", Method: "lsps0.list_protocols", Id: "req-1"})
+	server := newTestServer(mockLnd)
+	msg := lspsMessage([]byte{0x01}, lspslogic.JsonRpcRequest{JsonRpc: "2.0", Method: "lsps0.list_protocols", Id: "req-1"})
 
 	server.handleMessage(msg)
 
 	require.NotEmpty(t, sentData)
-	var resp JsonRpcResponse
+	var resp lspslogic.JsonRpcResponse
 	require.NoError(t, json.Unmarshal(sentData, &resp))
 	assert.Nil(t, resp.Error)
 	mockLnd.AssertCalled(t, "SendCustomMessage", mock.Anything, mock.Anything)
@@ -93,8 +136,8 @@ func TestHandleMessage_ValidRequest_RoutesAndReplies(t *testing.T) {
 // try to construct a response for a request it couldn't even parse an ID
 // out of.
 func TestHandleMessage_UnparsableJSON_DoesNotReply(t *testing.T) {
-	mockLnd := new(MockLndClient)
-	server := NewServer(Config{}, mockLnd, new(MockNodesService), new(MockOpeningService), new(MockLiquidityManager), new(MockNotificationService))
+	mockLnd := new(mockMessageClient)
+	server := newTestServer(mockLnd)
 	msg := &lnrpc.CustomMessage{Peer: []byte{0x01}, Type: LspsMessageId, Data: []byte(`not-json`)}
 
 	server.handleMessage(msg)
@@ -107,7 +150,7 @@ func TestHandleMessage_UnparsableJSON_DoesNotReply(t *testing.T) {
 // a normal stream-end (context canceled) is treated as a clean shutdown,
 // not an error to retry on.
 func TestSubscribeAndListen_DispatchesLspsMessagesOnly(t *testing.T) {
-	mockLnd := new(MockLndClient)
+	mockLnd := new(mockMessageClient)
 	var handledCount int32
 	var mu sync.Mutex
 	mockLnd.On("SendCustomMessage", mock.Anything, mock.Anything).Run(func(mock.Arguments) {
@@ -118,14 +161,14 @@ func TestSubscribeAndListen_DispatchesLspsMessagesOnly(t *testing.T) {
 
 	stream := &fakeCustomMessagesStream{
 		messages: []*lnrpc.CustomMessage{
-			lspsMessage([]byte{0x01}, JsonRpcRequest{JsonRpc: "2.0", Method: "lsps0.list_protocols", Id: "1"}),
+			lspsMessage([]byte{0x01}, lspslogic.JsonRpcRequest{JsonRpc: "2.0", Method: "lsps0.list_protocols", Id: "1"}),
 			{Peer: []byte{0x01}, Type: 99999, Data: []byte(`{}`)}, // not an LSPS message, must be ignored
 		},
 		recvErr: status.Error(codes.Canceled, "context canceled"),
 	}
 	mockLnd.On("SubscribeCustomMessages", mock.Anything, mock.Anything).Return(stream, nil)
 
-	server := NewServer(Config{}, mockLnd, new(MockNodesService), new(MockOpeningService), new(MockLiquidityManager), new(MockNotificationService))
+	server := newTestServer(mockLnd)
 	server.quit = make(chan struct{})
 
 	err := server.subscribeAndListen()
@@ -142,11 +185,11 @@ func TestSubscribeAndListen_DispatchesLspsMessagesOnly(t *testing.T) {
 // path: a non-Canceled Recv error must be returned so messageLoop's
 // caller knows to back off and retry, not swallowed like a clean shutdown.
 func TestSubscribeAndListen_RecvErrorPropagates(t *testing.T) {
-	mockLnd := new(MockLndClient)
+	mockLnd := new(mockMessageClient)
 	stream := &fakeCustomMessagesStream{recvErr: errors.New("connection reset")}
 	mockLnd.On("SubscribeCustomMessages", mock.Anything, mock.Anything).Return(stream, nil)
 
-	server := NewServer(Config{}, mockLnd, new(MockNodesService), new(MockOpeningService), new(MockLiquidityManager), new(MockNotificationService))
+	server := newTestServer(mockLnd)
 	server.quit = make(chan struct{})
 
 	err := server.subscribeAndListen()
@@ -156,10 +199,10 @@ func TestSubscribeAndListen_RecvErrorPropagates(t *testing.T) {
 // TestSubscribeAndListen_SubscribeErrorPropagates covers the case where
 // the initial SubscribeCustomMessages call itself fails.
 func TestSubscribeAndListen_SubscribeErrorPropagates(t *testing.T) {
-	mockLnd := new(MockLndClient)
+	mockLnd := new(mockMessageClient)
 	mockLnd.On("SubscribeCustomMessages", mock.Anything, mock.Anything).Return(nil, assert.AnError)
 
-	server := NewServer(Config{}, mockLnd, new(MockNodesService), new(MockOpeningService), new(MockLiquidityManager), new(MockNotificationService))
+	server := newTestServer(mockLnd)
 	server.quit = make(chan struct{})
 
 	err := server.subscribeAndListen()
@@ -171,13 +214,13 @@ func TestSubscribeAndListen_SubscribeErrorPropagates(t *testing.T) {
 // own quit-triggered context cancellation) rather than hang waiting for a
 // stream that will never produce a normal Recv() error on its own.
 func TestStartStop_ReturnsPromptly(t *testing.T) {
-	mockLnd := new(MockLndClient)
+	mockLnd := new(mockMessageClient)
 	stream := &fakeCustomMessagesStream{} // blocks in Recv() until its context is canceled
 	mockLnd.On("SubscribeCustomMessages", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
 		stream.withContext(args.Get(0).(context.Context))
 	}).Return(stream, nil)
 
-	server := NewServer(Config{}, mockLnd, new(MockNodesService), new(MockOpeningService), new(MockLiquidityManager), new(MockNotificationService))
+	server := newTestServer(mockLnd)
 	server.Start()
 
 	done := make(chan struct{})
@@ -196,13 +239,13 @@ func TestStartStop_ReturnsPromptly(t *testing.T) {
 // TestStop_IsIdempotent covers quitOnce: calling Stop twice must not panic
 // on a double-close of the quit channel.
 func TestStop_IsIdempotent(t *testing.T) {
-	mockLnd := new(MockLndClient)
+	mockLnd := new(mockMessageClient)
 	stream := &fakeCustomMessagesStream{}
 	mockLnd.On("SubscribeCustomMessages", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
 		stream.withContext(args.Get(0).(context.Context))
 	}).Return(stream, nil)
 
-	server := NewServer(Config{}, mockLnd, new(MockNodesService), new(MockOpeningService), new(MockLiquidityManager), new(MockNotificationService))
+	server := newTestServer(mockLnd)
 	server.Start()
 
 	done := make(chan struct{})
