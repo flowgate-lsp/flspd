@@ -3,6 +3,7 @@ package itest
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"testing"
@@ -180,6 +181,31 @@ func (sc *ScenarioContext) pubkey(role string) (string, error) {
 		return "", fmt.Errorf("GetInfo for role %q: %w", role, err)
 	}
 	return info.Pubkey, nil
+}
+
+// channelCount returns how many channels role currently has with peer.
+// Shared by the channel_count/channel_count_delta assertions and the
+// count_channels step.
+func (sc *ScenarioContext) channelCount(role, peer string) (int, error) {
+	c, err := sc.client(role)
+	if err != nil {
+		return 0, err
+	}
+	peerPubkeyHex, err := sc.pubkey(peer)
+	if err != nil {
+		return 0, err
+	}
+	channels, err := c.ListChannels()
+	if err != nil {
+		return 0, err
+	}
+	count := 0
+	for _, ch := range channels {
+		if hex.EncodeToString(ch.PeerId) == peerPubkeyHex {
+			count++
+		}
+	}
+	return count, nil
 }
 
 // save records a value under name for later steps/assertions to look up

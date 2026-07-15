@@ -20,6 +20,9 @@ func init() {
 	stepRegistry["auto_accept_channels"] = stepAutoAcceptChannels
 	stepRegistry["lsps1_create_order"] = stepLsps1CreateOrder
 	stepRegistry["wait_for_lsps1_order_state"] = stepWaitForLsps1OrderState
+	stepRegistry["kill_lsp"] = stepKillLsp
+	stepRegistry["restart_lsp"] = stepRestartLsp
+	stepRegistry["count_channels"] = stepCountChannels
 	stepRegistry["lsps2_buy"] = stepLsps2Buy
 	stepRegistry["create_jit_invoice"] = stepCreateJitInvoice
 	stepRegistry["pay_invoice"] = stepPayInvoice
@@ -452,4 +455,61 @@ func stepPayInvoice(t *testing.T, sc *ScenarioContext, params *yaml.Node) error 
 	}
 	_, err = PayInvoice(sc.Ctx, router, bolt11, outgoingChanId, time.Duration(p.TimeoutSeconds)*time.Second)
 	return err
+}
+
+// --- kill_lsp: {} ---
+// Fault injection (T4-3): SIGKILL's the flspd-under-test process, simulating
+// a crash rather than a graceful shutdown -- see FlspdProcess.Kill's own
+// doc comment, this is deliberately what the F-1/F-8 recovery scenarios
+// need, not Stop's clean SIGTERM path.
+
+func stepKillLsp(t *testing.T, sc *ScenarioContext, params *yaml.Node) error {
+	var p struct{}
+	if err := decodeParamsStrict(params, &p); err != nil {
+		return err
+	}
+	return sc.Flspd.Kill()
+}
+
+// --- restart_lsp: {} ---
+// Starts a fresh flspd instance with the exact same config after kill_lsp,
+// so it reconnects to the same flnd role and Postgres database and runs
+// its startup recovery sweep -- see FlspdProcess.Restart, which this
+// mirrors minus the redundant Kill (kill_lsp is its own explicit step, so
+// a scenario can assert on state in between the two).
+
+func stepRestartLsp(t *testing.T, sc *ScenarioContext, params *yaml.Node) error {
+	var p struct{}
+	if err := decodeParamsStrict(params, &p); err != nil {
+		return err
+	}
+	return sc.Flspd.Start()
+}
+
+// --- count_channels: {as: <role>, peer: <role>, save_as: name} ---
+// Snapshots the current channel count between two roles. This devnet's
+// chain/peer state is long-lived across test runs (see
+// test/devnet/README.md), so channels accumulate across unrelated runs --
+// an absolute channel_count assertion isn't reliable on its own. Pair
+// this step (taken before the action under test) with
+// channel_count_delta (checked after) to assert on *this scenario's own*
+// effect regardless of pre-existing history.
+func stepCountChannels(t *testing.T, sc *ScenarioContext, params *yaml.Node) error {
+	var p struct {
+		As     string `yaml:"as"`
+		Peer   string `yaml:"peer"`
+		SaveAs string `yaml:"save_as"`
+	}
+	if err := decodeParamsStrict(params, &p); err != nil {
+		return err
+	}
+	if p.As == "" || p.Peer == "" || p.SaveAs == "" {
+		return fmt.Errorf("count_channels: as, peer, and save_as are all required")
+	}
+
+	count, err := sc.channelCount(p.As, p.Peer)
+	if err != nil {
+		return err
+	}
+	return sc.save(p.SaveAs, count)
 }
