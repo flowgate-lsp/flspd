@@ -1404,17 +1404,75 @@ These are latency/CPU/memory notes from the original audit. None are
 correctness bugs; none block the phases above, but they're easiest to land
 alongside the Phase 3 tests for the same code.
 
+**Status (2026-07-15):** investigated all four against the current code
+(not just the original one-line notes) before touching anything — this
+hot path (`interceptor/intercept_handler.go`) is the exact code this
+session's T4-1 work spent significant effort characterizing a live,
+still-open timing race in (see Phase 4), and P-4 specifically turned out
+to have a real behavioral trap once actually read rather than assumed
+safe from its one-line description. No code changes made this pass;
+verifying that risk *before* changing hot-path timing/concurrency behavior
+is the actual deliverable here, given what's already fragile in this area.
+
 - **P-1** `Intercept` polls `GetChannel` (1s) and `QueryRoutes` (500ms) on
   fixed timers instead of driving off the existing channel-active event
   subscription in `lnd/client.go` — costs tail latency and idle load.
+  **Confirmed, concrete fix path exists but not attempted:**
+  `internal/adapters/lnd/client.go`'s `listenChannelEvents()` +
+  `WaitChannelActive` already implement exactly this kind of
+  subscription-based wait (`notifyAndWait` already uses
+  `WaitChannelActive` for a different case), so P-1 isn't a "build new
+  infrastructure" problem, it's a "wire the existing primitive into this
+  specific loop" problem. Not done this pass: the `GetChannel` loop needs
+  the *specific* `channelPoint` `openChannel` just returned, not just
+  "any active channel with this peer" (what `WaitChannelActive` checks),
+  and the second inner loop (`QueryRoutes` polling for router balance
+  sync) has no existing event-driven equivalent at all — that's the same
+  "insufficient local balance never resolves" gap Phase 4 already
+  documented as open. Changing this loop's timing without dedicated,
+  repeated live-devnet verification (each run takes over a minute) risks
+  masking or worsening that already-tracked race rather than just being a
+  clean perf win.
 - **P-2** `GetPeerId` / `IsConnected` do full `ListChannels`/`ListPeers`
   scans on every interception; a cached peer↔scid map refreshed off the
-  channel-event stream removes them from the hot path.
+  channel-event stream removes them from the hot path. **Confirmed real**
+  (`internal/adapters/lnd/client.go`'s `GetPeerId`/`IsConnected`, both
+  called from `Intercept()`'s hot path) — the channel-event subscription
+  infrastructure `listenChannelEvents()` already maintains internally
+  could back a cache, but building and invalidating that cache correctly
+  is new work, not a wire-up of something existing like P-1's fix is.
 - **P-3** `ListPeers` calls `GetNodeInfo` per peer (N+1 gRPC) for UI
   alias/color data — fine for a dashboard poll, wrong if ever called hot.
+  **Verified, no action needed:** every call site
+  (`grep -rn '\.ListPeers('`) is in `dashboard/service.go` — 5 call
+  sites, all dashboard-facing. It is not, in fact, ever called hot today;
+  the note's own caveat doesn't currently apply.
 - **P-4** Notification fan-out spawns one goroutine per webhook per event
   with a 7s context inline on the interception path; route through the
-  existing persistent queue asynchronously instead.
+  existing persistent queue asynchronously instead. **The literal fix
+  would be a regression, found by actually reading the call sites:**
+  `notifications/notification_service.go`'s `Notify()` already writes to
+  a durable, persistent queue (`store.Enqueue` → `notification_queue`
+  table) *and* a background poller already exists
+  (`NotificationService.Start` → `runWorker`, 10s tick,
+  `processPending`/`GetPending` with exponential backoff) — so "enqueue
+  and let the async worker deliver it" is mechanically trivial (drop the
+  eager `deliverOne` call + `wg.Wait()` in `Notify()`/`enqueueAndDeliver`,
+  just enqueue and return). *But* `interceptor/intercept_handler.go`'s
+  `notifyAndWait` (line ~424) depends on `Notify()`'s current *synchronous
+  delivery* return value as a real fast-fail signal: `if err != nil ||
+  !notified { resume immediately }` — skipping the up-to-`NotificationTimeout`
+  (default 1 minute) `WaitOnline` block specifically when the push
+  notification is known to have failed to *reach* the client (webhook
+  down, DNS failure, etc.), not just "wasn't delivered yet." Making
+  `Notify()` enqueue-only would make every one of those failed-webhook
+  cases block for up to a minute instead of failing fast — a real latency
+  regression on exactly the path this was meant to speed up, not a safe
+  perf-only change. A correct fix needs to preserve that fast-fail
+  signal (e.g. keep one bounded/short synchronous delivery attempt for
+  the `notifyAndWait` caller specifically, route only the
+  fire-and-forget caller at `intercept_handler.go:173` through pure
+  enqueue) rather than changing `Notify()`'s contract wholesale.
 
 ---
 
