@@ -37,7 +37,7 @@ number-soup and then get reorganized a second time.
 |---|---|---|---|
 | 0 | Contain live secret exposure | Untracked, purged, guarded | ✅ Done — confirmed test data, no rotation needed |
 | 1 | Green the build + safety net | `go test ./... -race` passes in CI | ◐ T1-1..T1-3 done; T1-4, T1-5 open |
-| 2 | Fix defects on current structure | All P2 items merged w/ regression test | ✅ F-1, F-2, C-1, C-2, C-3, F-5, F-7, F-9, F-10, F-11, F-12, F-13 done; F-8 (medium) remains |
+| 2 | Fix defects on current structure | All P2 items merged w/ regression test | ✅ All items done: F-1, F-2, C-1, C-2, C-3, F-5, F-7, F-8, F-9, F-10, F-11, F-12, F-13 |
 | 3 | Unit-test coverage buildout | Critical-four packages ≥70–80% | ◐ In progress: F-5, F-6, F-7, F-9, F-12, F-13 done, T3-2/T3-3/T3-4/T3-5/T3-6 done; interceptor 38.9%, lsps 49.4%, postgresql 69.1%, notifications 54.3%, lnd 4.7%, common 36.0%, config 93.4%, lightning 86.9%, auth 76.5% |
 | 4 | YAML-driven integration tests | Runner + 3 seed scenarios merged | ◐ Foundation built + proven (Devnet/FlspdProcess/LSPS2 client, 2 more real bugs found — F-10 additions); YAML schema/runner not started; scenario 1's Go-level proof blocked on a devnet gossip-propagation gap, see T4-1 |
 | 5 | Config model + secrets-by-reference | New model shipped behind compat shim | ✅ T5-1..T5-7 done (secrets-by-reference, unit/fee/channel-size model, profiles, CLI tooling, Settings.tsx re-skin — frontend not browser-verified, no automation tooling available) |
@@ -446,6 +446,22 @@ orders against actual on-chain/LND channel state, not just retry the open.
 
 **Acceptance criteria:** test simulating a DB write failure post-open,
 asserting the next recovery sweep reconciles the order to COMPLETED.
+
+**Status:** ✅ Done (commit `f9f06d1`). Found a second bug while fixing
+the first: the *existing* recovery sweep for stuck PAID orders called
+`openChannelForOrder` unconditionally for every one — meaning any order
+stuck in PAID because the COMPLETED write failed (channel already open)
+would get a duplicate `OpenChannel` attempt on the next sweep. Fixed by
+checking for recorded funding (`FundingTxid`/`FundingOutpoint`, only set
+after `OpenChannel` + `UpdateLsps1OrderFunding` both already succeeded)
+before retrying: if present, verify the channel is still active via
+`GetChannel` and reconcile straight to COMPLETED; if the recorded channel
+can't be found active, leave the order in PAID for manual review rather
+than guessing (retrying `OpenChannel` here would reintroduce the same
+double-open risk). Orders with no recorded funding fall through to the
+existing retry path unchanged. Confirmed via revert-and-verify — the new
+test panics against the original code (proves `openChannelForOrder` ran
+again instead of reconciling) and passes with the fix.
 
 ### F-9: Outpoint byte-order bug — channel-sync path stored reversed txids
 **Severity:** High · **Location:** `lightning/outpoint.go` (`NewOutPointFromString`)
