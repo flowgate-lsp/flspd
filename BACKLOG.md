@@ -41,7 +41,7 @@ number-soup and then get reorganized a second time.
 | 3 | Unit-test coverage buildout | Critical-four packages ≥70–80% | ✅ Done: F-5, F-6, F-7, F-8, F-9, F-12, F-13, T1-4/T3-2..T3-6 all done. All four critical packages now clear the target: **postgresql 69.1%→81.2%, notifications 54.3%→70.3%, lsps 50.1%→78.6%, interceptor 58.3%→73.4%**. Notable finds along the way, not just coverage: `lsps1_settlement_store.go`'s `UpdateLsps1OrderFunding` silently no-ops on an unknown order_id; two near-duplicate `GetPaidLsps1Order` implementations disagree on their not-found contract (only one is actually reachable in production); `notification_service.go`'s `Notify()` return value is a real fast-fail signal `notifyAndWait` depends on (relevant background for the still-open Performance-backlog P-4 write-up below); a genuine data race in a `lsps` test itself (reading `mock.Mock.Calls` from a different goroutine than the one appending to it) caught by `-race`, not just written defensively. `handler_lsps2.go`'s `lsps2Buy` and `server.go`'s core JSON-RPC dispatch (`subscribeAndListen`/`handleMessage`/`route`) remain the largest *remaining* gaps in `lsps` specifically, but the package-level target is already met. `lnd` 4.7%, `common` 36.0%, `config` 93.4%, `lightning` 86.9%, `auth` 76.5% are not part of the critical four and untouched this round. |
 | 4 | YAML-driven integration tests | Runner + 3 seed scenarios merged | ✅ Runner built + all 3 seed scenarios landed (T4-1/T4-2). LSPS1 test client added; `lsps1_order_settle_and_open.yaml` and `lsps1_recovery_after_restart.yaml` (F-1 regression, real kill/restart) both pass on real flspd/flnd/chain processes. `lsps2_jit_happy_path.yaml` intentionally left known-failing on the distinct zero-conf-balance-sync race documented in T4-1 — not swept under the rug. `kill_lsp`/`restart_lsp` fault injection landed (T4-3, partial); relay-failure/mempool-fee fault injection not started. This package isn't wired into the CI gate yet (path-filtered out of `ci.yml`), so "pass in CI" is still open follow-up work. |
 | 5 | Config model + secrets-by-reference | New model shipped behind compat shim | ✅ T5-1..T5-7 done (secrets-by-reference, unit/fee/channel-size model, profiles, CLI tooling, Settings.tsx re-skin — frontend not browser-verified, no automation tooling available) |
-| 6 | Repo structure / arbo migration | Tree matches target layout, build green throughout | ◐ T6-1..T6-3 done (format/ folded into common/, internal/adapters/ introduced, common/ split into core/ports/services/); T6-4 partial (rpc/→api/proto/rpc/, config/→platform/config/, build/→platform/build/, auth/→transport/auth/, notifications/ proto split→api/proto/notifications/, common/logger.go+log_enums.go→platform/logging/ all done; notifications/server.go transport classification resolved as "stays put" — naming collision with notifications/'s own transport.go; lsps/→lsps+transport/lsps/ split done (Server/route split from Handlers/Route on the real subscription-loop-vs-protocol-handler seam, verified live against devnet); dashboard/ transport-vs-logic split deliberately deferred — genuine symbol-level ambiguity, not mechanical risk); T6-5 done (configs/examples/, test/itest/, deploy/, web/ all landed — deploy/+web/ landed on explicit user go-ahead, stashed+reapplied someone else's uncommitted dev-tooling edits with re-derived paths) |
+| 6 | Repo structure / arbo migration | Tree matches target layout, build green throughout | ✅ Done. T6-1..T6-3 (format/ folded into common/, internal/adapters/ introduced, common/ split into core/ports/services/); T6-4 (rpc/→api/proto/rpc/, config/→platform/config/, build/→platform/build/, auth/→transport/auth/, notifications/ proto split→api/proto/notifications/, common/logger.go+log_enums.go→platform/logging/, notifications/server.go transport classification resolved "stays put", lsps/→lsps+transport/lsps/ and dashboard/→dashboard+transport/dashboard/ splits both landed on the real transport-vs-logic seam, verified live against devnet for lsps/); T6-5 (configs/examples/, test/itest/, deploy/, web/ — deploy/+web/ landed on explicit user go-ahead, stashed+reapplied someone else's uncommitted dev-tooling edits with re-derived paths) — all sub-items done. |
 | — | Performance backlog (parallel, non-blocking) | — | ◐ Investigated, not implemented: P-3 verified as no-op (never called hot); P-1/P-2 have concrete fix paths documented but need dedicated live-devnet regression verification; P-4's literal fix would regress `notifyAndWait`'s fast-fail behavior — narrower fix documented instead |
 
 ---
@@ -1297,9 +1297,11 @@ auth); `platform/` for config/logging/build; `api/proto/` as the one home
 for `.proto` + generated code (currently interleaved with hand-written logic
 in `rpc/`, `notifications/`).
 
-**Status (2026-07-15):** ◐ Partially done — the mechanical, low-risk moves
-landed; the ones needing real symbol-level business-logic-vs-transport
-separation (same rigor T6-3 needed) are deliberately deferred, not rushed.
+**Status (2026-07-15):** ✅ Done — including the two splits (`lsps/`,
+`dashboard/`) originally deferred pending real symbol-level
+business-logic-vs-transport separation (the rigor T6-3 needed);
+tracing each package's actual per-method dependency shape turned up a
+clean, real seam in both, not just in the mechanical moves.
 
 Landed, each verified with `go build`/`go vet`/full test suite green
 before moving to the next:
@@ -1408,14 +1410,36 @@ real-devnet LSPS1 scenarios (including the F-1 kill-mid-settlement
 regression test) against live `flspd`/`flnd`/chain processes — both
 pass. `lsps` coverage 78.6%→89.5%, `transport/lsps` 80.4% (new).
 
-**Deliberately not done, same reasoning as T6-5's own precedent below**
-(genuine architectural ambiguity needing careful per-symbol work, not
-mechanical risk):
-- `dashboard/`'s HTTP-handler (transport) vs. config-update/analytics
-  (business logic) split — same shape of problem as `lsps/`; recall
-  C-1/C-2/C-3 (Phase 2) were all bugs *in* `dashboard/service.go`'s
-  config-handling logic, not its HTTP plumbing, which is itself evidence
-  this package mixes the two rather than being pure transport.
+**`dashboard/`'s HTTP-handler (transport) vs. config-update/analytics
+(business logic) split — done (2026-07-15).** Same shape of question
+as `lsps/`'s split above, and the same answer once traced instead of
+assumed: `dashboard/service.go`'s single `DashboardService` struct
+mixed NIP-98 auth, the admin-pubkey authorization gate, and websocket
+infra (`ServeHTTP`/`handleWS`/`Hub`/`Client`) with the 9 `handleXxx`
+methods implementing the actual business logic (config CRUD — C-1/
+C-2/C-3 all lived here — analytics/liquidity aggregation). Checked
+per-method field usage the same way as `lsps/`: every handler uses
+only `nodesService`/`openingStore`/`configPath`; `ServeHTTP`/
+`handleWS` use only `adminPubKey`/`hub`. Clean, real seam. Also
+found, not touched (out of scope for a pure structural split, noted
+for whoever picks up `dashboard/` next): `openingService` and
+`historyStore` are accepted by the constructor and stored but never
+actually read by any handler — dead dependencies. Landed as
+`dashboard/` (business logic, stays — `DashboardService` renamed
+`Handlers`, dropped `adminPubKey`, added exported `Route` mirroring
+`lsps.Handlers.Route`) + new `transport/dashboard/` (`ServeHTTP`,
+`handleWS`, `Hub`/`Client`, `BroadcastEvent`, depending on the same
+small-`Router`-interface pattern as `transport/lsps` for the same
+reason — Go test files can't cross a package boundary). The original
+had zero tests for `ServeHTTP`/`handleWS`/`Hub`/`Client` at all (every
+existing test called handler methods directly, bypassing transport
+entirely), so this wasn't preserving coverage, it was adding it: 8
+new tests for `transport/dashboard` covering the full NIP-98 auth →
+admin-pubkey gate → `Router.Route` dispatch round trip with a *real*
+signed-and-verified auth header (not a stub), healthz's auth-bypass,
+and the `Hub` broadcast fan-out. `transport/dashboard` 0%→54.1%
+coverage; `dashboard` unchanged at 35.2% (logic tests moved intact).
+
 - `common/logger.go` + `log_enums.go` → `platform/logging/` (the last
   piece of T6-3's own predicted `platform/` destination for these) —
   **done.** Since only 2 of `common/`'s 5 files moved, the destination
