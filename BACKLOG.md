@@ -39,7 +39,7 @@ number-soup and then get reorganized a second time.
 | 1 | Green the build + safety net | `go test ./... -race` passes in CI | ✅ T1-1..T1-5 done |
 | 2 | Fix defects on current structure | All P2 items merged w/ regression test | ✅ All items done: F-1, F-2, C-1, C-2, C-3, F-5, F-7, F-8, F-9, F-10, F-11, F-12, F-13 |
 | 3 | Unit-test coverage buildout | Critical-four packages ≥70–80% | ✅ Done: F-5, F-6, F-7, F-8, F-9, F-12, F-13, T1-4/T3-2..T3-6 all done. All four critical packages now clear the target: **postgresql 69.1%→81.2%, notifications 54.3%→70.3%, lsps 50.1%→78.6%, interceptor 58.3%→73.4%**. Notable finds along the way, not just coverage: `lsps1_settlement_store.go`'s `UpdateLsps1OrderFunding` silently no-ops on an unknown order_id; two near-duplicate `GetPaidLsps1Order` implementations disagree on their not-found contract (only one is actually reachable in production); `notification_service.go`'s `Notify()` return value is a real fast-fail signal `notifyAndWait` depends on (relevant background for the still-open Performance-backlog P-4 write-up below); a genuine data race in a `lsps` test itself (reading `mock.Mock.Calls` from a different goroutine than the one appending to it) caught by `-race`, not just written defensively. `handler_lsps2.go`'s `lsps2Buy` and `server.go`'s core JSON-RPC dispatch (`subscribeAndListen`/`handleMessage`/`route`) remain the largest *remaining* gaps in `lsps` specifically, but the package-level target is already met. `lnd` 4.7%, `common` 36.0%, `config` 93.4%, `lightning` 86.9%, `auth` 76.5% are not part of the critical four and untouched this round. |
-| 4 | YAML-driven integration tests | Runner + 3 seed scenarios merged | ✅ Runner built + all 3 seed scenarios landed (T4-1/T4-2). LSPS1 test client added; `lsps1_order_settle_and_open.yaml` and `lsps1_recovery_after_restart.yaml` (F-1 regression, real kill/restart) both pass on real flspd/flnd/chain processes. `lsps2_jit_happy_path.yaml` intentionally left known-failing on the distinct zero-conf-balance-sync race documented in T4-1 — not swept under the rug. `kill_lsp`/`restart_lsp` fault injection landed (T4-3, partial); relay-failure/mempool-fee fault injection not started. Wired into CI as `.github/workflows/itest.yml` (2026-07-15) — `workflow_dispatch` + nightly, deliberately *not* on every push/PR (user's explicit call): the suite checks out and builds 4 sibling repos from source plus a live devnet before testing, realistically 10-20+ min with more inherent flakiness risk than a unit suite, not something to put in the PR-blocking path. |
+| 4 | YAML-driven integration tests | Runner + 3 seed scenarios merged | ✅ Runner built + all 3 seed scenarios landed (T4-1/T4-2). LSPS1 test client added; `lsps1_order_settle_and_open.yaml` and `lsps1_recovery_after_restart.yaml` (F-1 regression, real kill/restart) both pass on real flspd/flnd/chain processes, though the latter is flaky (new 2026-07-15 finding, pre-existing not a regression — see T4-2's own writeup). `lsps2_jit_happy_path.yaml` intentionally left known-failing on the distinct zero-conf-balance-sync race documented in T4-1 — not swept under the rug. `kill_lsp`/`restart_lsp` fault injection landed (T4-3, partial); relay-failure/mempool-fee fault injection not started. Wired into CI as `.github/workflows/itest.yml` (2026-07-15) — `workflow_dispatch` + nightly, deliberately *not* on every push/PR (user's explicit call): the suite checks out and builds 4 sibling repos from source plus a live devnet before testing, realistically 10-20+ min with more inherent flakiness risk than a unit suite, not something to put in the PR-blocking path. |
 | 5 | Config model + secrets-by-reference | New model shipped behind compat shim | ✅ T5-1..T5-7 done (secrets-by-reference, unit/fee/channel-size model, profiles, CLI tooling, Settings.tsx re-skin — frontend not browser-verified, no automation tooling available) |
 | 6 | Repo structure / arbo migration | Tree matches target layout, build green throughout | ✅ Done. T6-1..T6-3 (format/ folded into common/, internal/adapters/ introduced, common/ split into core/ports/services/); T6-4 (rpc/→api/proto/rpc/, config/→platform/config/, build/→platform/build/, auth/→transport/auth/, notifications/ proto split→api/proto/notifications/, common/logger.go+log_enums.go→platform/logging/, notifications/server.go transport classification resolved "stays put", lsps/→lsps+transport/lsps/ and dashboard/→dashboard+transport/dashboard/ splits both landed on the real transport-vs-logic seam, verified live against devnet for lsps/); T6-5 (configs/examples/, test/itest/, deploy/, web/ — deploy/+web/ landed on explicit user go-ahead, stashed+reapplied someone else's uncommitted dev-tooling edits with re-derived paths) — all sub-items done. |
 | — | Performance backlog (parallel, non-blocking) | — | ◐ P-3 verified as no-op (never called hot), nothing to do; P-4 done (2026-07-15) — split `Notify`/`NotifyAsync` on the real sync-vs-fire-and-forget seam, `notifyAndWait`'s fast-fail behavior untouched; P-1/P-2 have concrete fix paths documented but still need dedicated live-devnet regression verification before touching hot-path timing |
@@ -1042,8 +1042,8 @@ injection, T4-3's first concrete step), `count_channels`. Assertion verbs:
    nothing else stands in its way.
 3. `lsps1_recovery_after_restart.yaml` — reproduces F-1: settle invoice,
    kill the LSP mid-flight, restart, assert **exactly one new** channel
-   opens (not two) and the order reaches COMPLETED. **Passing**, first
-   real run. Root-caused the exploitable window by reading
+   opens (not two) and the order reaches COMPLETED. **Passing** on its
+   first real run. Root-caused the exploitable window by reading
    `settlement_service.go` directly: `processSettledInvoice` commits PAID
    to the DB, then hands off to `openChannelForOrder` *asynchronously* —
    and the payer's own view of payment settlement (driven by flnd
@@ -1056,6 +1056,26 @@ injection, T4-3's first concrete step), `count_channels`. Assertion verbs:
    accumulated from earlier, unrelated runs against the same lsp↔client
    pair); `count_channels` + `channel_count_delta` fixed this by
    snapshotting a baseline first.
+
+   **New finding (2026-07-15): this scenario is flaky, independent of
+   any change made this session.** Surfaced while live-verifying P-2:
+   repeated runs (both on P-2's code *and* independently reproduced on
+   the pre-P-2 baseline, ruling out causation) sometimes fail with the
+   order stuck `FAILED` (not F-1's own double-open symptom — that
+   didn't reproduce on the confirmed-clean baseline). `openChannelForOrder`
+   only transitions an order to `FAILED` on an `IsConnected` error or an
+   `OpenChannel` error (a bare "peer not connected" is a soft skip, not
+   `FAILED`) — and since the same underlying flnd↔flnd peer connection
+   never drops across an *flspd* restart (only flspd's control-plane
+   process restarts, not the flnd nodes), a transient error from either
+   call right after restart is the likely culprit, not a real
+   connectivity loss. Not root-caused further or fixed — genuinely
+   separate from P-2's own scope, and deserves its own dedicated
+   investigation (probably: does the recovery sweep run before flspd's
+   fresh gRPC connection to flnd is fully ready, or does
+   `recoverStuckOrders`'s F-8 "check `FundingTxid`" gate have a gap for
+   the specific case where `OpenChannel` itself failed with a transient
+   error worth retrying rather than immediately marking `FAILED`).
 
 ### T4-3: External-party fault injection
 **Status (2026-07-15):** ◐ Partial. `kill_lsp`/`restart_lsp` (LND-process
@@ -1592,16 +1612,36 @@ is the actual deliverable here, given what's already fragile in this area.
   clean perf win.
 - **P-2** `GetPeerId` / `IsConnected` do full `ListChannels`/`ListPeers`
   scans on every interception; a cached peer↔scid map refreshed off the
-  channel-event stream removes them from the hot path. **Confirmed real**
-  (`internal/adapters/lnd/client.go`'s `GetPeerId`/`IsConnected`, both
-  called from `Intercept()`'s hot path) — the channel-event subscription
-  infrastructure `listenChannelEvents()` already maintains internally
-  could back a cache, but building and invalidating that cache correctly
-  is new work, not a wire-up of something existing like P-1's fix is.
+  channel-event stream removes them from the hot path. **Done
+  (2026-07-15).** Turned out narrower than the original "new work, not a
+  wire-up" characterization: `listenPeerEvents` (peer online/offline,
+  for `WaitOnline`'s wake-up) and `listenChannelEvents` (for
+  `WaitChannelActive`'s) already existed and already fired on exactly
+  the right events — just needed a cache behind them. `refreshPeerCache`
+  does a full `ListChannels`+`ListPeers` resync (not per-event-type
+  incremental patching) on every channel/peer event, on stream
+  reconnect, and via a 30s safety-net ticker — deliberate: `OPEN_CHANNEL`/
+  `CLOSED_CHANNEL` carry a complete `Channel`/`ChannelCloseSummary` so
+  incremental patching would be precise there, but `ACTIVE_CHANNEL` only
+  carries a bare `ChannelPoint`, and it's genuinely unclear from the
+  proto alone whether a zero-conf channel's alias→confirmed SCID
+  transition always fires its own event — this runs in the listener
+  goroutine, not the interception path, so "always resync" costs
+  nothing where it actually matters. 5 new unit tests (embedded-interface
+  fake `lnrpc.LightningClient`, same pattern as
+  `server_transport_test.go`'s `fakeCustomMessagesStream`); `lnd`
+  coverage 4.7%→11.6%. **Caught by live devnet testing, not before
+  landing it:** `test/itest`'s `Devnet.LightningClient` constructed
+  `lnd.NewLndClient` directly without ever calling `StartListeners()`,
+  so every scenario using `IsConnected` failed outright (empty cache,
+  permanently) — fixed by calling `StartListeners()` inside
+  `LightningClient` itself, matching how `cmd/flspd/run.go`'s own
+  production callers already do it. See below for a second,
+  pre-existing finding surfaced by the same testing pass.
 - **P-3** `ListPeers` calls `GetNodeInfo` per peer (N+1 gRPC) for UI
   alias/color data — fine for a dashboard poll, wrong if ever called hot.
   **Verified, no action needed:** every call site
-  (`grep -rn '\.ListPeers('`) is in `dashboard/service.go` — 5 call
+  (`grep -rn '\.ListPeers('`) is in `dashboard/handlers.go` — 5 call
   sites, all dashboard-facing. It is not, in fact, ever called hot today;
   the note's own caveat doesn't currently apply.
 - **P-4** Notification fan-out spawns one goroutine per webhook per event
