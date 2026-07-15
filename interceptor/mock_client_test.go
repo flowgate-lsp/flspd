@@ -21,6 +21,10 @@ func (m *MockNotifier) Notify(pubkey string, paymenthash string, nodePrivKey int
 	return args.Bool(0), args.Error(1)
 }
 
+func (m *MockNotifier) NotifyAsync(pubkey string, paymenthash string, nodePrivKey interface{}) {
+	m.Called(pubkey, paymenthash, nodePrivKey)
+}
+
 func (m *MockNotifier) NotifyWebhookRegistered(pubkey string, webhook *core.Lsps5Webhook) bool {
 	args := m.Called(pubkey, webhook)
 	return args.Bool(0)

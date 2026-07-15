@@ -15,6 +15,7 @@ import (
 // Notifier is an interface for sending LSPS5 webhook notifications and other alerts.
 type Notifier interface {
 	Notify(pubkey string, paymenthash string, nodePrivKey interface{}) (bool, error)
+	NotifyAsync(pubkey string, paymenthash string, nodePrivKey interface{})
 	NotifyWebhookRegistered(pubkey string, webhook *core.Lsps5Webhook) bool
 	NotifyOrderStateChanged(pubkey string, orderId string, state string, channelPoint string, errorMsg string) (bool, error)
 	NotifyExpirySoon(pubkey string, timeout int, nodePrivKey interface{}, paymentHash string) (bool, error)
@@ -141,39 +142,32 @@ func (s *NotificationService) processPending(ctx context.Context) {
 	}
 }
 
-// Notify sends an lsps5.payment_incoming notification to all registered webhooks
-// for the given pubkey. This is compliant with bLIP-55 (LSPS5) specification.
-// nodePrivKey should be a *btcec.PrivateKey for signing the notification.
+// Notify sends an lsps5.payment_incoming notification to all registered
+// webhooks for the given pubkey, waiting for delivery (up to a 7s context)
+// and returning whether the client was actually reached. This is
+// compliant with bLIP-55 (LSPS5) specification. nodePrivKey should be a
+// *btcec.PrivateKey for signing the notification.
+//
+// The synchronous wait matters: interceptor's notifyAndWait depends on
+// this return value as a fast-fail signal (client unreachable -> resume
+// the HTLC now rather than blocking up to NotificationTimeout for a
+// WaitOnline that will never succeed). Callers that don't need that
+// signal (the peer is already known-connected; this is a courtesy push)
+// should use NotifyAsync instead, which skips the wait entirely (P-4).
 func (s *NotificationService) Notify(
 	pubkey string,
 	paymenthash string,
 	nodePrivKey interface{},
 ) (bool, error) {
-	s.mtx.Lock()
-	lastTime, ok := s.recentNotifications[paymentIdentifier(pubkey, paymenthash)]
-	s.mtx.Unlock()
-	if ok && lastTime.Add(minNotificationInterval).After(time.Now()) {
-		// Treat as if we notified if the notification was recent.
-		return true, nil
-	}
-
-	webhooks, err := s.openingStore.GetLsps5Webhooks(pubkey)
+	webhooks, deduped, err := s.paymentIncomingWebhooks(pubkey, paymenthash)
 	if err != nil {
-		log.Error().
-			Err(err).
-			Str("component", string(logging.LogComponentNotifications)).
-			Str("action", string(logging.LogActionFailure)).
-			Str("pubkey", pubkey).
-			Msg("Notifications: Failed to fetch webhooks")
 		return false, err
 	}
-
-	log.Debug().
-		Str("component", string(logging.LogComponentNotifications)).
-		Str("action", string(logging.LogActionRequest)).
-		Str("pubkey", pubkey).
-		Int("webhooks_count", len(webhooks)).
-		Msg("Notifications: Dispatching lsps5.payment_incoming to all webhooks")
+	if deduped {
+		// Treat as if we notified: this (pubkey, paymenthash) pair was
+		// already dispatched inside the dedup window.
+		return true, nil
+	}
 
 	var mtx sync.Mutex
 	var wg sync.WaitGroup
@@ -211,11 +205,84 @@ func (s *NotificationService) Notify(
 		Bool("notified", notified).
 		Msg("Notifications: Finished dispatching notifications")
 	if notified {
-		s.mtx.Lock()
-		s.recentNotifications[paymentIdentifier(pubkey, paymenthash)] = time.Now()
-		s.mtx.Unlock()
+		s.markRecentlyNotified(pubkey, paymenthash)
 	}
 	return notified, nil
+}
+
+// NotifyAsync durably enqueues an lsps5.payment_incoming notification for
+// all of pubkey's registered webhooks and returns immediately -- delivery
+// happens on the next background worker tick (runWorker, up to 10s later),
+// not inline on the caller's path. Only correct for callers that don't
+// depend on knowing whether the client was actually reached (see Notify's
+// doc comment); today that's exactly intercept_handler.go's
+// isConnected-already-true branch, a courtesy push with no decision
+// riding on its outcome.
+func (s *NotificationService) NotifyAsync(
+	pubkey string,
+	paymenthash string,
+	nodePrivKey interface{},
+) {
+	webhooks, deduped, err := s.paymentIncomingWebhooks(pubkey, paymenthash)
+	if err != nil || deduped {
+		return
+	}
+
+	ctx := context.Background()
+	for _, w := range webhooks {
+		if _, err := s.store.Enqueue(ctx, pubkey, w.Url, w.Transport, lightning.Lsps5MethodPaymentIncoming, &lightning.Lsps5PaymentIncomingParams{
+			PaymentHash: paymenthash,
+		}); err != nil {
+			log.Error().
+				Err(err).
+				Str("component", string(logging.LogComponentNotifications)).
+				Str("action", string(logging.LogActionFailure)).
+				Str("url", w.Url).
+				Msg("Notifications: NotifyAsync failed to enqueue")
+		}
+	}
+	s.markRecentlyNotified(pubkey, paymenthash)
+}
+
+// paymentIncomingWebhooks is Notify/NotifyAsync's shared prelude: the
+// recent-notification dedup check and the webhook lookup. deduped is true
+// (with a nil error and nil webhooks) when this (pubkey, paymenthash) pair
+// was already dispatched inside the dedup window -- callers must treat
+// that as "already notified" (Notify returns true), not as "zero
+// webhooks to iterate".
+func (s *NotificationService) paymentIncomingWebhooks(pubkey, paymenthash string) (webhooks []*core.Lsps5Webhook, deduped bool, err error) {
+	s.mtx.Lock()
+	lastTime, recent := s.recentNotifications[paymentIdentifier(pubkey, paymenthash)]
+	s.mtx.Unlock()
+	if recent && lastTime.Add(minNotificationInterval).After(time.Now()) {
+		return nil, true, nil
+	}
+
+	webhooks, err = s.openingStore.GetLsps5Webhooks(pubkey)
+	if err != nil {
+		log.Error().
+			Err(err).
+			Str("component", string(logging.LogComponentNotifications)).
+			Str("action", string(logging.LogActionFailure)).
+			Str("pubkey", pubkey).
+			Msg("Notifications: Failed to fetch webhooks")
+		return nil, false, err
+	}
+
+	log.Debug().
+		Str("component", string(logging.LogComponentNotifications)).
+		Str("action", string(logging.LogActionRequest)).
+		Str("pubkey", pubkey).
+		Int("webhooks_count", len(webhooks)).
+		Msg("Notifications: Dispatching lsps5.payment_incoming to all webhooks")
+
+	return webhooks, false, nil
+}
+
+func (s *NotificationService) markRecentlyNotified(pubkey, paymenthash string) {
+	s.mtx.Lock()
+	s.recentNotifications[paymentIdentifier(pubkey, paymenthash)] = time.Now()
+	s.mtx.Unlock()
 }
 
 // NotifyWebhookRegistered sends the lsps5.webhook_registered notification to a single

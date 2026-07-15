@@ -224,6 +224,70 @@ func TestNotify_DispatchesToAllWebhooksAndDedupsWithinWindow(t *testing.T) {
 	assert.EqualValues(t, 2, transport.callCount(), "recent notification should be deduped, not re-dispatched")
 }
 
+// TestNotifyAsync_EnqueuesWithoutSynchronousDelivery is P-4's regression
+// test: NotifyAsync must durably enqueue for every registered webhook and
+// return without ever calling the transport itself -- delivery is the
+// background worker's job (processPending), not NotifyAsync's. The
+// transport is constructed with a nil sendFunc specifically so any
+// synchronous delivery attempt panics instead of silently passing.
+func TestNotifyAsync_EnqueuesWithoutSynchronousDelivery(t *testing.T) {
+	store := newFakeOpeningStore()
+	store.webhooks["peer1"] = []*core.Lsps5Webhook{
+		{ClientNodeId: "peer1", AppName: "wallet-a", Url: "https://a.example", Transport: "push"},
+		{ClientNodeId: "peer1", AppName: "wallet-b", Url: "https://b.example", Transport: "push"},
+	}
+
+	transport := &stubTransport{transportType: TransportTypePush} // nil sendFunc: Send() must never be called
+	notifStore := newFakeNotifStore()
+
+	svc := NewNotificationService(store, nil, notifStore)
+	svc.AddTransport(transport)
+
+	svc.NotifyAsync("peer1", "hash1", nil)
+
+	assert.EqualValues(t, 0, transport.callCount(), "NotifyAsync must not attempt synchronous delivery")
+
+	pending, err := notifStore.GetPending(context.Background(), 10)
+	require.NoError(t, err)
+	require.Len(t, pending, 2, "one durable queue entry per registered webhook")
+	urls := []string{pending[0].TargetURL, pending[1].TargetURL}
+	assert.ElementsMatch(t, []string{"https://a.example", "https://b.example"}, urls)
+}
+
+// TestNotifyAsync_DedupsWithinWindow mirrors Notify's own dedup coverage:
+// a second call for the same (pubkey, paymenthash) within the dedup
+// window must not enqueue a second time.
+func TestNotifyAsync_DedupsWithinWindow(t *testing.T) {
+	store := newFakeOpeningStore()
+	store.webhooks["peer1"] = []*core.Lsps5Webhook{
+		{ClientNodeId: "peer1", AppName: "wallet-a", Url: "https://a.example", Transport: "push"},
+	}
+	notifStore := newFakeNotifStore()
+	svc := NewNotificationService(store, nil, notifStore)
+	svc.AddTransport(&stubTransport{transportType: TransportTypePush})
+
+	svc.NotifyAsync("peer1", "hash1", nil)
+	svc.NotifyAsync("peer1", "hash1", nil)
+
+	pending, err := notifStore.GetPending(context.Background(), 10)
+	require.NoError(t, err)
+	assert.Len(t, pending, 1, "recent notification should be deduped, not re-enqueued")
+}
+
+// TestNotifyAsync_NoWebhooksIsNoOp covers the empty-webhooks path: nothing
+// to enqueue, and critically no panic despite the empty slice.
+func TestNotifyAsync_NoWebhooksIsNoOp(t *testing.T) {
+	store := newFakeOpeningStore()
+	notifStore := newFakeNotifStore()
+	svc := NewNotificationService(store, nil, notifStore)
+
+	svc.NotifyAsync("peer-with-no-webhooks", "hash1", nil)
+
+	pending, err := notifStore.GetPending(context.Background(), 10)
+	require.NoError(t, err)
+	assert.Empty(t, pending)
+}
+
 func TestNotify_NoWebhooksReturnsNotNotified(t *testing.T) {
 	store := newFakeOpeningStore()
 	svc := NewNotificationService(store, nil, newFakeNotifStore())

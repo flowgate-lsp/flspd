@@ -31,6 +31,21 @@ func (b *DashboardNotificationBridge) Notify(pubkey string, paymenthash string, 
 	return res, err
 }
 
+func (b *DashboardNotificationBridge) NotifyAsync(pubkey string, paymenthash string, nodePrivKey interface{}) {
+	// 1. Deliver to LSPS5 webhooks (durably enqueued, not waited on -- see
+	// NotificationService.NotifyAsync's doc comment)
+	b.inner.NotifyAsync(pubkey, paymenthash, nodePrivKey)
+
+	// 2. Broadcast to Dashboard WebSocket -- a real-time "payment incoming"
+	// event for the operator is worth surfacing regardless of which path
+	// (sync or async) handled the LSPS5 webhook side, so this mirrors
+	// Notify's own broadcast rather than skipping it.
+	b.dashSvc.BroadcastEvent("payment_incoming", map[string]interface{}{
+		"pubkey":       pubkey,
+		"payment_hash": paymenthash,
+	})
+}
+
 func (b *DashboardNotificationBridge) NotifyWebhookRegistered(pubkey string, webhook *core.Lsps5Webhook) bool {
 	return b.inner.NotifyWebhookRegistered(pubkey, webhook)
 }

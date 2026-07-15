@@ -101,6 +101,7 @@ func (f *fakeExpiryNotifier) blocksNotified() []int {
 }
 
 func (f *fakeExpiryNotifier) Notify(string, string, interface{}) (bool, error) { return true, nil }
+func (f *fakeExpiryNotifier) NotifyAsync(string, string, interface{})          {}
 func (f *fakeExpiryNotifier) NotifyWebhookRegistered(string, *core.Lsps5Webhook) bool {
 	return true
 }

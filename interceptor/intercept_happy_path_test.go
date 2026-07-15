@@ -89,7 +89,7 @@ func TestIntercept_RegisteredPayment_ChannelOpensSuccessfully(t *testing.T) {
 	}, nil)
 
 	notifier := new(MockNotifier)
-	notifier.On("Notify", mock.Anything, mock.Anything, mock.Anything).Return(true, nil).Maybe()
+	notifier.On("NotifyAsync", mock.Anything, mock.Anything, mock.Anything).Maybe()
 
 	i := newHappyPathInterceptor(cfg, client, store, notifier)
 	result := i.Intercept(req)
@@ -121,7 +121,7 @@ func TestIntercept_RegisteredPayment_OpenChannelFails(t *testing.T) {
 	client.On("OpenChannel", mock.Anything).Return(nil, assert.AnError)
 
 	notifier := new(MockNotifier)
-	notifier.On("Notify", mock.Anything, mock.Anything, mock.Anything).Return(true, nil).Maybe()
+	notifier.On("NotifyAsync", mock.Anything, mock.Anything, mock.Anything).Maybe()
 
 	i := newHappyPathInterceptor(cfg, client, store, notifier)
 	result := i.Intercept(req)
@@ -151,7 +151,7 @@ func TestIntercept_RegisteredPayment_ExpiredFeeParams_ChainFeeNotCheaper(t *test
 	client.On("IsConnected", mock.Anything).Return(true, nil)
 
 	notifier := new(MockNotifier)
-	notifier.On("Notify", mock.Anything, mock.Anything, mock.Anything).Return(true, nil).Maybe()
+	notifier.On("NotifyAsync", mock.Anything, mock.Anything, mock.Anything).Maybe()
 
 	i := newHappyPathInterceptor(cfg, client, store, notifier)
 	i.openingService = &fakeOpeningServiceChainFee{cheaper: false}

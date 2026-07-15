@@ -169,8 +169,15 @@ func (i *Interceptor) Intercept(req core.InterceptRequest) core.InterceptResult 
 		}
 
 		if isConnected {
-			// If the peer is connected, notify anyway, but don't wait for the result.
-			go i.notificationService.Notify(
+			// If the peer is connected, notify anyway, but don't wait for
+			// the result (P-4): this is a courtesy push, nothing here
+			// depends on whether it actually reached the client, so
+			// NotifyAsync's durable-enqueue-and-return skips the up to
+			// 7s-per-webhook synchronous delivery attempt Notify does.
+			// Still backgrounded via go: Enqueue is a blocking DB write,
+			// and there's no reason for even that to sit inline on the
+			// interception path.
+			go i.notificationService.NotifyAsync(
 				hex.EncodeToString(nextHop),
 				reqPaymentHashStr,
 				i.nodePrivKey,

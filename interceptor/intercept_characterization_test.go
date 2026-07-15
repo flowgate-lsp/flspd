@@ -204,7 +204,7 @@ func TestIntercept_ProbeDetected_PeerConnected_NoChannel_FailsIncorrectPaymentDe
 	)
 	client.On("GetPeerId", mock.Anything).Return(nil, nil)
 	client.On("IsConnected", mock.Anything).Return(true, nil)
-	notifier.On("Notify", mock.Anything, mock.Anything, mock.Anything).Return(true, nil)
+	notifier.On("NotifyAsync", mock.Anything, mock.Anything, mock.Anything)
 
 	i := newCharacterizationInterceptor(store, client, notifier)
 	result := i.Intercept(req)
@@ -239,7 +239,7 @@ func TestIntercept_RegisteredNonProbe_InsufficientCltv_FailsTemporaryChannelFail
 	)
 	client.On("GetPeerId", mock.Anything).Return(nil, nil)
 	client.On("IsConnected", mock.Anything).Return(true, nil)
-	notifier.On("Notify", mock.Anything, mock.Anything, mock.Anything).Return(true, nil)
+	notifier.On("NotifyAsync", mock.Anything, mock.Anything, mock.Anything)
 
 	i := newCharacterizationInterceptor(store, client, notifier)
 	result := i.Intercept(req)
