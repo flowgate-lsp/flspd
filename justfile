@@ -47,8 +47,8 @@ setup: setup-backend setup-frontend
 # Setup backend data and config
 setup-backend:
     mkdir -p data/postgres data/flnd
-    [ -f data/nodes.yaml ] || cp nodes.sample.yaml data/nodes.yaml
-    [ -f .env ] || cp compose.env.sample .env
+    [ -f data/nodes.yaml ] || cp configs/examples/nodes.sample.yaml data/nodes.yaml
+    [ -f .env ] || cp configs/examples/compose.env.sample .env
     [ -f data/flnd/flnd.conf ] || cp data/flnd/flnd.conf.sample data/flnd/flnd.conf
 
 # Install frontend dependencies

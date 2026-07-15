@@ -17,7 +17,7 @@ import (
 // for the three fields SecretRef exists to protect — this is what makes
 // the sample file safe to commit verbatim (T5-1/T5-4's stated goal).
 func TestNodesSampleYaml_ParsesAndIsSecretFree(t *testing.T) {
-	data, err := os.ReadFile("../nodes.sample.yaml")
+	data, err := os.ReadFile("../configs/examples/nodes.sample.yaml")
 	require.NoError(t, err)
 
 	var configs []*NodeConfig
