@@ -8,8 +8,8 @@ import (
 	"time"
 
 	btcec "github.com/flokiorg/go-flokicoin/crypto"
-	"github.com/flowgate-lsp/flspd/common"
 	"github.com/flowgate-lsp/flspd/lightning"
+	"github.com/flowgate-lsp/flspd/platform/logging"
 	"github.com/rs/zerolog/log"
 )
 
@@ -39,8 +39,8 @@ func (t *HTTPSTransport) Send(ctx context.Context, webhookURL string, method str
 	privKey, ok := t.nodePrivKey.(*btcec.PrivateKey)
 	if !ok {
 		log.Error().
-			Str("component", string(common.LogComponentNotifications)).
-			Str("action", string(common.LogActionFailure)).
+			Str("component", string(logging.LogComponentNotifications)).
+			Str("action", string(logging.LogActionFailure)).
 			Msgf("HTTPSTransport: invalid private key type: %T", t.nodePrivKey)
 		return ErrInvalidPrivateKey
 	}
@@ -50,8 +50,8 @@ func (t *HTTPSTransport) Send(ctx context.Context, webhookURL string, method str
 	if err != nil {
 		log.Error().
 			Err(err).
-			Str("component", string(common.LogComponentNotifications)).
-			Str("action", string(common.LogActionFailure)).
+			Str("component", string(logging.LogComponentNotifications)).
+			Str("action", string(logging.LogActionFailure)).
 			Str("method", method).
 			Msg("HTTPSTransport: Failed to create LSPS5 notification body")
 		return err
@@ -61,7 +61,7 @@ func (t *HTTPSTransport) Send(ctx context.Context, webhookURL string, method str
 	timestamp := time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
 
 	log.Trace().
-		Str("component", string(common.LogComponentNotifications)).
+		Str("component", string(logging.LogComponentNotifications)).
 		Str("action", "signing").
 		Str("timestamp", timestamp).
 		Msg("HTTPSTransport: signing message")
@@ -71,8 +71,8 @@ func (t *HTTPSTransport) Send(ctx context.Context, webhookURL string, method str
 	if err != nil {
 		log.Error().
 			Err(err).
-			Str("component", string(common.LogComponentNotifications)).
-			Str("action", string(common.LogActionFailure)).
+			Str("component", string(logging.LogComponentNotifications)).
+			Str("action", string(logging.LogActionFailure)).
 			Str("method", method).
 			Msg("HTTPSTransport: Failed to sign LSPS5 notification")
 		return err
@@ -83,8 +83,8 @@ func (t *HTTPSTransport) Send(ctx context.Context, webhookURL string, method str
 	if err != nil {
 		log.Error().
 			Err(err).
-			Str("component", string(common.LogComponentNotifications)).
-			Str("action", string(common.LogActionFailure)).
+			Str("component", string(logging.LogComponentNotifications)).
+			Str("action", string(logging.LogActionFailure)).
 			Str("url", webhookURL).
 			Msg("HTTPSTransport: Failed to create HTTP request")
 		return err
@@ -95,7 +95,7 @@ func (t *HTTPSTransport) Send(ctx context.Context, webhookURL string, method str
 	req.Header.Set("x-lsps5-signature", signature)
 
 	log.Trace().
-		Str("component", string(common.LogComponentNotifications)).
+		Str("component", string(logging.LogComponentNotifications)).
 		Str("action", "sending_http").
 		Str("url", webhookURL).
 		Str("signature", signature).
@@ -105,8 +105,8 @@ func (t *HTTPSTransport) Send(ctx context.Context, webhookURL string, method str
 	if err != nil {
 		log.Error().
 			Err(err).
-			Str("component", string(common.LogComponentNotifications)).
-			Str("action", string(common.LogActionFailure)).
+			Str("component", string(logging.LogComponentNotifications)).
+			Str("action", string(logging.LogActionFailure)).
 			Str("url", webhookURL).
 			Str("method", method).
 			Msg("HTTPSTransport: Webhook delivery failed (network error)")
@@ -120,8 +120,8 @@ func (t *HTTPSTransport) Send(ctx context.Context, webhookURL string, method str
 		bytesRead, _ := io.ReadFull(resp.Body, buf)
 		respBody := buf[:bytesRead]
 		log.Error().
-			Str("component", string(common.LogComponentNotifications)).
-			Str("action", string(common.LogActionFailure)).
+			Str("component", string(logging.LogComponentNotifications)).
+			Str("action", string(logging.LogActionFailure)).
 			Str("url", webhookURL).
 			Str("method", method).
 			Str("status", resp.Status).
@@ -131,8 +131,8 @@ func (t *HTTPSTransport) Send(ctx context.Context, webhookURL string, method str
 	}
 
 	log.Info().
-		Str("component", string(common.LogComponentNotifications)).
-		Str("action", string(common.LogActionSuccess)).
+		Str("component", string(logging.LogComponentNotifications)).
+		Str("action", string(logging.LogActionSuccess)).
 		Str("url", webhookURL).
 		Str("method", method).
 		Msg("HTTPS: notification delivered")

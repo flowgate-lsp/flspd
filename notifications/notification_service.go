@@ -5,9 +5,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/flowgate-lsp/flspd/common"
 	"github.com/flowgate-lsp/flspd/core"
 	"github.com/flowgate-lsp/flspd/lightning"
+	"github.com/flowgate-lsp/flspd/platform/logging"
 	"github.com/flowgate-lsp/flspd/ports"
 	"github.com/rs/zerolog/log"
 )
@@ -161,16 +161,16 @@ func (s *NotificationService) Notify(
 	if err != nil {
 		log.Error().
 			Err(err).
-			Str("component", string(common.LogComponentNotifications)).
-			Str("action", string(common.LogActionFailure)).
+			Str("component", string(logging.LogComponentNotifications)).
+			Str("action", string(logging.LogActionFailure)).
 			Str("pubkey", pubkey).
 			Msg("Notifications: Failed to fetch webhooks")
 		return false, err
 	}
 
 	log.Debug().
-		Str("component", string(common.LogComponentNotifications)).
-		Str("action", string(common.LogActionRequest)).
+		Str("component", string(logging.LogComponentNotifications)).
+		Str("action", string(logging.LogActionRequest)).
 		Str("pubkey", pubkey).
 		Int("webhooks_count", len(webhooks)).
 		Msg("Notifications: Dispatching lsps5.payment_incoming to all webhooks")
@@ -185,7 +185,7 @@ func (s *NotificationService) Notify(
 		go func(w *core.Lsps5Webhook) {
 			defer wg.Done()
 			log.Trace().
-				Str("component", string(common.LogComponentNotifications)).
+				Str("component", string(logging.LogComponentNotifications)).
 				Str("action", "dispatch_one").
 				Str("url", w.Url).
 				Str("transport", w.Transport).
@@ -205,8 +205,8 @@ func (s *NotificationService) Notify(
 	cancel()
 
 	log.Debug().
-		Str("component", string(common.LogComponentNotifications)).
-		Str("action", string(common.LogActionResponse)).
+		Str("component", string(logging.LogComponentNotifications)).
+		Str("action", string(logging.LogActionResponse)).
 		Str("pubkey", pubkey).
 		Bool("notified", notified).
 		Msg("Notifications: Finished dispatching notifications")
@@ -226,8 +226,8 @@ func (s *NotificationService) NotifyWebhookRegistered(
 	webhook *core.Lsps5Webhook,
 ) bool {
 	log.Info().
-		Str("component", string(common.LogComponentNotifications)).
-		Str("action", string(common.LogActionRequest)).
+		Str("component", string(logging.LogComponentNotifications)).
+		Str("action", string(logging.LogActionRequest)).
 		Str("pubkey", pubkey).
 		Str("url", webhook.Url).
 		Msg("Notifications: Sending lsps5.webhook_registered to newly registered webhook")
@@ -250,8 +250,8 @@ func (s *NotificationService) NotifyExpirySoon(
 	if err != nil {
 		log.Error().
 			Err(err).
-			Str("component", string(common.LogComponentNotifications)).
-			Str("action", string(common.LogActionFailure)).
+			Str("component", string(logging.LogComponentNotifications)).
+			Str("action", string(logging.LogActionFailure)).
 			Str("pubkey", pubkey).
 			Msg("Notifications: Failed to fetch webhooks for expiry_soon")
 		return false, err
@@ -336,8 +336,8 @@ func (s *NotificationService) NotifyOrderStateChanged(
 	if err != nil {
 		log.Error().
 			Err(err).
-			Str("component", string(common.LogComponentNotifications)).
-			Str("action", string(common.LogActionFailure)).
+			Str("component", string(logging.LogComponentNotifications)).
+			Str("action", string(logging.LogActionFailure)).
 			Str("pubkey", pubkey).
 			Msg("Notifications: Failed to fetch webhooks for order_state_changed")
 		return false, err
@@ -351,8 +351,8 @@ func (s *NotificationService) NotifyOrderStateChanged(
 	}
 
 	log.Debug().
-		Str("component", string(common.LogComponentNotifications)).
-		Str("action", string(common.LogActionRequest)).
+		Str("component", string(logging.LogComponentNotifications)).
+		Str("action", string(logging.LogActionRequest)).
 		Str("pubkey", pubkey).
 		Str("order_id", orderId).
 		Str("state", state).
@@ -369,7 +369,7 @@ func (s *NotificationService) NotifyOrderStateChanged(
 		go func(w *core.Lsps5Webhook) {
 			defer wg.Done()
 			log.Trace().
-				Str("component", string(common.LogComponentNotifications)).
+				Str("component", string(logging.LogComponentNotifications)).
 				Str("action", "dispatch_one").
 				Str("url", w.Url).
 				Str("transport", w.Transport).
@@ -433,7 +433,7 @@ func (s *NotificationService) deliverOne(
 	s.mtx.Unlock()
 
 	log.Trace().
-		Str("component", string(common.LogComponentNotifications)).
+		Str("component", string(logging.LogComponentNotifications)).
 		Str("action", "deliver_one").
 		Str("method", method).
 		Str("url", webhook.Url).
@@ -442,8 +442,8 @@ func (s *NotificationService) deliverOne(
 
 	if !ok {
 		log.Error().
-			Str("component", string(common.LogComponentNotifications)).
-			Str("action", string(common.LogActionFailure)).
+			Str("component", string(logging.LogComponentNotifications)).
+			Str("action", string(logging.LogActionFailure)).
 			Str("transport", webhook.Transport).
 			Msg("Notifications: Unsupported transport type")
 		return false
@@ -453,8 +453,8 @@ func (s *NotificationService) deliverOne(
 	if err != nil {
 		log.Error().
 			Err(err).
-			Str("component", string(common.LogComponentNotifications)).
-			Str("action", string(common.LogActionFailure)).
+			Str("component", string(logging.LogComponentNotifications)).
+			Str("action", string(logging.LogActionFailure)).
 			Str("url", webhook.Url).
 			Str("method", method).
 			Str("transport", string(transport.Type())).
@@ -463,8 +463,8 @@ func (s *NotificationService) deliverOne(
 	}
 
 	log.Info().
-		Str("component", string(common.LogComponentNotifications)).
-		Str("action", string(common.LogActionSuccess)).
+		Str("component", string(logging.LogComponentNotifications)).
+		Str("action", string(logging.LogActionSuccess)).
 		Str("method", method).
 		Str("transport", string(transport.Type())).
 		Msg("Notifications: Delivery succeeded")

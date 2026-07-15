@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/flokiorg/flnd/lnrpc"
-	"github.com/flowgate-lsp/flspd/common"
 	"github.com/flowgate-lsp/flspd/core"
+	"github.com/flowgate-lsp/flspd/platform/logging"
 	"github.com/flowgate-lsp/flspd/ports"
 	"github.com/rs/zerolog/log"
 	"google.golang.org/grpc/codes"
@@ -99,7 +99,7 @@ func (s *Server) messageLoop() {
 		if err != nil {
 			log.Error().
 				Err(err).
-				Str("component", string(common.LogComponentLSPS0)).
+				Str("component", string(logging.LogComponentLSPS0)).
 				Msg("LSPS: Connection lost, retrying in 5s")
 			select {
 			case <-s.quit:
@@ -127,7 +127,7 @@ func (s *Server) subscribeAndListen() error {
 	}
 
 	log.Info().
-		Str("component", string(common.LogComponentLSPS0)).
+		Str("component", string(logging.LogComponentLSPS0)).
 		Msg("LSPS: Service started, listening for custom messages")
 
 	for {
@@ -200,7 +200,7 @@ func (s *Server) handleMessage(msg *lnrpc.CustomMessage) {
 	if err != nil {
 		log.Warn().
 			Err(err).
-			Str("component", string(common.LogComponentLSPS0)).
+			Str("component", string(logging.LogComponentLSPS0)).
 			Str("peer", fmt.Sprintf("%x", msg.Peer)).
 			Msg("LSPS: Failed to parse incoming JSON-RPC request")
 		// Cannot reply if we can't parse the ID, so just ignore valid malformed JSON as per spec
@@ -218,7 +218,7 @@ func (s *Server) handleMessage(msg *lnrpc.CustomMessage) {
 	if err != nil {
 		log.Error().
 			Err(err).
-			Str("component", string(common.LogComponentLSPS0)).
+			Str("component", string(logging.LogComponentLSPS0)).
 			Msg("LSPS: Failed to marshal JSON-RPC response")
 		return
 	}
@@ -231,7 +231,7 @@ func (s *Server) handleMessage(msg *lnrpc.CustomMessage) {
 	if err != nil {
 		log.Error().
 			Err(err).
-			Str("component", string(common.LogComponentLSPS0)).
+			Str("component", string(logging.LogComponentLSPS0)).
 			Msg("LSPS: Failed to send custom message to peer")
 	}
 }

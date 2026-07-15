@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/flowgate-lsp/flspd/common"
+	"github.com/flowgate-lsp/flspd/platform/logging"
 	"github.com/rs/zerolog/log"
 )
 
@@ -33,8 +33,8 @@ func (c *CleanupService) Start(ctx context.Context) {
 		if err != nil {
 			log.Error().
 				Err(err).
-				Str("component", string(common.LogComponentNotifications)).
-				Str("action", string(common.LogActionFailure)).
+				Str("component", string(logging.LogComponentNotifications)).
+				Str("action", string(logging.LogActionFailure)).
 				Time("before", before).
 				Msg("Notifications Cleanup: Failed to remove expired webhooks")
 		}

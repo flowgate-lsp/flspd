@@ -8,8 +8,8 @@ import (
 
 	"github.com/rs/zerolog/log"
 
-	"github.com/flowgate-lsp/flspd/common"
 	"github.com/flowgate-lsp/flspd/core"
+	"github.com/flowgate-lsp/flspd/platform/logging"
 )
 
 type ChannelSync struct {
@@ -56,16 +56,16 @@ func (s *ChannelSync) channelsSynchronizeNodeOnce(ctx context.Context, node *cor
 	lastUpdate := time.Now()
 	nodeIdHex := hex.EncodeToString(node.NodeId)
 	log.Debug().
-		Str("component", string(common.LogComponentChannelSync)).
-		Str("action", string(common.LogActionSync)).
+		Str("component", string(logging.LogComponentChannelSync)).
+		Str("action", string(logging.LogActionSync)).
 		Str("node_id", nodeIdHex).
 		Msg("Channel sync started")
 	channels, err := node.Client.ListChannels()
 	if err != nil {
 		log.Error().
 			Err(err).
-			Str("component", string(common.LogComponentChannelSync)).
-			Str("action", string(common.LogActionFailure)).
+			Str("component", string(logging.LogComponentChannelSync)).
+			Str("action", string(logging.LogActionFailure)).
 			Str("node_id", nodeIdHex).
 			Msg("Failed to list channels from LND")
 		return
@@ -89,16 +89,16 @@ func (s *ChannelSync) channelsSynchronizeNodeOnce(ctx context.Context, node *cor
 	if err != nil {
 		log.Error().
 			Err(err).
-			Str("component", string(common.LogComponentChannelSync)).
-			Str("action", string(common.LogActionFailure)).
+			Str("component", string(logging.LogComponentChannelSync)).
+			Str("action", string(logging.LogActionFailure)).
 			Str("node_id", nodeIdHex).
 			Msg("Failed to update channels in store")
 		return
 	}
 
 	log.Debug().
-		Str("component", string(common.LogComponentChannelSync)).
-		Str("action", string(common.LogActionSuccess)).
+		Str("component", string(logging.LogComponentChannelSync)).
+		Str("action", string(logging.LogActionSuccess)).
 		Str("node_id", nodeIdHex).
 		Int("channel_count", len(channels)).
 		Msg("Channel sync completed")

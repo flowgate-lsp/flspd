@@ -9,9 +9,9 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/flokiorg/flnd/lnrpc"
-	"github.com/flowgate-lsp/flspd/common"
 	"github.com/flowgate-lsp/flspd/history"
 	"github.com/flowgate-lsp/flspd/lightning"
+	"github.com/flowgate-lsp/flspd/platform/logging"
 )
 
 type ForwardSync struct {
@@ -55,8 +55,8 @@ func (s *ForwardSync) forwardsSynchronizeOnce(ctx context.Context) {
 	if err != nil {
 		log.Error().
 			Err(err).
-			Str("component", string(common.LogComponentForwardsSync)).
-			Str("action", string(common.LogActionFailure)).
+			Str("component", string(logging.LogComponentForwardsSync)).
+			Str("action", string(logging.LogActionFailure)).
 			Str("node_id", fmt.Sprintf("%x", s.nodeid)).
 			Msg("Forwards Sync: Failed to fetch offset")
 		return
@@ -75,16 +75,16 @@ func (s *ForwardSync) forwardsSynchronizeOnce(ctx context.Context) {
 		if err != nil {
 			log.Error().
 				Err(err).
-				Str("component", string(common.LogComponentForwardsSync)).
-				Str("action", string(common.LogActionFailure)).
+				Str("component", string(logging.LogComponentForwardsSync)).
+				Str("action", string(logging.LogActionFailure)).
 				Str("node_id", fmt.Sprintf("%x", s.nodeid)).
 				Msg("Forwards Sync: Failed to fetch forwarding history from LND")
 			return
 		}
 
 		log.Debug().
-			Str("component", string(common.LogComponentForwardsSync)).
-			Str("action", string(common.LogActionSync)).
+			Str("component", string(logging.LogComponentForwardsSync)).
+			Str("action", string(logging.LogActionSync)).
 			Str("node_id", fmt.Sprintf("%x", s.nodeid)).
 			Uint64("start_time", startTime).
 			Int("events_count", len(forwardHistory.ForwardingEvents)).
@@ -109,8 +109,8 @@ func (s *ForwardSync) forwardsSynchronizeOnce(ctx context.Context) {
 		if err != nil {
 			log.Error().
 				Err(err).
-				Str("component", string(common.LogComponentForwardsSync)).
-				Str("action", string(common.LogActionFailure)).
+				Str("component", string(logging.LogComponentForwardsSync)).
+				Str("action", string(logging.LogActionFailure)).
 				Str("node_id", fmt.Sprintf("%x", s.nodeid)).
 				Msg("Forwards Sync: Failed to insert forwards into store")
 			return

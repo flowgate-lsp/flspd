@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/flokiorg/flnd/lnrpc"
-	"github.com/flowgate-lsp/flspd/common"
 	"github.com/flowgate-lsp/flspd/core"
+	"github.com/flowgate-lsp/flspd/platform/logging"
 	"github.com/rs/zerolog/log"
 )
 
@@ -84,8 +84,8 @@ func (s *Server) getLsps1ConfigValues() (uint16, uint16, bool, uint32, time.Dura
 
 func (s *Server) handleLsps1GetInfo(req *JsonRpcRequest) *JsonRpcResponse {
 	log.Trace().
-		Str("component", string(common.LogComponentLSPS1)).
-		Str("action", string(common.LogActionRequest)).
+		Str("component", string(logging.LogComponentLSPS1)).
+		Str("action", string(logging.LogActionRequest)).
 		Msg("LSPS1: Received get_info request")
 
 	minReqConf, fundingConf, supportsZeroReserve, maxExpiry, _, minClient, maxClient, minLsp, maxLsp, minChan, maxChan, _ := s.getLsps1ConfigValues()
@@ -129,8 +129,8 @@ func (s *Server) handleLsps1GetInfo(req *JsonRpcRequest) *JsonRpcResponse {
 		MaxChannelBalanceLoki:           fmt.Sprintf("%d", maxChan),
 	}
 	log.Trace().
-		Str("component", string(common.LogComponentLSPS1)).
-		Str("action", string(common.LogActionResponse)).
+		Str("component", string(logging.LogComponentLSPS1)).
+		Str("action", string(logging.LogActionResponse)).
 		Msgf("LSPS1: get_info result: %+v", resp)
 	return NewJsonRpcResponse(req.Id, resp)
 }
@@ -185,14 +185,14 @@ func (s *Server) handleLsps1CreateOrder(req *JsonRpcRequest, peer []byte) *JsonR
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		log.Trace().
 			Err(err).
-			Str("component", string(common.LogComponentLSPS1)).
-			Str("action", string(common.LogActionValidate)).
+			Str("component", string(logging.LogComponentLSPS1)).
+			Str("action", string(logging.LogActionValidate)).
 			Msg("LSPS1: create_order invalid params")
 		return NewJsonRpcErrorResponse(req.Id, -32602, "Invalid params", nil)
 	}
 	log.Trace().
-		Str("component", string(common.LogComponentLSPS1)).
-		Str("action", string(common.LogActionRequest)).
+		Str("component", string(logging.LogComponentLSPS1)).
+		Str("action", string(logging.LogActionRequest)).
 		Interface("params", params).
 		Msg("LSPS1: Received create_order request")
 
@@ -202,8 +202,8 @@ func (s *Server) handleLsps1CreateOrder(req *JsonRpcRequest, peer []byte) *JsonR
 	// Validation: At least one balance must be non-zero
 	if clientBalance == 0 && lspBalance == 0 {
 		log.Warn().
-			Str("component", string(common.LogComponentLSPS1)).
-			Str("action", string(common.LogActionReject)).
+			Str("component", string(logging.LogComponentLSPS1)).
+			Str("action", string(logging.LogActionReject)).
 			Str("peer_id", hex.EncodeToString(peer)).
 			Msg("LSPS1: Order rejected - at least one balance must be non-zero")
 		return NewJsonRpcErrorResponse(req.Id, -32602, "Invalid params: either client_balance or lsp_balance must be non-zero", nil)
@@ -229,8 +229,8 @@ func (s *Server) handleLsps1CreateOrder(req *JsonRpcRequest, peer []byte) *JsonR
 	if err := s.liquidityManager.CheckOnChainLiquidity(context.Background(), lspBalance); err != nil {
 		log.Warn().
 			Err(err).
-			Str("component", string(common.LogComponentLSPS1)).
-			Str("action", string(common.LogActionReject)).
+			Str("component", string(logging.LogComponentLSPS1)).
+			Str("action", string(logging.LogActionReject)).
 			Msg("LSPS1: Order rejected - insufficient on-chain liquidity")
 		return NewJsonRpcErrorResponse(req.Id, 1, "Client rejected: insufficient liquidity", nil)
 	}
@@ -244,8 +244,8 @@ func (s *Server) handleLsps1CreateOrder(req *JsonRpcRequest, peer []byte) *JsonR
 	// 1. Check Physical Floor (LND requirement)
 	if channelCapacity+uint64(additionalPadding) < minPhysicalFloor {
 		log.Warn().
-			Str("component", string(common.LogComponentLSPS1)).
-			Str("action", string(common.LogActionReject)).
+			Str("component", string(logging.LogComponentLSPS1)).
+			Str("action", string(logging.LogActionReject)).
 			Uint64("requested_capacity", channelCapacity).
 			Int64("additional_capacity", additionalPadding).
 			Uint64("min_capacity", minPhysicalFloor).
@@ -261,8 +261,8 @@ func (s *Server) handleLsps1CreateOrder(req *JsonRpcRequest, peer []byte) *JsonR
 	finalCapacity := channelCapacity + uint64(additionalPadding)
 	if finalCapacity < minBusinessChan || (maxChan > 0 && finalCapacity > maxChan) {
 		log.Warn().
-			Str("component", string(common.LogComponentLSPS1)).
-			Str("action", string(common.LogActionReject)).
+			Str("component", string(logging.LogComponentLSPS1)).
+			Str("action", string(logging.LogActionReject)).
 			Uint64("requested_capacity", channelCapacity).
 			Int64("additional_capacity", additionalPadding).
 			Uint64("min_business_limit", minBusinessChan).
@@ -351,8 +351,8 @@ func (s *Server) handleLsps1CreateOrder(req *JsonRpcRequest, peer []byte) *JsonR
 	if err != nil {
 		log.Error().
 			Err(err).
-			Str("component", string(common.LogComponentLSPS1)).
-			Str("action", string(common.LogActionFailure)).
+			Str("component", string(logging.LogComponentLSPS1)).
+			Str("action", string(logging.LogActionFailure)).
 			Msg("LSPS1: Failed to create LND invoice for order")
 		return NewJsonRpcErrorResponse(req.Id, -32603, "Internal error creating invoice", nil)
 	}
@@ -385,8 +385,8 @@ func (s *Server) handleLsps1CreateOrder(req *JsonRpcRequest, peer []byte) *JsonR
 	if err != nil {
 		log.Error().
 			Err(err).
-			Str("component", string(common.LogComponentLSPS1)).
-			Str("action", string(common.LogActionFailure)).
+			Str("component", string(logging.LogComponentLSPS1)).
+			Str("action", string(logging.LogActionFailure)).
 			Msg("LSPS1: Failed to persist order in database")
 		return NewJsonRpcErrorResponse(req.Id, -32603, "Database error", nil)
 	}
@@ -420,8 +420,8 @@ func (s *Server) handleLsps1CreateOrder(req *JsonRpcRequest, peer []byte) *JsonR
 	}
 
 	log.Trace().
-		Str("component", string(common.LogComponentLSPS1)).
-		Str("action", string(common.LogActionResponse)).
+		Str("component", string(logging.LogComponentLSPS1)).
+		Str("action", string(logging.LogActionResponse)).
 		Msgf("LSPS1: create_order success, order_id=%s", resp.OrderId)
 	return NewJsonRpcResponse(req.Id, resp)
 }
@@ -435,14 +435,14 @@ func (s *Server) handleLsps1GetOrder(req *JsonRpcRequest) *JsonRpcResponse {
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		log.Trace().
 			Err(err).
-			Str("component", string(common.LogComponentLSPS1)).
-			Str("action", string(common.LogActionValidate)).
+			Str("component", string(logging.LogComponentLSPS1)).
+			Str("action", string(logging.LogActionValidate)).
 			Msg("LSPS1: get_order invalid params")
 		return NewJsonRpcErrorResponse(req.Id, -32602, "Invalid params", nil)
 	}
 	log.Trace().
-		Str("component", string(common.LogComponentLSPS1)).
-		Str("action", string(common.LogActionRequest)).
+		Str("component", string(logging.LogComponentLSPS1)).
+		Str("action", string(logging.LogActionRequest)).
 		Interface("params", params).
 		Msg("LSPS1: Received get_order request")
 
@@ -535,8 +535,8 @@ func (s *Server) handleLsps1GetOrder(req *JsonRpcRequest) *JsonRpcResponse {
 	}
 
 	log.Trace().
-		Str("component", string(common.LogComponentLSPS1)).
-		Str("action", string(common.LogActionResponse)).
+		Str("component", string(logging.LogComponentLSPS1)).
+		Str("action", string(logging.LogActionResponse)).
 		Msgf("LSPS1: get_order result: %+v", resp)
 	return NewJsonRpcResponse(req.Id, resp)
 }

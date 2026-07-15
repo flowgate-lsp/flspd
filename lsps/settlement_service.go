@@ -7,11 +7,11 @@ import (
 	"sync"
 
 	"github.com/flowgate-lsp/flspd/chain"
-	"github.com/flowgate-lsp/flspd/common"
 	"github.com/flowgate-lsp/flspd/core"
 	"github.com/flowgate-lsp/flspd/history"
 	"github.com/flowgate-lsp/flspd/lightning"
 	"github.com/flowgate-lsp/flspd/platform/config"
+	"github.com/flowgate-lsp/flspd/platform/logging"
 	"github.com/flowgate-lsp/flspd/ports"
 	"github.com/rs/zerolog/log"
 )
@@ -68,8 +68,8 @@ func (s *Lsps1SettlementService) Start(ctx context.Context) error {
 	go func() {
 		defer s.wg.Done()
 		log.Info().
-			Str("component", string(common.LogComponentSettlement)).
-			Str("action", string(common.LogActionSuccess)).
+			Str("component", string(logging.LogComponentSettlement)).
+			Str("action", string(logging.LogActionSuccess)).
 			Msg("LSPS1 Settlement: Service started, monitoring invoices")
 
 		// Recover stuck orders in a separate goroutine to avoid blocking Start()
@@ -80,7 +80,7 @@ func (s *Lsps1SettlementService) Start(ctx context.Context) error {
 			select {
 			case <-s.ctx.Done():
 				log.Info().
-					Str("component", string(common.LogComponentSettlement)).
+					Str("component", string(logging.LogComponentSettlement)).
 					Msg("LSPS1 Settlement: Service stopped")
 				return
 
@@ -107,14 +107,14 @@ func (s *Lsps1SettlementService) Start(ctx context.Context) error {
 // Stop gracefully shuts down the settlement service
 func (s *Lsps1SettlementService) Stop() {
 	log.Info().
-		Str("component", string(common.LogComponentSettlement)).
+		Str("component", string(logging.LogComponentSettlement)).
 		Msg("LSPS1 Settlement: Stopping service...")
 	if s.cancel != nil {
 		s.cancel()
 	}
 	s.wg.Wait()
 	log.Info().
-		Str("component", string(common.LogComponentSettlement)).
+		Str("component", string(logging.LogComponentSettlement)).
 		Msg("LSPS1 Settlement: Service stopped successfully")
 }
 
@@ -167,8 +167,8 @@ func (s *Lsps1SettlementService) processSettledInvoice(update *lightning.Invoice
 	}
 
 	log.Info().
-		Str("component", string(common.LogComponentSettlement)).
-		Str("action", string(common.LogActionSuccess)).
+		Str("component", string(logging.LogComponentSettlement)).
+		Str("action", string(logging.LogActionSuccess)).
 		Str("order_id", order.OrderId).
 		Str("peer_id", order.PeerId).
 		Int64("client_balance", order.ClientBalanceLoki).
@@ -190,8 +190,8 @@ func (s *Lsps1SettlementService) openChannelForOrder(order *core.Lsps1Order) {
 	cfg := s.config.Load()
 
 	log.Info().
-		Str("component", string(common.LogComponentSettlement)).
-		Str("action", string(common.LogActionRequest)).
+		Str("component", string(logging.LogComponentSettlement)).
+		Str("action", string(logging.LogActionRequest)).
 		Str("order_id", order.OrderId).
 		Str("peer_id", order.PeerId).
 		Msg("LSPS1 Settlement: Attempting automatic channel opening")
@@ -219,7 +219,7 @@ func (s *Lsps1SettlementService) openChannelForOrder(order *core.Lsps1Order) {
 
 	if !connected {
 		log.Info().
-			Str("component", string(common.LogComponentSettlement)).
+			Str("component", string(logging.LogComponentSettlement)).
 			Str("order_id", order.OrderId).
 			Str("peer_id", order.PeerId).
 			Msg("LSPS1 Settlement: Peer not connected, skipping automatic open (will be handled by JIT or manual)")
@@ -243,8 +243,8 @@ func (s *Lsps1SettlementService) openChannelForOrder(order *core.Lsps1Order) {
 
 	// Open channel
 	log.Info().
-		Str("component", string(common.LogComponentSettlement)).
-		Str("action", string(common.LogActionRequest)).
+		Str("component", string(logging.LogComponentSettlement)).
+		Str("action", string(logging.LogActionRequest)).
 		Str("order_id", order.OrderId).
 		Uint64("capacity_loki", capacity).
 		Uint64("push_loki", uint64(order.ClientBalanceLoki)).
@@ -280,8 +280,8 @@ func (s *Lsps1SettlementService) openChannelForOrder(order *core.Lsps1Order) {
 	}
 
 	log.Info().
-		Str("component", string(common.LogComponentSettlement)).
-		Str("action", string(common.LogActionSuccess)).
+		Str("component", string(logging.LogComponentSettlement)).
+		Str("action", string(logging.LogActionSuccess)).
 		Str("order_id", order.OrderId).
 		Str("channel_point", channelPoint.String()).
 		Msg("LSPS1 Settlement: Channel opening initiated")
@@ -315,7 +315,7 @@ func (s *Lsps1SettlementService) openChannelForOrder(order *core.Lsps1Order) {
 //     on startup makes recovery deterministic.
 func (s *Lsps1SettlementService) recoverStuckOrders() {
 	log.Info().
-		Str("component", string(common.LogComponentSettlement)).
+		Str("component", string(logging.LogComponentSettlement)).
 		Msg("LSPS1 Settlement: Checking for stuck PAID orders to recover...")
 
 	paidOrders, err := s.openingStore.GetAllPaidLsps1Orders()
@@ -328,7 +328,7 @@ func (s *Lsps1SettlementService) recoverStuckOrders() {
 		log.Debug().Msg("LSPS1 Settlement: No stuck orders found")
 	} else {
 		log.Info().
-			Str("component", string(common.LogComponentSettlement)).
+			Str("component", string(logging.LogComponentSettlement)).
 			Int("count", len(paidOrders)).
 			Msgf("LSPS1 Settlement: Found %d stuck PAID orders, recovering...", len(paidOrders))
 
@@ -385,7 +385,7 @@ func (s *Lsps1SettlementService) reconcileFundedOrder(order *core.Lsps1Order) {
 	}
 
 	log.Info().
-		Str("component", string(common.LogComponentSettlement)).
+		Str("component", string(logging.LogComponentSettlement)).
 		Str("order_id", order.OrderId).
 		Str("channel_point", channelPoint).
 		Msg("LSPS1 Settlement: Recorded funding verified active in LND — reconciling order to COMPLETED")
@@ -414,7 +414,7 @@ func (s *Lsps1SettlementService) recoverSettledCreatedOrders() {
 	}
 
 	log.Debug().
-		Str("component", string(common.LogComponentSettlement)).
+		Str("component", string(logging.LogComponentSettlement)).
 		Int("count", len(createdOrders)).
 		Msg("LSPS1 Settlement: Checking CREATED orders against LND for missed settlements")
 
@@ -441,7 +441,7 @@ func (s *Lsps1SettlementService) recoverSettledCreatedOrders() {
 		}
 
 		log.Info().
-			Str("component", string(common.LogComponentSettlement)).
+			Str("component", string(logging.LogComponentSettlement)).
 			Str("order_id", order.OrderId).
 			Str("invoice_state", stateStr).
 			Int64("order_total_loki", order.OrderTotalLoki).
@@ -450,14 +450,14 @@ func (s *Lsps1SettlementService) recoverSettledCreatedOrders() {
 		switch state {
 		case lightning.InvoiceStateSettled:
 			log.Info().
-				Str("component", string(common.LogComponentSettlement)).
+				Str("component", string(logging.LogComponentSettlement)).
 				Str("order_id", order.OrderId).
 				Str("peer_id", order.PeerId).
 				Msg("LSPS1 Settlement: Found CREATED order with settled invoice — recovering")
 			s.processSettledOrder(order)
 		case lightning.InvoiceStateCanceled:
 			log.Warn().
-				Str("component", string(common.LogComponentSettlement)).
+				Str("component", string(logging.LogComponentSettlement)).
 				Str("order_id", order.OrderId).
 				Msg("LSPS1 Settlement: Invoice is CANCELED — order cannot be fulfilled")
 		}
@@ -487,7 +487,7 @@ func (s *Lsps1SettlementService) processSettledOrder(order *core.Lsps1Order) {
 	}
 
 	log.Info().
-		Str("component", string(common.LogComponentSettlement)).
+		Str("component", string(logging.LogComponentSettlement)).
 		Str("order_id", order.OrderId).
 		Str("peer_id", order.PeerId).
 		Msg("LSPS1 Settlement: Order marked as PAID (recovery)")

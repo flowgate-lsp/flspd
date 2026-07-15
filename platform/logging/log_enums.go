@@ -1,4 +1,4 @@
-package common
+package logging
 
 // LogComponent defines the source of the log message
 type LogComponent string

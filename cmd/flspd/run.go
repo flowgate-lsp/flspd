@@ -34,6 +34,7 @@ import (
 	"github.com/flowgate-lsp/flspd/notifications"
 	"github.com/flowgate-lsp/flspd/platform/build"
 	"github.com/flowgate-lsp/flspd/platform/config"
+	"github.com/flowgate-lsp/flspd/platform/logging"
 	"github.com/flowgate-lsp/flspd/services"
 	"github.com/urfave/cli"
 )
@@ -68,7 +69,7 @@ func runLspd(cliCtx *cli.Context) error {
 	if funding.MinChanFundingSize > funding.MaxFlokicoinFundingAmount {
 		return fmt.Errorf("external consistency error: Network MinChanFundingSize (%d) > MaxFlokicoinFundingAmount (%d)", funding.MinChanFundingSize, funding.MaxFlokicoinFundingAmount)
 	}
-	common.InitLogger()
+	logging.InitLogger()
 	log.Info().Msgf(`Starting flspd, tag='%s', revision='%s'`, build.GetTag(), build.GetRevision())
 
 	nodeConfigs, err := loadNodeConfigs()

@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/flowgate-lsp/flspd/common"
 	"github.com/flowgate-lsp/flspd/core"
+	"github.com/flowgate-lsp/flspd/platform/logging"
 	"github.com/rs/zerolog/log"
 )
 
@@ -41,15 +41,15 @@ type Lsps2BuyResult struct {
 
 func (s *Server) handleLsps2GetVersions(req *JsonRpcRequest) *JsonRpcResponse {
 	log.Trace().
-		Str("component", string(common.LogComponentLSPS2)).
-		Str("action", string(common.LogActionRequest)).
+		Str("component", string(logging.LogComponentLSPS2)).
+		Str("action", string(logging.LogActionRequest)).
 		Msg("LSPS2: Received get_versions request")
 	result := map[string][]int{
 		"versions": {1},
 	}
 	log.Trace().
-		Str("component", string(common.LogComponentLSPS2)).
-		Str("action", string(common.LogActionResponse)).
+		Str("component", string(logging.LogComponentLSPS2)).
+		Str("action", string(logging.LogActionResponse)).
 		Msgf("LSPS2: get_versions result: %+v", result)
 	return NewJsonRpcResponse(req.Id, result)
 }
@@ -61,8 +61,8 @@ func (s *Server) lsps2GetInfo(req *JsonRpcRequest) *JsonRpcResponse {
 		_ = json.Unmarshal(req.Params, &params)
 	}
 	log.Trace().
-		Str("component", string(common.LogComponentLSPS2)).
-		Str("action", string(common.LogActionRequest)).
+		Str("component", string(logging.LogComponentLSPS2)).
+		Str("action", string(logging.LogActionRequest)).
 		Interface("params", params).
 		Msg("LSPS2: Received get_info request")
 
@@ -100,8 +100,8 @@ func (s *Server) lsps2GetInfo(req *JsonRpcRequest) *JsonRpcResponse {
 			if err != nil {
 				log.Warn().
 					Err(err).
-					Str("component", string(common.LogComponentLSPS2)).
-					Str("action", string(common.LogActionFailure)).
+					Str("component", string(logging.LogComponentLSPS2)).
+					Str("action", string(logging.LogActionFailure)).
 					Str("token", token).
 					Msg("LSPS2: Failed to get fee params for token")
 				continue
@@ -124,8 +124,8 @@ func (s *Server) lsps2GetInfo(req *JsonRpcRequest) *JsonRpcResponse {
 	}
 
 	log.Trace().
-		Str("component", string(common.LogComponentLSPS2)).
-		Str("action", string(common.LogActionResponse)).
+		Str("component", string(logging.LogComponentLSPS2)).
+		Str("action", string(logging.LogActionResponse)).
 		Msgf("LSPS2: get_info success, menu items=%d", len(menu))
 	return NewJsonRpcResponse(req.Id, map[string]interface{}{
 		"opening_fee_params_menu": menu,
@@ -138,14 +138,14 @@ func (s *Server) lsps2Buy(req *JsonRpcRequest, peer []byte) *JsonRpcResponse {
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		log.Trace().
 			Err(err).
-			Str("component", string(common.LogComponentLSPS2)).
-			Str("action", string(common.LogActionValidate)).
+			Str("component", string(logging.LogComponentLSPS2)).
+			Str("action", string(logging.LogActionValidate)).
 			Msg("LSPS2: buy invalid params")
 		return NewJsonRpcErrorResponse(req.Id, -32602, "Invalid params", nil)
 	}
 	log.Trace().
-		Str("component", string(common.LogComponentLSPS2)).
-		Str("action", string(common.LogActionRequest)).
+		Str("component", string(logging.LogComponentLSPS2)).
+		Str("action", string(logging.LogActionRequest)).
 		Interface("params", params).
 		Msg("LSPS2: Received buy request")
 
@@ -227,8 +227,8 @@ Loop:
 		if err := s.liquidityManager.CheckOnChainLiquidity(context.Background(), neededSat); err != nil {
 			log.Warn().
 				Err(err).
-				Str("component", string(common.LogComponentLSPS2)).
-				Str("action", string(common.LogActionReject)).
+				Str("component", string(logging.LogComponentLSPS2)).
+				Str("action", string(logging.LogActionReject)).
 				Msg("LSPS2: Buy rejected - insufficient on-chain liquidity")
 			return NewJsonRpcErrorResponse(req.Id, 203, "Payment size too large: insufficient liquidity", nil)
 		}
@@ -265,8 +265,8 @@ Loop:
 	if err != nil {
 		log.Error().
 			Err(err).
-			Str("component", string(common.LogComponentLSPS2)).
-			Str("action", string(common.LogActionFailure)).
+			Str("component", string(logging.LogComponentLSPS2)).
+			Str("action", string(logging.LogActionFailure)).
 			Msg("LSPS2: Failed to register buy in database")
 		return NewJsonRpcErrorResponse(req.Id, -32603, "Internal DB error", nil)
 	}

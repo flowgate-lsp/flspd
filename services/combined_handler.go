@@ -1,8 +1,8 @@
 package services
 
 import (
-	"github.com/flowgate-lsp/flspd/common"
 	"github.com/flowgate-lsp/flspd/core"
+	"github.com/flowgate-lsp/flspd/platform/logging"
 	"github.com/flowgate-lsp/flspd/ports"
 	"github.com/rs/zerolog/log"
 )
@@ -21,7 +21,7 @@ func (c *CombinedHandler) Intercept(req core.InterceptRequest) core.InterceptRes
 	for i, handler := range c.handlers {
 		res := handler.Intercept(req)
 		log.Debug().
-			Str("component", string(common.LogComponentIntercept)).
+			Str("component", string(logging.LogComponentIntercept)).
 			Str("req", req.String()).
 			Int("handler_index", i).
 			Str("result", res.String()).

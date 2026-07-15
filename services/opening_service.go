@@ -12,6 +12,7 @@ import (
 	"github.com/flokiorg/go-flokicoin/crypto/ecdsa"
 	"github.com/flowgate-lsp/flspd/common"
 	"github.com/flowgate-lsp/flspd/core"
+	"github.com/flowgate-lsp/flspd/platform/logging"
 	"github.com/flowgate-lsp/flspd/ports"
 	"github.com/rs/zerolog/log"
 )
@@ -33,8 +34,8 @@ func NewOpeningService(
 
 func (s *openingService) GetFeeParamsMenu(token string, privateKey *btcec.PrivateKey) ([]*core.OpeningFeeParams, error) {
 	log.Trace().
-		Str("component", string(common.LogComponentOpeningService)).
-		Str("action", string(common.LogActionRequest)).
+		Str("component", string(logging.LogComponentOpeningService)).
+		Str("action", string(logging.LogActionRequest)).
 		Str("token", token).
 		Msg("GetFeeParamsMenu: Fetching fee params")
 	var menu []*core.OpeningFeeParams
@@ -42,15 +43,15 @@ func (s *openingService) GetFeeParamsMenu(token string, privateKey *btcec.Privat
 	if err != nil {
 		log.Error().
 			Err(err).
-			Str("component", string(common.LogComponentOpeningService)).
-			Str("action", string(common.LogActionFailure)).
+			Str("component", string(logging.LogComponentOpeningService)).
+			Str("action", string(logging.LogActionFailure)).
 			Msg("GetFeeParamsMenu: Failed to fetch fee params settings")
 		return nil, fmt.Errorf("failed to get opening_fee_params")
 	}
 
 	if len(settings) == 0 {
 		log.Debug().
-			Str("component", string(common.LogComponentOpeningService)).
+			Str("component", string(logging.LogComponentOpeningService)).
 			Str("token", token).
 			Msg("GetFeeParamsMenu: No fee params settings found in DB")
 	}
@@ -76,7 +77,7 @@ func (s *openingService) GetFeeParamsMenu(token string, privateKey *btcec.Privat
 		if err != nil {
 			log.Error().
 				Err(err).
-				Str("component", string(common.LogComponentOpeningService)).
+				Str("component", string(logging.LogComponentOpeningService)).
 				Msg("GetFeeParamsMenu: Failed to create promise")
 			return nil, err
 		}
@@ -93,8 +94,8 @@ func (s *openingService) GetFeeParamsMenu(token string, privateKey *btcec.Privat
 		return menu[i].MinFeeMloki < menu[j].MinFeeMloki
 	})
 	log.Trace().
-		Str("component", string(common.LogComponentOpeningService)).
-		Str("action", string(common.LogActionResponse)).
+		Str("component", string(logging.LogComponentOpeningService)).
+		Str("action", string(logging.LogActionResponse)).
 		Int("items_count", len(menu)).
 		Msg("GetFeeParamsMenu: Returning fee params menu")
 	return menu, nil
@@ -102,8 +103,8 @@ func (s *openingService) GetFeeParamsMenu(token string, privateKey *btcec.Privat
 
 func (s *openingService) ValidateOpeningFeeParams(params *core.OpeningFeeParams, publicKey *btcec.PublicKey) bool {
 	log.Trace().
-		Str("component", string(common.LogComponentOpeningService)).
-		Str("action", string(common.LogActionValidate)).
+		Str("component", string(logging.LogComponentOpeningService)).
+		Str("action", string(logging.LogActionValidate)).
 		Msg("ValidateOpeningFeeParams: Validating params")
 	if params == nil {
 		return false
@@ -118,8 +119,8 @@ func (s *openingService) ValidateOpeningFeeParams(params *core.OpeningFeeParams,
 	if err != nil {
 		log.Error().
 			Err(err).
-			Str("component", string(common.LogComponentOpeningService)).
-			Str("action", string(common.LogActionFailure)).
+			Str("component", string(logging.LogComponentOpeningService)).
+			Str("action", string(logging.LogActionFailure)).
 			Str("valid_until", params.ValidUntil).
 			Msg("ValidateOpeningFeeParams: Invalid time format")
 		return false
@@ -127,8 +128,8 @@ func (s *openingService) ValidateOpeningFeeParams(params *core.OpeningFeeParams,
 
 	if time.Now().UTC().After(t) {
 		log.Debug().
-			Str("component", string(common.LogComponentOpeningService)).
-			Str("action", string(common.LogActionValidate)).
+			Str("component", string(logging.LogComponentOpeningService)).
+			Str("action", string(logging.LogActionValidate)).
 			Time("valid_until", t).
 			Msg("ValidateOpeningFeeParams: Promise expired")
 		return false
@@ -142,7 +143,7 @@ func (s *openingService) IsCurrentChainFeeCheaper(token string, params *core.Ope
 	if err != nil {
 		log.Error().
 			Err(err).
-			Str("component", string(common.LogComponentOpeningService)).
+			Str("component", string(logging.LogComponentOpeningService)).
 			Msg("IsCurrentChainFeeCheaper: Failed to get fee params settings")
 		return false
 	}
@@ -183,7 +184,7 @@ func paramsHash(params *core.OpeningFeeParams) ([]byte, error) {
 	if err != nil {
 		log.Error().
 			Err(err).
-			Str("component", string(common.LogComponentOpeningService)).
+			Str("component", string(logging.LogComponentOpeningService)).
 			Msg("paramsHash: Failed to marshal params")
 		return nil, err
 	}
@@ -200,7 +201,7 @@ func verifyPromise(lspPublicKey *btcec.PublicKey, params *core.OpeningFeeParams)
 	if err != nil {
 		log.Error().
 			Err(err).
-			Str("component", string(common.LogComponentOpeningService)).
+			Str("component", string(logging.LogComponentOpeningService)).
 			Msg("verifyPromise: Failed to decode promise signature")
 		return err
 	}
@@ -208,13 +209,13 @@ func verifyPromise(lspPublicKey *btcec.PublicKey, params *core.OpeningFeeParams)
 	if err != nil {
 		log.Error().
 			Err(err).
-			Str("component", string(common.LogComponentOpeningService)).
+			Str("component", string(logging.LogComponentOpeningService)).
 			Msg("verifyPromise: Failed to recover key from signature")
 		return err
 	}
 	if !lspPublicKey.IsEqual(pub) {
 		log.Error().
-			Str("component", string(common.LogComponentOpeningService)).
+			Str("component", string(logging.LogComponentOpeningService)).
 			Msg("verifyPromise: Signature not signed by us")
 		return fmt.Errorf("invalid promise")
 	}
@@ -223,8 +224,8 @@ func verifyPromise(lspPublicKey *btcec.PublicKey, params *core.OpeningFeeParams)
 
 func (s *openingService) RegisterLsps2Buy(reg *core.Lsps2BuyRegistration) error {
 	log.Trace().
-		Str("component", string(common.LogComponentOpeningService)).
-		Str("action", string(common.LogActionRequest)).
+		Str("component", string(logging.LogComponentOpeningService)).
+		Str("action", string(logging.LogActionRequest)).
 		Uint64("scid", reg.Scid).
 		Str("peer_id", reg.PeerId).
 		Msg("RegisterLsps2Buy: Registering buy")
@@ -233,8 +234,8 @@ func (s *openingService) RegisterLsps2Buy(reg *core.Lsps2BuyRegistration) error 
 
 func (s *openingService) RegisterLsps1Order(order *core.Lsps1Order) error {
 	log.Trace().
-		Str("component", string(common.LogComponentOpeningService)).
-		Str("action", string(common.LogActionRequest)).
+		Str("component", string(logging.LogComponentOpeningService)).
+		Str("action", string(logging.LogActionRequest)).
 		Str("order_id", order.OrderId).
 		Str("peer_id", order.PeerId).
 		Msg("RegisterLsps1Order: Registering order")
@@ -243,8 +244,8 @@ func (s *openingService) RegisterLsps1Order(order *core.Lsps1Order) error {
 
 func (s *openingService) GetLsps1Order(orderId string) (*core.Lsps1Order, error) {
 	log.Trace().
-		Str("component", string(common.LogComponentOpeningService)).
-		Str("action", string(common.LogActionRequest)).
+		Str("component", string(logging.LogComponentOpeningService)).
+		Str("action", string(logging.LogActionRequest)).
 		Str("order_id", orderId).
 		Msg("GetLsps1Order: Fetching order")
 	return s.store.GetLsps1Order(orderId)
@@ -252,8 +253,8 @@ func (s *openingService) GetLsps1Order(orderId string) (*core.Lsps1Order, error)
 
 func (s *openingService) RegisterLsps5Webhook(webhook *core.Lsps5Webhook) error {
 	log.Trace().
-		Str("component", string(common.LogComponentOpeningService)).
-		Str("action", string(common.LogActionRequest)).
+		Str("component", string(logging.LogComponentOpeningService)).
+		Str("action", string(logging.LogActionRequest)).
 		Str("app_name", webhook.AppName).
 		Str("url", webhook.Url).
 		Msg("RegisterLsps5Webhook: Registering webhook")
@@ -262,8 +263,8 @@ func (s *openingService) RegisterLsps5Webhook(webhook *core.Lsps5Webhook) error 
 
 func (s *openingService) GetLsps5Webhooks(clientNodeId string) ([]*core.Lsps5Webhook, error) {
 	log.Trace().
-		Str("component", string(common.LogComponentOpeningService)).
-		Str("action", string(common.LogActionRequest)).
+		Str("component", string(logging.LogComponentOpeningService)).
+		Str("action", string(logging.LogActionRequest)).
 		Str("client_node_id", clientNodeId).
 		Msg("GetLsps5Webhooks: Fetching webhooks")
 	return s.store.GetLsps5Webhooks(clientNodeId)
@@ -271,8 +272,8 @@ func (s *openingService) GetLsps5Webhooks(clientNodeId string) ([]*core.Lsps5Web
 
 func (s *openingService) RemoveLsps5Webhook(clientNodeId, appName string) error {
 	log.Trace().
-		Str("component", string(common.LogComponentOpeningService)).
-		Str("action", string(common.LogActionRequest)).
+		Str("component", string(logging.LogComponentOpeningService)).
+		Str("action", string(logging.LogActionRequest)).
 		Str("client_node_id", clientNodeId).
 		Str("app_name", appName).
 		Msg("RemoveLsps5Webhook: Removing webhook")

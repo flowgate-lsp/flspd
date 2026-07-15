@@ -8,8 +8,8 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/GoWebProd/uuid7"
-	"github.com/flowgate-lsp/flspd/common"
 	"github.com/flowgate-lsp/flspd/history"
+	"github.com/flowgate-lsp/flspd/platform/logging"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -145,8 +145,8 @@ func (s *HistoryStore) UpdateChannels(
 		return fmt.Errorf("CopyFrom() error: %w", err)
 	}
 	log.Debug().
-		Str("component", string(common.LogComponentHistoryStore)).
-		Str("action", string(common.LogActionSync)).
+		Str("component", string(logging.LogComponentHistoryStore)).
+		Str("action", string(logging.LogActionSync)).
 		Int64("count", count).
 		Msg("UpdateChannels: Batch copy to temp table complete")
 
@@ -163,8 +163,8 @@ func (s *HistoryStore) UpdateChannels(
 		return fmt.Errorf("INSERT INTO channels error: %w", err)
 	}
 	log.Debug().
-		Str("component", string(common.LogComponentHistoryStore)).
-		Str("action", string(common.LogActionSync)).
+		Str("component", string(logging.LogComponentHistoryStore)).
+		Str("action", string(logging.LogActionSync)).
 		Int64("rows_affected", cmdTag.RowsAffected()).
 		Msg("UpdateChannels: Upsert to main table complete")
 
@@ -212,8 +212,8 @@ func (s *HistoryStore) InsertForwards(
 		return fmt.Errorf("CopyFrom() error: %w", err)
 	}
 	log.Debug().
-		Str("component", string(common.LogComponentHistoryStore)).
-		Str("action", string(common.LogActionSync)).
+		Str("component", string(logging.LogComponentHistoryStore)).
+		Str("action", string(logging.LogActionSync)).
 		Str("node_id", fmt.Sprintf("%x", nodeid)).
 		Int64("count", count).
 		Msg("InsertForwards: Batch copy to temp table complete")
@@ -228,8 +228,8 @@ func (s *HistoryStore) InsertForwards(
 		return fmt.Errorf("INSERT INTO forwarding_history error: %w", err)
 	}
 	log.Debug().
-		Str("component", string(common.LogComponentHistoryStore)).
-		Str("action", string(common.LogActionSync)).
+		Str("component", string(logging.LogComponentHistoryStore)).
+		Str("action", string(logging.LogActionSync)).
 		Str("node_id", fmt.Sprintf("%x", nodeid)).
 		Int64("rows_affected", cmdTag.RowsAffected()).
 		Msg("InsertForwards: Upsert to main table complete")
@@ -278,8 +278,8 @@ func (s *HistoryStore) UpdateForwards(
 		return fmt.Errorf("CopyFrom() error: %w", err)
 	}
 	log.Debug().
-		Str("component", string(common.LogComponentHistoryStore)).
-		Str("action", string(common.LogActionSync)).
+		Str("component", string(logging.LogComponentHistoryStore)).
+		Str("action", string(logging.LogActionSync)).
 		Str("node_id", fmt.Sprintf("%x", nodeid)).
 		Int64("count", count).
 		Msg("UpdateForwards: Batch copy to temp table complete")
@@ -299,8 +299,8 @@ func (s *HistoryStore) UpdateForwards(
 		return fmt.Errorf("INSERT INTO forwarding_history error: %w", err)
 	}
 	log.Debug().
-		Str("component", string(common.LogComponentHistoryStore)).
-		Str("action", string(common.LogActionSync)).
+		Str("component", string(logging.LogComponentHistoryStore)).
+		Str("action", string(logging.LogActionSync)).
 		Str("node_id", fmt.Sprintf("%x", nodeid)).
 		Int64("rows_affected", cmdTag.RowsAffected()).
 		Msg("UpdateForwards: Upsert to main table complete")

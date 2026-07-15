@@ -8,8 +8,8 @@ import (
 	ecies "github.com/ecies/go/v2"
 	pb "github.com/flowgate-lsp/flspd/api/proto/notifications"
 	rpc "github.com/flowgate-lsp/flspd/api/proto/rpc"
-	"github.com/flowgate-lsp/flspd/common"
 	"github.com/flowgate-lsp/flspd/lightning"
+	"github.com/flowgate-lsp/flspd/platform/logging"
 	"github.com/rs/zerolog/log"
 	"google.golang.org/protobuf/proto"
 )
@@ -40,8 +40,8 @@ func (s *server) SubscribeNotifications(
 	if err != nil {
 		log.Warn().
 			Err(err).
-			Str("component", string(common.LogComponentNotifications)).
-			Str("action", string(common.LogActionValidate)).
+			Str("component", string(logging.LogComponentNotifications)).
+			Str("action", string(logging.LogActionValidate)).
 			Msg("Notifications: Failed to decrypt request")
 		return nil, fmt.Errorf("ecies.Decrypt(%x) error: %w", in.Blob, err)
 	}
@@ -51,8 +51,8 @@ func (s *server) SubscribeNotifications(
 	if err != nil {
 		log.Warn().
 			Err(err).
-			Str("component", string(common.LogComponentNotifications)).
-			Str("action", string(common.LogActionValidate)).
+			Str("component", string(logging.LogComponentNotifications)).
+			Str("action", string(logging.LogActionValidate)).
 			Msg("Notifications: Failed to unmarshal subscription request")
 		return nil, fmt.Errorf("proto.Unmarshal(%x) error: %w", data, err)
 	}
@@ -61,8 +61,8 @@ func (s *server) SubscribeNotifications(
 	if err != nil {
 		log.Warn().
 			Err(err).
-			Str("component", string(common.LogComponentNotifications)).
-			Str("action", string(common.LogActionValidate)).
+			Str("component", string(logging.LogComponentNotifications)).
+			Str("action", string(logging.LogActionValidate)).
 			Str("url", request.Url).
 			Msg("Notifications: Failed to verify signature")
 
@@ -81,8 +81,8 @@ func (s *server) SubscribeNotifications(
 	if err != nil {
 		log.Error().
 			Err(err).
-			Str("component", string(common.LogComponentNotifications)).
-			Str("action", string(common.LogActionFailure)).
+			Str("component", string(logging.LogComponentNotifications)).
+			Str("action", string(logging.LogActionFailure)).
 			Str("pubkey", pubkeyStr).
 			Str("url", request.Url).
 			Msg("Notifications: Failed to register in store")
@@ -91,8 +91,8 @@ func (s *server) SubscribeNotifications(
 	}
 
 	log.Debug().
-		Str("component", string(common.LogComponentNotifications)).
-		Str("action", string(common.LogActionSuccess)).
+		Str("component", string(logging.LogComponentNotifications)).
+		Str("action", string(logging.LogActionSuccess)).
 		Str("pubkey", pubkeyStr).
 		Str("url", request.Url).
 		Str("transport", transport).
@@ -113,8 +113,8 @@ func (s *server) UnsubscribeNotifications(
 	if err != nil {
 		log.Warn().
 			Err(err).
-			Str("component", string(common.LogComponentNotifications)).
-			Str("action", string(common.LogActionValidate)).
+			Str("component", string(logging.LogComponentNotifications)).
+			Str("action", string(logging.LogActionValidate)).
 			Msg("Notifications: Failed to decrypt unsubscribe request")
 		return nil, fmt.Errorf("ecies.Decrypt(%x) error: %w", in.Blob, err)
 	}
@@ -124,8 +124,8 @@ func (s *server) UnsubscribeNotifications(
 	if err != nil {
 		log.Warn().
 			Err(err).
-			Str("component", string(common.LogComponentNotifications)).
-			Str("action", string(common.LogActionValidate)).
+			Str("component", string(logging.LogComponentNotifications)).
+			Str("action", string(logging.LogActionValidate)).
 			Msg("Notifications: Failed to unmarshal unsubscribe request")
 		return nil, fmt.Errorf("proto.Unmarshal(%x) error: %w", data, err)
 	}
@@ -134,8 +134,8 @@ func (s *server) UnsubscribeNotifications(
 	if err != nil {
 		log.Warn().
 			Err(err).
-			Str("component", string(common.LogComponentNotifications)).
-			Str("action", string(common.LogActionValidate)).
+			Str("component", string(logging.LogComponentNotifications)).
+			Str("action", string(logging.LogActionValidate)).
 			Str("url", request.Url).
 			Msg("Notifications: Failed to verify signature for unsubscribe")
 
@@ -148,8 +148,8 @@ func (s *server) UnsubscribeNotifications(
 	if err != nil {
 		log.Error().
 			Err(err).
-			Str("component", string(common.LogComponentNotifications)).
-			Str("action", string(common.LogActionFailure)).
+			Str("component", string(logging.LogComponentNotifications)).
+			Str("action", string(logging.LogActionFailure)).
 			Str("pubkey", pubkeyStr).
 			Str("url", request.Url).
 			Msg("Notifications: Failed to unsubscribe in store")
@@ -158,8 +158,8 @@ func (s *server) UnsubscribeNotifications(
 	}
 
 	log.Debug().
-		Str("component", string(common.LogComponentNotifications)).
-		Str("action", string(common.LogActionSuccess)).
+		Str("component", string(logging.LogComponentNotifications)).
+		Str("action", string(logging.LogActionSuccess)).
 		Str("pubkey", pubkeyStr).
 		Str("url", request.Url).
 		Msg("Notifications: Successfully unsubscribed client")
