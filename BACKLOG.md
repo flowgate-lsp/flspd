@@ -39,10 +39,10 @@ number-soup and then get reorganized a second time.
 | 1 | Green the build + safety net | `go test ./... -race` passes in CI | ✅ T1-1..T1-5 done |
 | 2 | Fix defects on current structure | All P2 items merged w/ regression test | ✅ All items done: F-1, F-2, C-1, C-2, C-3, F-5, F-7, F-8, F-9, F-10, F-11, F-12, F-13 |
 | 3 | Unit-test coverage buildout | Critical-four packages ≥70–80% | ✅ Done: F-5, F-6, F-7, F-8, F-9, F-12, F-13, T1-4/T3-2..T3-6 all done. All four critical packages now clear the target: **postgresql 69.1%→81.2%, notifications 54.3%→70.3%, lsps 50.1%→78.6%, interceptor 58.3%→73.4%**. Notable finds along the way, not just coverage: `lsps1_settlement_store.go`'s `UpdateLsps1OrderFunding` silently no-ops on an unknown order_id; two near-duplicate `GetPaidLsps1Order` implementations disagree on their not-found contract (only one is actually reachable in production); `notification_service.go`'s `Notify()` return value is a real fast-fail signal `notifyAndWait` depends on (relevant background for the still-open Performance-backlog P-4 write-up below); a genuine data race in a `lsps` test itself (reading `mock.Mock.Calls` from a different goroutine than the one appending to it) caught by `-race`, not just written defensively. `handler_lsps2.go`'s `lsps2Buy` and `server.go`'s core JSON-RPC dispatch (`subscribeAndListen`/`handleMessage`/`route`) remain the largest *remaining* gaps in `lsps` specifically, but the package-level target is already met. `lnd` 4.7%, `common` 36.0%, `config` 93.4%, `lightning` 86.9%, `auth` 76.5% are not part of the critical four and untouched this round. |
-| 4 | YAML-driven integration tests | Runner + 3 seed scenarios merged | ✅ Runner built + all 3 seed scenarios landed (T4-1/T4-2). LSPS1 test client added; `lsps1_order_settle_and_open.yaml` and `lsps1_recovery_after_restart.yaml` (F-1 regression, real kill/restart) both pass on real flspd/flnd/chain processes, though the latter is flaky (new 2026-07-15 finding, pre-existing not a regression — see T4-2's own writeup). `lsps2_jit_happy_path.yaml` intentionally left known-failing on the distinct zero-conf-balance-sync race documented in T4-1 — not swept under the rug. `kill_lsp`/`restart_lsp` fault injection landed (T4-3, partial); relay-failure/mempool-fee fault injection not started. Wired into CI as `.github/workflows/itest.yml` (2026-07-15) — `workflow_dispatch` + nightly, deliberately *not* on every push/PR (user's explicit call): the suite checks out and builds 4 sibling repos from source plus a live devnet before testing, realistically 10-20+ min with more inherent flakiness risk than a unit suite, not something to put in the PR-blocking path. |
+| 4 | YAML-driven integration tests | Runner + 3 seed scenarios merged | ✅ Runner built + all 3 seed scenarios landed (T4-1/T4-2). LSPS1 test client added; `lsps1_order_settle_and_open.yaml` and `lsps1_recovery_after_restart.yaml` (F-1 regression, real kill/restart) both pass on real flspd/flnd/chain processes, though the latter is flaky (new 2026-07-15 finding, pre-existing not a regression — see T4-2's own writeup). `lsps2_jit_happy_path.yaml` intentionally left known-failing on the distinct zero-conf-balance-sync race documented in T4-1 — not swept under the rug; revisited 2026-07-15 (see the dedicated writeup after T4-3): one genuine root-caused bug fixed (an unsatisfiable `QueryRoutes` amount), a second, distinct failure newly found and left open (`"unable to find a path to destination"` for an alias-SCID-pinned route query), still failing end to end. `kill_lsp`/`restart_lsp` fault injection landed (T4-3, partial); relay-failure/mempool-fee fault injection not started. Wired into CI as `.github/workflows/itest.yml` (2026-07-15) — `workflow_dispatch` + nightly, deliberately *not* on every push/PR (user's explicit call): the suite checks out and builds 4 sibling repos from source plus a live devnet before testing, realistically 10-20+ min with more inherent flakiness risk than a unit suite, not something to put in the PR-blocking path. |
 | 5 | Config model + secrets-by-reference | New model shipped behind compat shim | ✅ T5-1..T5-7 done (secrets-by-reference, unit/fee/channel-size model, profiles, CLI tooling, Settings.tsx re-skin — frontend not browser-verified, no automation tooling available) |
 | 6 | Repo structure / arbo migration | Tree matches target layout, build green throughout | ✅ Done. T6-1..T6-3 (format/ folded into common/, internal/adapters/ introduced, common/ split into core/ports/services/); T6-4 (rpc/→api/proto/rpc/, config/→platform/config/, build/→platform/build/, auth/→transport/auth/, notifications/ proto split→api/proto/notifications/, common/logger.go+log_enums.go→platform/logging/, notifications/server.go transport classification resolved "stays put", lsps/→lsps+transport/lsps/ and dashboard/→dashboard+transport/dashboard/ splits both landed on the real transport-vs-logic seam, verified live against devnet for lsps/); T6-5 (configs/examples/, test/itest/, deploy/, web/ — deploy/+web/ landed on explicit user go-ahead, stashed+reapplied someone else's uncommitted dev-tooling edits with re-derived paths) — all sub-items done. |
-| — | Performance backlog (parallel, non-blocking) | — | ✅ P-3 verified as no-op (never called hot), nothing to do; P-4 done — split `Notify`/`NotifyAsync` on the real sync-vs-fire-and-forget seam; P-2 done — cached peer↔scid map off the existing peer/channel-event subscriptions; P-1 done for its `GetChannel` half (`WaitChannelPointActive`, verified live), its `QueryRoutes` half is inseparable from the still-open LSPS2 zero-conf balance-sync race, tracked there instead of as a standalone perf item. All 4 items verified live against the devnet where the code path allowed it. |
+| — | Performance backlog (parallel, non-blocking) | — | ✅ P-3 verified as no-op (never called hot), nothing to do; P-4 done — split `Notify`/`NotifyAsync` on the real sync-vs-fire-and-forget seam; P-2 done — cached peer↔scid map off the existing peer/channel-event subscriptions; P-1 done for its `GetChannel` half (`WaitChannelPointActive`, verified live); its `QueryRoutes` half turned into the LSPS2 zero-conf race investigation itself (see Phase 4/T4-3) — one real bug fixed there (an unsatisfiable route-query amount), the race still open on a second, newly-found issue. All items verified live against the devnet where the code path allowed it. |
 
 ---
 
@@ -1083,6 +1083,87 @@ fault injection — actually SIGKILL/restart flspd itself, exercising real
 crash recovery, not a simulated failure) landed and already earning its
 keep as T4-2 scenario #3's core mechanism. Relay failure modes
 (`reject_then_accept`) and mempool fee-congestion fixtures not started.
+
+### LSPS2 zero-conf balance-sync race — deeper investigation (2026-07-15)
+**Still open, but substantially better understood — one real bug fixed,
+one distinct issue newly found and left open.** Picked back up as part
+of P-1's `QueryRoutes` half (which turned out to be the same
+investigation, not a separate perf task — see P-1 above).
+
+**Fixed: the `QueryRoutes` amount was structurally unsatisfiable, not
+just slow to sync.** `openChannel` sizes JIT channel capacity as
+`incomingAmountMloki` (converted to loki) plus only
+`AdditionalChannelCapacity`'s configured padding — neither that formula
+nor `ValidateJit`'s own network-floor checks account for the ~1%
+mandatory channel reserve locked on each side of *any* Lightning
+channel. A live run showed `capacity=5,021,000` loki against a
+`5,000,000` loki payment — a ~21,000 loki margin, well under the
+~50,000 loki reserve alone. The post-open `QueryRoutes` loop asked for
+the *full* incoming amount every poll; that margin can never cover it,
+so the loop always ran its full 60s clock before falling back to "best
+effort, resume anyway" — this looked exactly like "the router hasn't
+synced yet" (a real, waitable condition, which is what the loop's
+retry structure is actually built for) but was really "the amount
+asked for can never be satisfied by this channel's own local balance,"
+which no amount of waiting fixes. The code's own pre-existing comment
+already stated the intended design ("use a minimal amount... trust the
+Switch to handle the full amount check on resume") but the
+implementation used the full amount instead — fixed to use the
+channel's own configured HTLC minimum (`chanResult.HtlcMinimumMloki`,
+already available from `WaitChannelPointActive`), matching what the
+comment already said it should do. Verified live: "insufficient local
+balance" (117 occurrences in one 60s run before this fix) no longer
+occurs at all afterward.
+
+**Not fixed, newly found: a second, distinct failure mode.** With the
+amount fix in place, `QueryRoutes` immediately starts failing with a
+*different* error instead — `"unable to find a path to destination"` —
+and this one does *not* resolve within 60s either. This is the same
+call (`QueryRoutes(destination, routeParamsAmount, targetScid)` with
+`OutgoingChanIds` pinned to the just-opened channel's *alias* SCID,
+since JIT channels are zero-conf/unannounced), just failing on
+apparent graph-routability rather than local balance. Not root-caused
+further this pass — candidate explanations neither confirmed nor
+ruled out: whether flnd's router needs longer than 60s to resolve an
+alias-SCID-pinned `OutgoingChanIds` filter for a brand-new private
+channel at all, or whether `QueryRoutes` (a graph-pathfinding RPC) is
+fundamentally the wrong tool to ask this question of an unannounced
+zero-conf channel regardless of how long you wait, versus some other
+gap. Deserves dedicated flnd-source-level investigation, not a guess.
+
+**Also observed, not resolved: the payer's own give-up point doesn't
+track flspd's resume timing the way assumed.** Tried shortening the
+`QueryRoutes` loop's timeout from 60s down to 5s, on the theory that
+flspd resuming faster (via the same best-effort fallback, just
+triggered sooner) would beat the payer's own `FAILURE_REASON_NO_ROUTE`
+give-up. Reverted after live testing across several runs: the payer's
+NO_ROUTE failure showed up anywhere from ~8s to ~70s after `pay_invoice`
+started, *including runs where it arrived before flspd had even
+finished opening the channel* — meaning the payer's own retry/give-up
+logic isn't simply waiting on flspd's signal, and shortening flspd's
+timeout is not a validated fix for the observable symptom, just an
+unproven guess against revenue-critical code. Left at the original,
+safe 60s. Whatever governs the payer's own patience here (LND's
+default payment-attempt retry/backoff behavior against a
+`TEMPORARY_CHANNEL_FAILURE`-shaped intermediate failure, most likely)
+needs its own investigation before touching flspd's timing further —
+this session also flagged `lsps1_recovery_after_restart.yaml` as
+independently flaky (see T4-2), so this devnet's long-lived,
+many-hours-old accumulated state is a plausible confound worth ruling
+out with a fresh devnet before trusting any more timing numbers from
+it.
+
+**Recommended next steps for whoever picks this up:** (1) reproduce
+`"unable to find a path to destination"` against a *freshly reset*
+devnet (`docker compose down -v && rm -rf data && ./setup.sh`) to rule
+out accumulated-state noise; (2) read flnd's `routing` package for how
+`QueryRoutesRequest.OutgoingChanIds` resolves an alias SCID for an
+unannounced channel, specifically whether it requires graph
+propagation at all or should resolve from local channel state
+directly; (3) consider whether the right fix is a different RPC
+entirely (e.g. checking the channel's local link state directly rather
+than asking the graph-based router to find a path to an unannounced
+neighbor) rather than continuing to tune `QueryRoutes`' parameters.
 
 **Acceptance criteria for Phase 4:** the 3 seed scenarios pass in CI; adding
 a new scenario requires zero Go code, only a new YAML file. **Landed with
