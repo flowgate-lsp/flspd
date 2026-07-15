@@ -10,7 +10,6 @@ import (
 
 	btcec "github.com/flokiorg/go-flokicoin/crypto"
 	"github.com/flokiorg/go-flokicoin/crypto/ecdsa"
-	"github.com/flowgate-lsp/flspd/format"
 	"github.com/rs/zerolog/log"
 )
 
@@ -77,7 +76,7 @@ func (s *openingService) GetFeeParamsMenu(token string, privateKey *btcec.Privat
 		params := &OpeningFeeParams{
 			MinFeeMloki:          setting.Params.MinFeeMloki,
 			Proportional:         setting.Params.Proportional,
-			ValidUntil:           validUntil.Format(format.TIME_FORMAT),
+			ValidUntil:           validUntil.Format(TimeFormat),
 			MinLifetime:          setting.Params.MinLifetime,
 			MaxClientToSelfDelay: setting.Params.MaxClientToSelfDelay,
 			MinPaymentSizeMloki:  setting.Params.MinPaymentSizeMloki,
@@ -126,7 +125,7 @@ func (s *openingService) ValidateOpeningFeeParams(params *OpeningFeeParams, publ
 		return false
 	}
 
-	t, err := time.Parse(format.TIME_FORMAT, params.ValidUntil)
+	t, err := time.Parse(TimeFormat, params.ValidUntil)
 	if err != nil {
 		log.Error().
 			Err(err).

@@ -12,7 +12,6 @@ import (
 	"github.com/flowgate-lsp/flspd/chain"
 	"github.com/flowgate-lsp/flspd/common"
 	"github.com/flowgate-lsp/flspd/config"
-	"github.com/flowgate-lsp/flspd/format"
 	"github.com/flowgate-lsp/flspd/history"
 	"github.com/flowgate-lsp/flspd/lightning"
 	"github.com/flowgate-lsp/flspd/notifications"
@@ -207,7 +206,7 @@ func (i *Interceptor) Intercept(req common.InterceptRequest) common.InterceptRes
 				params = &common.OpeningFeeParams{
 					MinFeeMloki:          uint64(cfg.ChannelMinimumFeeMloki),
 					Proportional:         uint32(cfg.ChannelFeePermyriad * 100),
-					ValidUntil:           time.Now().UTC().Add(validity).Format(format.TIME_FORMAT),
+					ValidUntil:           time.Now().UTC().Add(validity).Format(common.TimeFormat),
 					MinLifetime:          uint32(cfg.MaxInactiveDuration / 600),
 					MaxClientToSelfDelay: maxDelay,
 				}
@@ -222,9 +221,9 @@ func (i *Interceptor) Intercept(req common.InterceptRequest) common.InterceptRes
 				}, nil
 			}
 
-			validUntil, err := time.Parse(format.TIME_FORMAT, params.ValidUntil)
+			validUntil, err := time.Parse(common.TimeFormat, params.ValidUntil)
 			if err != nil {
-				log.Error().Msgf("paymentHash: %s, time.Parse(%s, %s) failed. Failing channel open: %v", reqPaymentHashStr, format.TIME_FORMAT, params.ValidUntil, err)
+				log.Error().Msgf("paymentHash: %s, time.Parse(%s, %s) failed. Failing channel open: %v", reqPaymentHashStr, common.TimeFormat, params.ValidUntil, err)
 				if data.orderId != "" {
 					go i.notificationService.NotifyOrderStateChanged(hex.EncodeToString(nextHop), data.orderId, "FAILED", "", fmt.Sprintf("invalid valid_until format: %v", err))
 				}
@@ -705,7 +704,7 @@ func (i *Interceptor) resolvePayment(req common.InterceptRequest) (*interceptDat
 					params = &common.OpeningFeeParams{
 						MinFeeMloki:          uint64(cfg.ChannelMinimumFeeMloki),
 						Proportional:         uint32(cfg.ChannelFeePermyriad * 100),
-						ValidUntil:           time.Now().Add(validity).Format(format.TIME_FORMAT),
+						ValidUntil:           time.Now().Add(validity).Format(common.TimeFormat),
 						MinLifetime:          uint32(cfg.MaxInactiveDuration / 600),
 						MaxClientToSelfDelay: maxDelay,
 					}

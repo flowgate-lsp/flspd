@@ -13,7 +13,6 @@ import (
 	ecies "github.com/ecies/go/v2"
 	btcec "github.com/flokiorg/go-flokicoin/crypto"
 	"github.com/flowgate-lsp/flspd/common"
-	"github.com/flowgate-lsp/flspd/format"
 	"github.com/flowgate-lsp/flspd/interceptor"
 	rpc "github.com/flowgate-lsp/flspd/rpc"
 	"google.golang.org/protobuf/proto"
@@ -140,7 +139,7 @@ func (s *channelOpenerServer) RegisterPayment(
 		pi.OpeningFeeParams = &rpc.OpeningFeeParams{
 			MinMloki:             uint64(cfg.ChannelMinimumFeeMloki),
 			Proportional:         uint32(cfg.ChannelFeePermyriad * 100),
-			ValidUntil:           time.Now().UTC().Add(time.Duration(time.Hour * 24)).Format(format.TIME_FORMAT),
+			ValidUntil:           time.Now().UTC().Add(time.Duration(time.Hour * 24)).Format(common.TimeFormat),
 			MaxIdleTime:          uint32(cfg.MaxInactiveDuration / 600),
 			MaxClientToSelfDelay: uint32(10000),
 		}

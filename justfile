@@ -46,9 +46,10 @@ setup: setup-backend setup-frontend
 
 # Setup backend data and config
 setup-backend:
-    mkdir -p data/postgres
+    mkdir -p data/postgres data/flnd
     [ -f data/nodes.yaml ] || cp nodes.sample.yaml data/nodes.yaml
     [ -f .env ] || cp compose.env.sample .env
+    [ -f data/flnd/flnd.conf ] || cp data/flnd/flnd.conf.sample data/flnd/flnd.conf
 
 # Install frontend dependencies
 setup-frontend:
@@ -84,13 +85,18 @@ sh service cmd="/bin/sh":
 
 ### --- 🧹 Operations --- ###
 
-# Clean build artifacts
+# Clean build artifacts (binaries, dist output, air's tmp/ build dir, compiled test binaries)
 clean:
     rm -f flspd flspd_revenue_cli
-    rm -rf dist frontend/dist
+    rm -rf dist frontend/dist tmp
+    find . -name "*.test" -type f -delete
 
-# Deep clean: remove build artifacts and docker volumes
+# Deep clean: build artifacts, docker volumes, AND local dev state (data/ —
+# nodes.yaml, flnd data dir, postgres data dir). Not folded into plain
+# `clean`: data/ can hold live devnet config/wallet state a developer would
+# not expect a routine "clean build artifacts" command to touch.
 clean-all: clean
+    rm -rf data
     {{COMPOSE}} down -v --remove-orphans
 
 ### --- ✅ Testing & Linting --- ###
