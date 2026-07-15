@@ -77,17 +77,46 @@ type fakeNotifStore struct {
 
 	removeExpiredCalls []time.Time
 	removeExpiredErr   error
+
+	registerCalls    []registerCall
+	registerErr      error
+	unsubscribeCalls []unsubscribeCall
+	unsubscribeErr   error
 }
 
 func newFakeNotifStore() *fakeNotifStore {
 	return &fakeNotifStore{items: make(map[int64]*NotificationQueueItem)}
 }
 
-func (f *fakeNotifStore) Register(context.Context, string, string, string) error { return nil }
+type registerCall struct {
+	pubkey, url, transport string
+}
+
+type unsubscribeCall struct {
+	pubkey, url string
+}
+
+func (f *fakeNotifStore) Register(_ context.Context, pubkey, url, transport string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.registerErr != nil {
+		return f.registerErr
+	}
+	f.registerCalls = append(f.registerCalls, registerCall{pubkey, url, transport})
+	return nil
+}
 func (f *fakeNotifStore) GetRegistrations(context.Context, string) ([]core.NotificationRegistration, error) {
 	return nil, nil
 }
-func (f *fakeNotifStore) Unsubscribe(context.Context, string, string) error { return nil }
+func (f *fakeNotifStore) Unsubscribe(_ context.Context, pubkey, url string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.unsubscribeErr != nil {
+		return f.unsubscribeErr
+	}
+	f.unsubscribeCalls = append(f.unsubscribeCalls, unsubscribeCall{pubkey, url})
+	return nil
+}
 
 func (f *fakeNotifStore) RemoveExpired(_ context.Context, before time.Time) error {
 	f.mu.Lock()
@@ -223,6 +252,63 @@ func TestProcessPending_SuccessMarksCompleted(t *testing.T) {
 	_, stillPending := notifStore.items[id]
 	notifStore.mu.Unlock()
 	assert.False(t, stillPending, "a successfully delivered item should be marked completed and no longer pending")
+}
+
+// TestSetNodePrivKey_SetsOnDefaultHTTPSTransport covers a previously
+// untested setter: the private key set here is what HTTPSTransport signs
+// outgoing lsps5 webhook payloads with.
+func TestSetNodePrivKey_SetsOnDefaultHTTPSTransport(t *testing.T) {
+	svc := NewNotificationService(newFakeOpeningStore(), nil, newFakeNotifStore())
+
+	svc.SetNodePrivKey("test-priv-key")
+
+	transport, ok := svc.transports[TransportTypePush].(*HTTPSTransport)
+	require.True(t, ok, "NewNotificationService must register a default HTTPSTransport under TransportTypePush")
+	assert.Equal(t, "test-priv-key", transport.nodePrivKey)
+}
+
+// TestStart_StopsPromptlyOnContextCancellation and
+// TestRunWorker_StopsPromptlyOnContextCancellation cover Start/runWorker's
+// goroutine lifecycles, previously entirely untested. Both loops' real
+// intervals (cleanInterval=2m, runWorker's ticker=10s) are too long to
+// wait out directly, so these instead prove the ctx.Done() branch of each
+// loop's select actually exits promptly -- a regression there (a missing
+// or misplaced ctx.Done() case) would hang the service on shutdown
+// instead of just eventually ticking again.
+func TestStart_StopsPromptlyOnContextCancellation(t *testing.T) {
+	svc := NewNotificationService(newFakeOpeningStore(), nil, newFakeNotifStore())
+	ctx, cancel := context.WithCancel(context.Background())
+
+	done := make(chan struct{})
+	go func() {
+		svc.Start(ctx)
+		close(done)
+	}()
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Start did not return promptly after context cancellation")
+	}
+}
+
+func TestRunWorker_StopsPromptlyOnContextCancellation(t *testing.T) {
+	svc := NewNotificationService(newFakeOpeningStore(), nil, newFakeNotifStore())
+	ctx, cancel := context.WithCancel(context.Background())
+
+	done := make(chan struct{})
+	go func() {
+		svc.runWorker(ctx)
+		close(done)
+	}()
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("runWorker did not return promptly after context cancellation")
+	}
 }
 
 func TestProcessPending_FailureBacksOff(t *testing.T) {

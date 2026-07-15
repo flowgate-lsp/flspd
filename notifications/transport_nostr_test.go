@@ -211,6 +211,11 @@ func nostrLsps5Uri(pubkey string, relays ...string) string {
 	return uri
 }
 
+func TestNostrTransport_Type(t *testing.T) {
+	transport := NewNostrTransport(nostr.GeneratePrivateKey())
+	assert.Equal(t, TransportTypeNostr, transport.Type())
+}
+
 func TestNostrTransport_Send_MissingPrivKey(t *testing.T) {
 	transport := NewNostrTransport("")
 	err := transport.Send(context.Background(), nostrLsps5Uri(nostr.GeneratePrivateKey()), "lsps5.payment_incoming", nil)

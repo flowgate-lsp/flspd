@@ -260,3 +260,30 @@ func TestCheckExpiries_EvictsMilestonesForSettledHtlcs(t *testing.T) {
 	defer w.mu.Unlock()
 	assert.Empty(t, w.notifiedMilestones, "milestone entries for a no-longer-pending HTLC must be evicted")
 }
+
+// TestExpiryWatcher_StartStop_ReturnsPromptly covers Start/Stop/checkLoop,
+// previously entirely untested: checkLoop's real ticker is a 10-minute
+// expiryCheckInterval, far too long to wait out in a test, so this instead
+// proves the *other* branch of checkLoop's select -- the quit channel --
+// actually stops the goroutine immediately rather than only on a future
+// tick. A regression here (e.g. checkLoop's select missing the quit case)
+// would hang this test until it times out, not silently pass.
+func TestExpiryWatcher_StartStop_ReturnsPromptly(t *testing.T) {
+	client := &fakeExpiryLightningClient{blockHeight: 1000}
+	notifier := &fakeExpiryNotifier{}
+	w := NewExpiryWatcher(client, notifier, nil)
+
+	w.Start()
+
+	done := make(chan struct{})
+	go func() {
+		w.Stop()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Stop did not return promptly -- checkLoop failed to exit on the quit signal")
+	}
+}
