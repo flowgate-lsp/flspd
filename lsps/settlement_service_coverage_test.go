@@ -130,6 +130,10 @@ func TestMatrixProcessSettledInvoice(t *testing.T) {
 					// Open Channel
 					if tt.openChannelError != nil {
 						mockClient.On("OpenChannel", mock.Anything).Return(nil, tt.openChannelError)
+						// reconcileUnclaimedChannel's own ListChannels check: no channel
+						// to this peer exists, so it falls straight through to FAILED
+						// below -- this is a genuine failure, not a crash-orphaned open.
+						mockClient.On("ListChannels").Return([]*lightning.Channel{}, nil)
 						mockStore.On("UpdateLsps1OrderState", tt.order.OrderId, string(Lsps1OrderStateFailed), string(Lsps1OrderStatePaid), string(Lsps1OrderStatePaid)).Return(true, nil)
 					} else {
 						chanPoint := &wire.OutPoint{Hash: chainhash.Hash{}, Index: 0}

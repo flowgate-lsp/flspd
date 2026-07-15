@@ -2,6 +2,7 @@ package lsps
 
 import (
 	"context"
+	"encoding/hex"
 	"testing"
 
 	"github.com/flokiorg/go-flokicoin/chaincfg/chainhash"
@@ -250,4 +251,158 @@ func TestRecoverStuckOrders_UnfundedOrderStillRetriesOpenChannel(t *testing.T) {
 
 	client.AssertCalled(t, "IsConnected", mock.Anything)
 	client.AssertNotCalled(t, "GetChannel", mock.Anything, mock.Anything)
+}
+
+// unfundedPaidOrder builds a PAID order with no funding recorded yet — the
+// state recoverStuckOrders sees when a crash landed before
+// UpdateLsps1OrderFunding ever ran, regardless of whether OpenChannel
+// itself already succeeded on the attempt that crashed.
+func unfundedPaidOrder(orderId string) *core.Lsps1Order {
+	return &core.Lsps1Order{
+		OrderId:      orderId,
+		PeerId:       "02677063d89856f4d04be859e9a4d3393165b6f3cd78641bc3c4ef9ca2fde37f",
+		OrderState:   "PAID",
+		PaymentState: "PAID",
+	}
+}
+
+// TestRecoverStuckOrders_UnfundedOrderReconcilesWhenOpenChannelCollidesWithPriorAttempt
+// is the regression test for the crash-orphaned-channel bug found while
+// investigating lsps1_recovery_after_restart.yaml's flakiness: an earlier
+// (pre-crash) openChannelForOrder run can have OpenChannel succeed at LND
+// -- broadcasting a real funding transaction -- and then crash before
+// UpdateLsps1OrderFunding persists that. recoverStuckOrders retries
+// openChannelForOrder for the same order, and the retry's own OpenChannel
+// call collides with LND's single-pending-channel-per-peer limit and
+// fails. The fix must recognize the resulting unclaimed channel to this
+// peer and reconcile to COMPLETED instead of reporting FAILED and
+// orphaning funds already committed on-chain.
+func TestRecoverStuckOrders_UnfundedOrderReconcilesWhenOpenChannelCollidesWithPriorAttempt(t *testing.T) {
+	client := new(MockLightningClient)
+	store := new(MockOpeningStore)
+	order := unfundedPaidOrder("order-crash-orphaned")
+	peerIdBytes, err := hex.DecodeString(order.PeerId)
+	assert.NoError(t, err)
+
+	store.On("GetAllPaidLsps1Orders").Return([]*core.Lsps1Order{order}, nil)
+	store.On("GetAllCreatedLsps1Orders").Return([]*core.Lsps1Order{}, nil)
+	client.On("IsConnected", mock.Anything).Return(true, nil)
+	client.On("OpenChannel", mock.Anything).Return(nil, assert.AnError)
+
+	// The prior attempt's own channel: to the same peer, not recorded
+	// against any order yet.
+	priorAttemptPoint := &wire.OutPoint{Hash: chainhash.Hash{0xaa}, Index: 0}
+	client.On("ListChannels").Return([]*lightning.Channel{
+		{PeerId: peerIdBytes, ChannelPoint: priorAttemptPoint},
+	}, nil)
+	// No existing order (this one or any other) already claims that
+	// channel point.
+	store.On("ListLsps1Orders", 500, 0).Return([]*core.Lsps1Order{}, nil)
+
+	store.On("UpdateLsps1OrderFunding", "order-crash-orphaned", priorAttemptPoint.Hash.String(), int(priorAttemptPoint.Index)).Return(nil)
+	store.On("UpdateLsps1OrderState", "order-crash-orphaned", "COMPLETED", "PAID", "PAID").Return(true, nil)
+
+	svc := newRecoveryTestService(client, store, nil)
+	svc.recoverStuckOrders()
+
+	client.AssertNumberOfCalls(t, "OpenChannel", 1)
+	store.AssertCalled(t, "UpdateLsps1OrderFunding", "order-crash-orphaned", priorAttemptPoint.Hash.String(), int(priorAttemptPoint.Index))
+	store.AssertCalled(t, "UpdateLsps1OrderState", "order-crash-orphaned", "COMPLETED", "PAID", "PAID")
+	store.AssertNotCalled(t, "UpdateLsps1OrderState", "order-crash-orphaned", "FAILED", "PAID", "PAID")
+}
+
+// TestRecoverStuckOrders_UnfundedOrderReconciliationSkipsChannelsAlreadyClaimedByAnotherOrder
+// guards the false-positive side of the same fix: if the only channel to
+// this peer is already recorded as some *other* order's funding, it must
+// not be mis-attributed to this one — the normal FAILED path must still
+// run.
+func TestRecoverStuckOrders_UnfundedOrderReconciliationSkipsChannelsAlreadyClaimedByAnotherOrder(t *testing.T) {
+	client := new(MockLightningClient)
+	store := new(MockOpeningStore)
+	order := unfundedPaidOrder("order-genuine-failure")
+	peerIdBytes, err := hex.DecodeString(order.PeerId)
+	assert.NoError(t, err)
+
+	store.On("GetAllPaidLsps1Orders").Return([]*core.Lsps1Order{order}, nil)
+	store.On("GetAllCreatedLsps1Orders").Return([]*core.Lsps1Order{}, nil)
+	client.On("IsConnected", mock.Anything).Return(true, nil)
+	client.On("OpenChannel", mock.Anything).Return(nil, assert.AnError)
+
+	claimedPoint := &wire.OutPoint{Hash: chainhash.Hash{0xbb}, Index: 0}
+	client.On("ListChannels").Return([]*lightning.Channel{
+		{PeerId: peerIdBytes, ChannelPoint: claimedPoint},
+	}, nil)
+	claimedTxid := claimedPoint.Hash.String()
+	claimedIdx := int(claimedPoint.Index)
+	otherOrder := &core.Lsps1Order{
+		OrderId:         "order-other",
+		OrderState:      "COMPLETED",
+		FundingTxid:     &claimedTxid,
+		FundingOutpoint: &claimedIdx,
+	}
+	store.On("ListLsps1Orders", 500, 0).Return([]*core.Lsps1Order{otherOrder}, nil)
+
+	store.On("UpdateLsps1OrderState", "order-genuine-failure", "FAILED", "PAID", "PAID").Return(true, nil)
+
+	svc := newRecoveryTestService(client, store, nil)
+	svc.recoverStuckOrders()
+
+	store.AssertNotCalled(t, "UpdateLsps1OrderFunding", mock.Anything, mock.Anything, mock.Anything)
+	store.AssertCalled(t, "UpdateLsps1OrderState", "order-genuine-failure", "FAILED", "PAID", "PAID")
+}
+
+// TestRecoverStuckOrders_UnfundedOrderStaysFailedWhenNoChannelExists confirms
+// the fix doesn't change behavior for a genuine failure (peer truly
+// rejected the open, no channel of any kind resulted): the order is still
+// marked FAILED, matching pre-fix behavior.
+func TestRecoverStuckOrders_UnfundedOrderStaysFailedWhenNoChannelExists(t *testing.T) {
+	client := new(MockLightningClient)
+	store := new(MockOpeningStore)
+	order := unfundedPaidOrder("order-no-channel")
+
+	store.On("GetAllPaidLsps1Orders").Return([]*core.Lsps1Order{order}, nil)
+	store.On("GetAllCreatedLsps1Orders").Return([]*core.Lsps1Order{}, nil)
+	client.On("IsConnected", mock.Anything).Return(true, nil)
+	client.On("OpenChannel", mock.Anything).Return(nil, assert.AnError)
+	client.On("ListChannels").Return([]*lightning.Channel{}, nil)
+
+	store.On("UpdateLsps1OrderState", "order-no-channel", "FAILED", "PAID", "PAID").Return(true, nil)
+
+	svc := newRecoveryTestService(client, store, nil)
+	svc.recoverStuckOrders()
+
+	store.AssertNotCalled(t, "ListLsps1Orders", mock.Anything, mock.Anything)
+	store.AssertCalled(t, "UpdateLsps1OrderState", "order-no-channel", "FAILED", "PAID", "PAID")
+}
+
+// TestRecoverStuckOrders_UnfundedOrderStaysFailedWhenAmbiguous confirms the
+// "don't guess" philosophy shared with reconcileFundedOrder: if more than
+// one unclaimed channel to the peer exists, recovery can't tell which (if
+// any) belongs to this order, so it falls through to FAILED for manual
+// review rather than picking one.
+func TestRecoverStuckOrders_UnfundedOrderStaysFailedWhenAmbiguous(t *testing.T) {
+	client := new(MockLightningClient)
+	store := new(MockOpeningStore)
+	order := unfundedPaidOrder("order-ambiguous")
+	peerIdBytes, err := hex.DecodeString(order.PeerId)
+	assert.NoError(t, err)
+
+	store.On("GetAllPaidLsps1Orders").Return([]*core.Lsps1Order{order}, nil)
+	store.On("GetAllCreatedLsps1Orders").Return([]*core.Lsps1Order{}, nil)
+	client.On("IsConnected", mock.Anything).Return(true, nil)
+	client.On("OpenChannel", mock.Anything).Return(nil, assert.AnError)
+
+	client.On("ListChannels").Return([]*lightning.Channel{
+		{PeerId: peerIdBytes, ChannelPoint: &wire.OutPoint{Hash: chainhash.Hash{0xcc}, Index: 0}},
+		{PeerId: peerIdBytes, ChannelPoint: &wire.OutPoint{Hash: chainhash.Hash{0xdd}, Index: 0}},
+	}, nil)
+	store.On("ListLsps1Orders", 500, 0).Return([]*core.Lsps1Order{}, nil)
+
+	store.On("UpdateLsps1OrderState", "order-ambiguous", "FAILED", "PAID", "PAID").Return(true, nil)
+
+	svc := newRecoveryTestService(client, store, nil)
+	svc.recoverStuckOrders()
+
+	store.AssertNotCalled(t, "UpdateLsps1OrderFunding", mock.Anything, mock.Anything, mock.Anything)
+	store.AssertCalled(t, "UpdateLsps1OrderState", "order-ambiguous", "FAILED", "PAID", "PAID")
 }

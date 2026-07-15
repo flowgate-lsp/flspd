@@ -90,6 +90,19 @@ func loadScenario(path string) (*Scenario, error) {
 	return &s, nil
 }
 
+// usesStep reports whether verb appears anywhere in the scenario's step
+// list. Used by the runner to decide whether to activate optional fixtures
+// (e.g. the fake mempool API) only for scenarios that actually exercise
+// them, rather than changing every scenario's behavior unconditionally.
+func (s *Scenario) usesStep(verb string) bool {
+	for _, step := range s.Steps {
+		if step.Verb == verb {
+			return true
+		}
+	}
+	return false
+}
+
 // StepFn performs one scenario step against a live ScenarioContext.
 type StepFn func(t *testing.T, sc *ScenarioContext, params *yaml.Node) error
 
@@ -112,6 +125,7 @@ type ScenarioContext struct {
 	Devnet   *Devnet
 	Postgres *PostgresContainer
 	Flspd    *FlspdProcess
+	Mempool  *FakeMempoolServer
 
 	rawClients map[string]lnrpc.LightningClient
 	clients    map[string]lightning.Client
@@ -120,13 +134,14 @@ type ScenarioContext struct {
 	saved map[string]interface{}
 }
 
-func newScenarioContext(t *testing.T, ctx context.Context, d *Devnet, pg *PostgresContainer, flspd *FlspdProcess) *ScenarioContext {
+func newScenarioContext(t *testing.T, ctx context.Context, d *Devnet, pg *PostgresContainer, flspd *FlspdProcess, mempool *FakeMempoolServer) *ScenarioContext {
 	return &ScenarioContext{
 		T:          t,
 		Ctx:        ctx,
 		Devnet:     d,
 		Postgres:   pg,
 		Flspd:      flspd,
+		Mempool:    mempool,
 		rawClients: make(map[string]lnrpc.LightningClient),
 		clients:    make(map[string]lightning.Client),
 		routers:    make(map[string]routerrpc.RouterClient),

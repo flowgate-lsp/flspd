@@ -26,6 +26,7 @@ func init() {
 	stepRegistry["lsps2_buy"] = stepLsps2Buy
 	stepRegistry["create_jit_invoice"] = stepCreateJitInvoice
 	stepRegistry["pay_invoice"] = stepPayInvoice
+	stepRegistry["set_mempool_fees"] = stepSetMempoolFees
 }
 
 // p2pAddr maps a devnet role name to its container-internal P2P address --
@@ -455,6 +456,35 @@ func stepPayInvoice(t *testing.T, sc *ScenarioContext, params *yaml.Node) error 
 	}
 	_, err = PayInvoice(sc.Ctx, router, bolt11, outgoingChanId, time.Duration(p.TimeoutSeconds)*time.Second)
 	return err
+}
+
+// --- set_mempool_fees: {fastest_fee: N, half_hour_fee: N, hour_fee: N, economy_fee: N, minimum_fee: N} ---
+// Fault injection (T4-3): overwrites every tier flspd-under-test's fake
+// mempool API reports, simulating a fee-congestion condition (or a return
+// to normal). All 5 fields are required -- the real API always reports a
+// complete schedule, so a scenario should too, rather than leaving some
+// tiers at whatever they happened to default/were last set to. Takes
+// effect on the *next* fee query flspd makes; there's no caching to wait
+// out on either side.
+
+type setMempoolFeesParams struct {
+	FastestFee  *float64 `yaml:"fastest_fee"`
+	HalfHourFee *float64 `yaml:"half_hour_fee"`
+	HourFee     *float64 `yaml:"hour_fee"`
+	EconomyFee  *float64 `yaml:"economy_fee"`
+	MinimumFee  *float64 `yaml:"minimum_fee"`
+}
+
+func stepSetMempoolFees(t *testing.T, sc *ScenarioContext, params *yaml.Node) error {
+	var p setMempoolFeesParams
+	if err := decodeParamsStrict(params, &p); err != nil {
+		return err
+	}
+	if p.FastestFee == nil || p.HalfHourFee == nil || p.HourFee == nil || p.EconomyFee == nil || p.MinimumFee == nil {
+		return fmt.Errorf("set_mempool_fees: fastest_fee, half_hour_fee, hour_fee, economy_fee, and minimum_fee are all required")
+	}
+	sc.Mempool.SetFees(*p.FastestFee, *p.HalfHourFee, *p.HourFee, *p.EconomyFee, *p.MinimumFee)
+	return nil
 }
 
 // --- kill_lsp: {} ---

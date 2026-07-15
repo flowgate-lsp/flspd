@@ -92,6 +92,14 @@ func killStrayFlspdProcesses(t *testing.T) {
 // values fall back to fast, test-friendly defaults (see NewFlspdProcess).
 type FlspdProcessOptions struct {
 	JitEnabled bool
+
+	// MempoolAPIBaseURL points flspd's chain-fee estimation at a fake
+	// mempool API (see FakeMempoolServer) instead of the config-only
+	// DefaultFeeEstimator it otherwise falls back to -- needed for
+	// mempool fee-congestion fault injection (T4-3). Empty means "use
+	// the default," matching production's own behavior when
+	// MEMPOOL_API_BASE_URL isn't set.
+	MempoolAPIBaseURL string
 }
 
 // FlspdProcess runs the actual flspd binary under test as a real OS
@@ -179,6 +187,9 @@ func NewFlspdProcess(t *testing.T, d *Devnet, pg *PostgresContainer, opts FlspdP
 		"DASHBOARD_LISTEN_ADDRESS="+dashboardAddr,
 		"LSP_NOSTR_PRIVATE_KEY=",
 	)
+	if opts.MempoolAPIBaseURL != "" {
+		env = append(env, "MEMPOOL_API_BASE_URL="+opts.MempoolAPIBaseURL)
+	}
 
 	return &FlspdProcess{
 		t:          t,

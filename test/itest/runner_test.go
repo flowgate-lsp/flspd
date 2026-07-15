@@ -33,11 +33,25 @@ func TestScenarios(t *testing.T) {
 			require.NoError(t, pg.Start(ctx))
 			t.Cleanup(func() { pg.Stop(ctx) })
 
-			flspd := NewFlspdProcess(t, d, pg, FlspdProcessOptions{JitEnabled: true})
+			// The fake mempool server is always available on sc.Mempool for
+			// steps to use, but flspd is only pointed at it (via
+			// MempoolAPIBaseURL) when the scenario actually calls
+			// set_mempool_fees -- otherwise flspd keeps using its normal
+			// DefaultFeeEstimator (target-conf-based), preserving existing
+			// scenarios' behavior exactly rather than silently switching
+			// every scenario onto an explicit, unrealistic flat fee rate.
+			mempool := NewFakeMempoolServer()
+			t.Cleanup(mempool.Close)
+
+			opts := FlspdProcessOptions{JitEnabled: true}
+			if scenario.usesStep("set_mempool_fees") {
+				opts.MempoolAPIBaseURL = mempool.URL()
+			}
+			flspd := NewFlspdProcess(t, d, pg, opts)
 			require.NoError(t, flspd.Start())
 			t.Cleanup(func() { flspd.Stop() })
 
-			sc := newScenarioContext(t, ctx, d, pg, flspd)
+			sc := newScenarioContext(t, ctx, d, pg, flspd, mempool)
 
 			for i, step := range scenario.Steps {
 				fn, ok := stepRegistry[step.Verb]

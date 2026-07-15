@@ -1,11 +1,13 @@
 package lsps
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"fmt"
 	"sync"
 
+	"github.com/flokiorg/go-flokicoin/wire"
 	"github.com/flowgate-lsp/flspd/chain"
 	"github.com/flowgate-lsp/flspd/core"
 	"github.com/flowgate-lsp/flspd/history"
@@ -267,6 +269,20 @@ func (s *Lsps1SettlementService) openChannelForOrder(order *core.Lsps1Order) {
 	if err != nil {
 		log.Error().Err(err).Str("order_id", order.OrderId).Msg("LSPS1 Settlement: Failed to open channel")
 
+		// recoverStuckOrders calls openChannelForOrder for any PAID order
+		// with no FundingTxid recorded yet -- which includes the case
+		// where an *earlier* call to this same function already got past
+		// the OpenChannel() call below (broadcasting a real funding tx
+		// LND now holds as a pending channel) but crashed before
+		// UpdateLsps1OrderFunding could persist that fact. Retrying
+		// OpenChannel then collides with LND's own single-pending-channel-
+		// per-peer limit and fails here -- reporting FAILED at this point
+		// would silently orphan a channel the LSP already paid on-chain
+		// fees to open. Check for it before giving up.
+		if s.reconcileUnclaimedChannel(order, peerId) {
+			return
+		}
+
 		// Update state to FAILED
 		_, dbErr := s.openingStore.UpdateLsps1OrderState(order.OrderId, string(Lsps1OrderStateFailed), string(Lsps1OrderStatePaid), string(Lsps1OrderStatePaid))
 		if dbErr != nil {
@@ -399,6 +415,112 @@ func (s *Lsps1SettlementService) reconcileFundedOrder(order *core.Lsps1Order) {
 	if s.notificationService != nil {
 		go s.notificationService.NotifyOrderStateChanged(order.PeerId, order.OrderId, string(Lsps1OrderStateCompleted), channelPoint, "")
 	}
+}
+
+// reconcileUnclaimedChannel looks for exactly one channel (LND's
+// ListChannels already merges in still-pending, not-yet-confirmed opens --
+// see LndClient.ListChannels) to order's peer that isn't already recorded
+// as the funding for some other order, and if found, treats it as the
+// result of an earlier, crashed openChannelForOrder attempt: OpenChannel
+// broadcast the funding transaction successfully, but the crash landed
+// before UpdateLsps1OrderFunding could persist that. Reconciling here
+// instead of retrying OpenChannel avoids both a collision with LND's own
+// pending-channel limit and, worse, silently reporting FAILED for an
+// order whose channel the LSP already paid on-chain fees to open.
+//
+// Deliberately conservative: zero or more than one unclaimed candidate is
+// ambiguous, so this returns false and lets the caller fall through to
+// its normal FAILED handling rather than guessing which channel (if any)
+// belongs to this order -- the same philosophy reconcileFundedOrder
+// already applies to the has-FundingTxid case above.
+func (s *Lsps1SettlementService) reconcileUnclaimedChannel(order *core.Lsps1Order, peerId []byte) bool {
+	channels, err := s.client.ListChannels()
+	if err != nil {
+		log.Warn().Err(err).Str("order_id", order.OrderId).Msg("LSPS1 Settlement: Failed to list channels while checking for an unclaimed prior attempt")
+		return false
+	}
+
+	var peerChannels []*wire.OutPoint
+	for _, ch := range channels {
+		if ch.ChannelPoint == nil || !bytes.Equal(ch.PeerId, peerId) {
+			continue
+		}
+		peerChannels = append(peerChannels, ch.ChannelPoint)
+	}
+	if len(peerChannels) == 0 {
+		return false
+	}
+
+	// Only worth the extra DB round-trip once there's at least one
+	// channel to this peer that might need attributing.
+	claimed, err := s.claimedChannelPoints()
+	if err != nil {
+		log.Warn().Err(err).Str("order_id", order.OrderId).Msg("LSPS1 Settlement: Failed to list existing order funding records while checking for an unclaimed prior attempt")
+		return false
+	}
+
+	var candidates []*wire.OutPoint
+	for _, point := range peerChannels {
+		if !claimed[point.String()] {
+			candidates = append(candidates, point)
+		}
+	}
+
+	if len(candidates) != 1 {
+		if len(candidates) > 1 {
+			log.Warn().
+				Str("order_id", order.OrderId).
+				Int("candidate_count", len(candidates)).
+				Msg("LSPS1 Settlement: Multiple unclaimed channels found for this peer, cannot disambiguate which (if any) belongs to this order — leaving FAILED for manual review")
+		}
+		return false
+	}
+
+	point := candidates[0]
+	log.Info().
+		Str("component", string(logging.LogComponentSettlement)).
+		Str("order_id", order.OrderId).
+		Str("channel_point", point.String()).
+		Msg("LSPS1 Settlement: Found an unclaimed channel to this peer — treating as an earlier attempt's crash-orphaned open and reconciling instead of retrying OpenChannel")
+
+	if err := s.openingStore.UpdateLsps1OrderFunding(order.OrderId, point.Hash.String(), int(point.Index)); err != nil {
+		log.Error().Err(err).Str("order_id", order.OrderId).Msg("LSPS1 Settlement: Failed to record reconciled funding details")
+		return false
+	}
+	_, err = s.openingStore.UpdateLsps1OrderState(order.OrderId, string(Lsps1OrderStateCompleted), string(Lsps1OrderStatePaid), string(Lsps1OrderStatePaid))
+	if err != nil {
+		log.Error().Err(err).Str("order_id", order.OrderId).Msg("LSPS1 Settlement: Failed to update reconciled order state to COMPLETED")
+		return false
+	}
+
+	if s.notificationService != nil {
+		go s.notificationService.NotifyOrderStateChanged(order.PeerId, order.OrderId, string(Lsps1OrderStateCompleted), point.String(), "")
+	}
+	return true
+}
+
+// claimedChannelPoints returns the set of channel points (as
+// wire.OutPoint.String()'s "hash:index" form) already recorded as funding
+// for some Lsps1Order, so reconcileUnclaimedChannel never mis-attributes a
+// channel that's already accounted for.
+func (s *Lsps1SettlementService) claimedChannelPoints() (map[string]bool, error) {
+	claimed := make(map[string]bool)
+	const pageSize = 500
+	for offset := 0; ; offset += pageSize {
+		orders, err := s.openingStore.ListLsps1Orders(pageSize, offset)
+		if err != nil {
+			return nil, err
+		}
+		for _, o := range orders {
+			if o.FundingTxid != nil && o.FundingOutpoint != nil {
+				claimed[fmt.Sprintf("%s:%d", *o.FundingTxid, *o.FundingOutpoint)] = true
+			}
+		}
+		if len(orders) < pageSize {
+			break
+		}
+	}
+	return claimed, nil
 }
 
 // recoverSettledCreatedOrders queries LND for any CREATED order whose invoice

@@ -39,7 +39,7 @@ number-soup and then get reorganized a second time.
 | 1 | Green the build + safety net | `go test ./... -race` passes in CI | ✅ T1-1..T1-5 done |
 | 2 | Fix defects on current structure | All P2 items merged w/ regression test | ✅ All items done: F-1, F-2, C-1, C-2, C-3, F-5, F-7, F-8, F-9, F-10, F-11, F-12, F-13 |
 | 3 | Unit-test coverage buildout | Critical-four packages ≥70–80% | ✅ Done: F-5, F-6, F-7, F-8, F-9, F-12, F-13, T1-4/T3-2..T3-6 all done. All four critical packages now clear the target: **postgresql 69.1%→81.2%, notifications 54.3%→70.3%, lsps 50.1%→78.6%, interceptor 58.3%→73.4%**. Notable finds along the way, not just coverage: `lsps1_settlement_store.go`'s `UpdateLsps1OrderFunding` silently no-ops on an unknown order_id; two near-duplicate `GetPaidLsps1Order` implementations disagree on their not-found contract (only one is actually reachable in production); `notification_service.go`'s `Notify()` return value is a real fast-fail signal `notifyAndWait` depends on (relevant background for the still-open Performance-backlog P-4 write-up below); a genuine data race in a `lsps` test itself (reading `mock.Mock.Calls` from a different goroutine than the one appending to it) caught by `-race`, not just written defensively. `handler_lsps2.go`'s `lsps2Buy` and `server.go`'s core JSON-RPC dispatch (`subscribeAndListen`/`handleMessage`/`route`) remain the largest *remaining* gaps in `lsps` specifically, but the package-level target is already met. `lnd` 4.7%, `common` 36.0%, `config` 93.4%, `lightning` 86.9%, `auth` 76.5% are not part of the critical four and untouched this round. |
-| 4 | YAML-driven integration tests | Runner + 3 seed scenarios merged | ✅ Runner built + all 3 seed scenarios landed (T4-1/T4-2). LSPS1 test client added; `lsps1_order_settle_and_open.yaml` and `lsps1_recovery_after_restart.yaml` (F-1 regression, real kill/restart) both pass on real flspd/flnd/chain processes, though the latter is flaky (new 2026-07-15 finding, pre-existing not a regression — see T4-2's own writeup). `lsps2_jit_happy_path.yaml` intentionally left known-failing on the distinct zero-conf-balance-sync race documented in T4-1 — not swept under the rug; revisited 2026-07-15 (see the dedicated writeup after T4-3): one genuine root-caused bug fixed (an unsatisfiable `QueryRoutes` amount), a second, distinct failure newly found and left open (`"unable to find a path to destination"` for an alias-SCID-pinned route query), still failing end to end. `kill_lsp`/`restart_lsp` fault injection landed (T4-3, partial); relay-failure/mempool-fee fault injection not started. Wired into CI as `.github/workflows/itest.yml` (2026-07-15) — `workflow_dispatch` + nightly, deliberately *not* on every push/PR (user's explicit call): the suite checks out and builds 4 sibling repos from source plus a live devnet before testing, realistically 10-20+ min with more inherent flakiness risk than a unit suite, not something to put in the PR-blocking path. |
+| 4 | YAML-driven integration tests | Runner + 3 seed scenarios merged | ✅ Runner built + 4 scenarios landed (T4-1/T4-2/T4-3): `lsps1_order_settle_and_open.yaml`, `lsps1_recovery_after_restart.yaml` (F-1 regression, real kill/restart), `lsps1_settle_under_fee_congestion.yaml` (T4-3 mempool fault injection, new) all pass on real flspd/flnd/chain processes. The recovery scenario's flakiness (2026-07-15 finding) is now root-caused and fixed — F-14, a real crash-orphaned-channel bug, not a timing race; a separate itest-harness design gap (devnet channels accumulate unbounded across scenario runs with no per-run DB to reconcile against) means it can still read `FAILED` when run alongside other channel-opening scenarios on a well-used devnet — see F-14's writeup for the full explanation and recommended harness-level follow-up. `lsps2_jit_happy_path.yaml` intentionally left known-failing on the distinct zero-conf-balance-sync race documented in T4-1 — not swept under the rug; revisited 2026-07-15 (see the dedicated writeup after T4-3): one genuine root-caused bug fixed (an unsatisfiable `QueryRoutes` amount), a second, distinct failure newly found and left open (`"unable to find a path to destination"` for an alias-SCID-pinned route query), still failing end to end. `kill_lsp`/`restart_lsp` and mempool fee-congestion fault injection landed (T4-3); relay-failure (`reject_then_accept`) fault injection not started, deliberately deferred (needs a gRPC MITM proxy, out of scope for this pass). Wired into CI as `.github/workflows/itest.yml` (2026-07-15) — `workflow_dispatch` + nightly, deliberately *not* on every push/PR (user's explicit call): the suite checks out and builds 4 sibling repos from source plus a live devnet before testing, realistically 10-20+ min with more inherent flakiness risk than a unit suite, not something to put in the PR-blocking path. |
 | 5 | Config model + secrets-by-reference | New model shipped behind compat shim | ✅ T5-1..T5-7 done (secrets-by-reference, unit/fee/channel-size model, profiles, CLI tooling, Settings.tsx re-skin — frontend not browser-verified, no automation tooling available) |
 | 6 | Repo structure / arbo migration | Tree matches target layout, build green throughout | ✅ Done. T6-1..T6-3 (format/ folded into common/, internal/adapters/ introduced, common/ split into core/ports/services/); T6-4 (rpc/→api/proto/rpc/, config/→platform/config/, build/→platform/build/, auth/→transport/auth/, notifications/ proto split→api/proto/notifications/, common/logger.go+log_enums.go→platform/logging/, notifications/server.go transport classification resolved "stays put", lsps/→lsps+transport/lsps/ and dashboard/→dashboard+transport/dashboard/ splits both landed on the real transport-vs-logic seam, verified live against devnet for lsps/); T6-5 (configs/examples/, test/itest/, deploy/, web/ — deploy/+web/ landed on explicit user go-ahead, stashed+reapplied someone else's uncommitted dev-tooling edits with re-derived paths) — all sub-items done. |
 | — | Performance backlog (parallel, non-blocking) | — | ✅ P-3 verified as no-op (never called hot), nothing to do; P-4 done — split `Notify`/`NotifyAsync` on the real sync-vs-fire-and-forget seam; P-2 done — cached peer↔scid map off the existing peer/channel-event subscriptions; P-1 done for its `GetChannel` half (`WaitChannelPointActive`, verified live); its `QueryRoutes` half turned into the LSPS2 zero-conf race investigation itself (see Phase 4/T4-3) — one real bug fixed there (an unsatisfiable route-query amount), the race still open on a second, newly-found issue. All items verified live against the devnet where the code path allowed it. |
@@ -1057,32 +1057,145 @@ injection, T4-3's first concrete step), `count_channels`. Assertion verbs:
    pair); `count_channels` + `channel_count_delta` fixed this by
    snapshotting a baseline first.
 
-   **New finding (2026-07-15): this scenario is flaky, independent of
-   any change made this session.** Surfaced while live-verifying P-2:
-   repeated runs (both on P-2's code *and* independently reproduced on
-   the pre-P-2 baseline, ruling out causation) sometimes fail with the
-   order stuck `FAILED` (not F-1's own double-open symptom — that
-   didn't reproduce on the confirmed-clean baseline). `openChannelForOrder`
-   only transitions an order to `FAILED` on an `IsConnected` error or an
-   `OpenChannel` error (a bare "peer not connected" is a soft skip, not
-   `FAILED`) — and since the same underlying flnd↔flnd peer connection
-   never drops across an *flspd* restart (only flspd's control-plane
-   process restarts, not the flnd nodes), a transient error from either
-   call right after restart is the likely culprit, not a real
-   connectivity loss. Not root-caused further or fixed — genuinely
-   separate from P-2's own scope, and deserves its own dedicated
-   investigation (probably: does the recovery sweep run before flspd's
-   fresh gRPC connection to flnd is fully ready, or does
-   `recoverStuckOrders`'s F-8 "check `FundingTxid`" gate have a gap for
-   the specific case where `OpenChannel` itself failed with a transient
-   error worth retrying rather than immediately marking `FAILED`).
+   **Finding from 2026-07-15, root-caused and fixed (see "F-14:
+   crash-orphaned channel" below).** What was first logged as generic
+   flakiness ("order stuck `FAILED`... probably a transient
+   `IsConnected`/`OpenChannel` error right after restart") turned out to
+   be a precise, reproducible bug, not a timing race: `openChannelForOrder`'s
+   `OpenChannel` call can succeed at LND — broadcasting a real funding
+   transaction — and then crash before the DB records `FundingTxid`;
+   `recoverStuckOrders`'s retry then collides with LND's own
+   single-pending-channel-per-peer limit and reports `FAILED`, silently
+   orphaning a channel the LSP already paid on-chain fees to open. Fixed
+   in `lsps/settlement_service.go` (`reconcileUnclaimedChannel`).
 
 ### T4-3: External-party fault injection
 **Status (2026-07-15):** ◐ Partial. `kill_lsp`/`restart_lsp` (LND-process
 fault injection — actually SIGKILL/restart flspd itself, exercising real
 crash recovery, not a simulated failure) landed and already earning its
-keep as T4-2 scenario #3's core mechanism. Relay failure modes
-(`reject_then_accept`) and mempool fee-congestion fixtures not started.
+keep as T4-2 scenario #3's core mechanism. Mempool fee-congestion
+fixture landed (below). Relay failure modes (`reject_then_accept`) not
+started — deliberately deferred, judged too large for this pass (would
+need a gRPC MITM proxy between flspd and flnd, a different shape of work
+than the other fixtures here).
+
+**Mempool fee-congestion fixture — done.** New `test/itest/fake_mempool.go`
+(`FakeMempoolServer`, wraps `httptest.NewServer`, serves `GET
+/fees/recommended` matching `internal/adapters/mempool.MempoolClient`'s
+exact contract) + `FlspdProcessOptions.MempoolAPIBaseURL` env wiring +
+`set_mempool_fees` step (`fastest_fee`/`half_hour_fee`/`hour_fee`/
+`economy_fee`/`minimum_fee`, all required, full-schedule replacement not
+partial — avoids ambiguity about which tier a scenario left at the
+baseline). New scenario `lsps1_settle_under_fee_congestion.yaml`: same
+settle-and-open flow as scenario #1, but sets a heavily congested fee
+schedule before the order is placed, proving flspd's settlement service
+still opens the channel correctly under elevated chain fees rather than
+erroring out or stalling. Verified live: flspd log confirms it actually
+queries the fake server ("using mempool api for fee estimation:
+http://127.0.0.1:PORT") and the scenario passes.
+
+Each scenario gets its **own** `FakeMempoolServer` instance (not one
+shared server across the suite) so `set_mempool_fees` in one scenario
+can never leak into another's assertions. `MempoolAPIBaseURL` is only
+set on `FlspdProcessOptions` for scenarios that actually call
+`set_mempool_fees` (`Scenario.usesStep("set_mempool_fees")` gates it) —
+routing every scenario through the fake server unconditionally would
+have silently changed fee estimation for the other two LSPS1 scenarios
+too (`DefaultFeeEstimator`'s target-conf-based estimation vs. the fake
+server's explicit `LokiPerVByte`), an unintended behavior change caught
+before it shipped by noticing `lsps1_recovery_after_restart.yaml`'s
+pass rate looked different under the naive unconditional wiring.
+
+### F-14: crash-orphaned channel — `recoverStuckOrders` can silently lose track of a real, already-funded channel
+**Status: fixed and unit-tested (2026-07-15).** Found while
+live-verifying the mempool fixture above (running
+`lsps1_recovery_after_restart.yaml` repeatedly surfaced it far more
+often than the ~25% rate this session had earlier logged as generic,
+unexplained flakiness).
+
+**Root cause, confirmed via flspd's own logs, not guessed:**
+`openChannelForOrder` (`lsps/settlement_service.go`) calls
+`s.client.OpenChannel(...)` — an `OpenChannelSync` RPC that broadcasts
+the funding transaction and returns synchronously — and only *after*
+that succeeds does it call `UpdateLsps1OrderFunding` to persist the
+resulting channel point. If flspd crashes in the gap between those two
+lines (exactly the window `lsps1_recovery_after_restart.yaml` targets:
+`kill_lsp` right after `pay_invoice` returns), LND now holds a real,
+funded pending channel that the DB has no record of. On restart,
+`recoverStuckOrders` sees the order still `PAID` with no `FundingTxid`
+and retries `openChannelForOrder` from scratch — but LND's own
+`--maxpendingchannels` limit (default 1 per peer) rejects the second
+`OpenChannelSync` call with `"Number of pending channels exceed
+maximum"`, and the order was being marked `FAILED` on that error,
+never recording that a real, LSP-funded channel already existed.
+Confirmed directly: `lncli pendingchannels` showed the exact channel
+(capacity matching the order's `lsp_balance_loki + AdditionalChannelCapacity`)
+sitting there, unclaimed, every time this reproduced.
+
+**Fix:** `reconcileUnclaimedChannel` (new, in `settlement_service.go`),
+called from `openChannelForOrder`'s existing failure path before it
+marks an order `FAILED`. Lists all channels to the order's peer
+(`s.client.ListChannels()` — already merges LND's pending-open channels
+with confirmed ones, no new interface method needed), filters out any
+already recorded as another order's funding
+(`claimedChannelPoints`, paginating `ListLsps1Orders`), and — **only
+when exactly one unclaimed candidate remains** — treats it as this
+order's own crash-orphaned channel: records its funding and completes
+the order instead of reporting `FAILED`. Zero candidates falls through
+to the original `FAILED` behavior unchanged (a genuine failure, e.g.
+peer truly rejected the open). More than one candidate is deliberately
+**not** guessed at either — logged as ambiguous and left `FAILED` for
+manual review, mirroring the same "don't guess when ambiguous"
+philosophy `reconcileFundedOrder` (F-8) already applies to the
+has-`FundingTxid` case right above it in the same file.
+
+**Tested:** 7 new tests in `lsps/settlement_recovery_test.go` covering
+every branch — reconciles when exactly one unclaimed channel exists;
+skips (and doesn't mis-attribute) a channel already claimed by a
+*different* order; stays `FAILED` when zero channels exist (preserves
+existing behavior for genuine failures); stays `FAILED` when multiple
+unclaimed candidates exist (ambiguous, don't guess) — plus the existing
+`o5`/"Retry/Fail - Channel Open Fails" table-driven case updated for the
+new `ListChannels` call it now makes on the failure path. Verified live
+against a freshly cleaned devnet: 3 consecutive real crash/restart
+cycles reconciled to `COMPLETED` correctly (not `FAILED`) with the fix
+in place, having failed 100% of the time (0/6) with the same devnet
+state and the fix absent.
+
+**New, separate finding while verifying this live — a real itest-harness
+design gap, not a bug in the fix:** each scenario run gets a *fresh,
+empty* Postgres database (test isolation, by design — see
+`runner_test.go`), but shares one *persistent* devnet whose channels are
+never closed by any scenario. That means `claimedChannelPoints()`
+— correctly, from its own DB's point of view — can never recognize a
+channel opened by an *earlier scenario run* (different, already-discarded
+DB) as claimed. Every successful run, whether via the normal path or via
+this new reconciliation path, permanently leaves one more real,
+unclosed, "unclaimed" channel between `lsp` and `client` for every
+*future* run to trip over — reproduced directly: after cleaning the
+devnet to zero and getting 3 clean passes, running the other two LSPS1
+scenarios (which legitimately open their own lsp↔client channels and
+never close them either) was enough on its own to push
+`lsps1_recovery_after_restart.yaml` back into "2 unclaimed candidates,
+ambiguous, `FAILED`" — correct, conservative behavior given the fix's
+own rules, but still a `FAILED` result. **This is a pre-existing
+property of the itest harness** (the F-1 recovery scenario's own
+`channel_count_delta`-based assertions already exist specifically
+*because* channel counts grow unbounded across runs — see T4-2 above),
+not something introduced by this fix, but this fix is the first thing to
+depend on "is this specific channel already accounted for" rather than
+just a count, so it's the first thing to expose it as a correctness
+problem for a specific scenario rather than just noise a delta
+assertion already absorbs. **Not fixed — recommended follow-up:**
+either have scenarios that open an LSP-side channel close it in
+`t.Cleanup`, or give each scenario run a fresh peer keypair so channels
+never collide across scenario boundaries, or periodically reset the
+devnet's channel state. Out of scope for this pass; the production-code
+fix itself is unaffected by this and is correct and complete regardless
+of the harness's separate design gap. Cleaned up ~65 accumulated
+orphaned channels on the shared devnet as part of this investigation
+(`lncli closechannel --force` + `generate.sh`) so it isn't left in a
+degraded state for the next person to hit this.
 
 ### LSPS2 zero-conf balance-sync race — deeper investigation (2026-07-15)
 **Still open, but substantially better understood — one real bug fixed,
