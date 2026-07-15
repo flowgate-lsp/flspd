@@ -8,6 +8,7 @@ import (
 
 	"github.com/flokiorg/flnd/lnrpc"
 	"github.com/flowgate-lsp/flspd/lsps"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
 )
@@ -17,6 +18,8 @@ func init() {
 	stepRegistry["open_channel"] = stepOpenChannel
 	stepRegistry["mine_blocks"] = stepMineBlocks
 	stepRegistry["auto_accept_channels"] = stepAutoAcceptChannels
+	stepRegistry["lsps1_create_order"] = stepLsps1CreateOrder
+	stepRegistry["wait_for_lsps1_order_state"] = stepWaitForLsps1OrderState
 	stepRegistry["lsps2_buy"] = stepLsps2Buy
 	stepRegistry["create_jit_invoice"] = stepCreateJitInvoice
 	stepRegistry["pay_invoice"] = stepPayInvoice
@@ -276,6 +279,113 @@ func stepCreateJitInvoice(t *testing.T, sc *ScenarioContext, params *yaml.Node) 
 	return sc.save(p.SaveAs, bolt11)
 }
 
+// --- lsps1_create_order: {as: <role>, lsp: <role>, token: str, lsp_balance_loki: N, client_balance_loki: N, save_as: name} ---
+
+type lsps1CreateOrderParams struct {
+	As                string `yaml:"as"`
+	Lsp               string `yaml:"lsp"`
+	Token             string `yaml:"token"`
+	LspBalanceLoki    uint64 `yaml:"lsp_balance_loki"`
+	ClientBalanceLoki uint64 `yaml:"client_balance_loki"`
+	SaveAs            string `yaml:"save_as"`
+}
+
+func stepLsps1CreateOrder(t *testing.T, sc *ScenarioContext, params *yaml.Node) error {
+	var p lsps1CreateOrderParams
+	if err := decodeParamsStrict(params, &p); err != nil {
+		return err
+	}
+	if p.As == "" || p.Lsp == "" || p.LspBalanceLoki == 0 || p.SaveAs == "" {
+		return fmt.Errorf("lsps1_create_order: as, lsp, lsp_balance_loki, and save_as are all required")
+	}
+
+	asRaw, err := sc.raw(p.As)
+	if err != nil {
+		return err
+	}
+	lspPubkey, err := sc.pubkey(p.Lsp)
+	if err != nil {
+		return err
+	}
+
+	bus, err := NewCustomMessageBus(sc.Ctx, asRaw)
+	if err != nil {
+		return fmt.Errorf("building custom message bus: %w", err)
+	}
+	client, err := NewLsps1Client(bus, lspPubkey)
+	if err != nil {
+		return err
+	}
+	order, err := client.CreateOrder(sc.Ctx, p.Token, p.LspBalanceLoki, p.ClientBalanceLoki)
+	if err != nil {
+		return fmt.Errorf("lsps1 create_order: %w", err)
+	}
+	if order.Payment == nil || order.Payment.Bolt11 == nil || order.Payment.Bolt11.Invoice == "" {
+		return fmt.Errorf("lsps1 create_order: LSP did not return a payable invoice")
+	}
+	return sc.save(p.SaveAs, order)
+}
+
+// --- wait_for_lsps1_order_state: {as: <role>, lsp: <role>, order: <save_as ref>, state: str, timeout_seconds: N} ---
+
+type waitForLsps1OrderStateParams struct {
+	As             string `yaml:"as"`
+	Lsp            string `yaml:"lsp"`
+	Order          string `yaml:"order"`
+	State          string `yaml:"state"`
+	TimeoutSeconds int    `yaml:"timeout_seconds"`
+}
+
+func stepWaitForLsps1OrderState(t *testing.T, sc *ScenarioContext, params *yaml.Node) error {
+	var p waitForLsps1OrderStateParams
+	if err := decodeParamsStrict(params, &p); err != nil {
+		return err
+	}
+	if p.As == "" || p.Lsp == "" || p.Order == "" || p.State == "" || p.TimeoutSeconds == 0 {
+		return fmt.Errorf("wait_for_lsps1_order_state: as, lsp, order, state, and timeout_seconds are all required")
+	}
+
+	saved, err := sc.get(p.Order)
+	if err != nil {
+		return err
+	}
+	order, ok := saved.(*lsps.Lsps1CreateOrderResponse)
+	if !ok {
+		return fmt.Errorf("wait_for_lsps1_order_state: %q was not saved by lsps1_create_order", p.Order)
+	}
+
+	asRaw, err := sc.raw(p.As)
+	if err != nil {
+		return err
+	}
+	lspPubkey, err := sc.pubkey(p.Lsp)
+	if err != nil {
+		return err
+	}
+	bus, err := NewCustomMessageBus(sc.Ctx, asRaw)
+	if err != nil {
+		return fmt.Errorf("building custom message bus: %w", err)
+	}
+	client, err := NewLsps1Client(bus, lspPubkey)
+	if err != nil {
+		return err
+	}
+
+	var lastState string
+	reached := assert.Eventually(t, func() bool {
+		got, err := client.GetOrder(sc.Ctx, order.OrderId)
+		if err != nil {
+			return false
+		}
+		lastState = got.OrderState
+		return got.OrderState == p.State
+	}, time.Duration(p.TimeoutSeconds)*time.Second, time.Second)
+	if !reached {
+		return fmt.Errorf("wait_for_lsps1_order_state: order %s did not reach state %s within %ds (last seen: %s)", order.OrderId, p.State, p.TimeoutSeconds, lastState)
+	}
+	return nil
+}
+
 // --- pay_invoice: {as: <role>, invoice: <save_as ref>, outgoing_channel_to: <role>, timeout_seconds: N} ---
 
 type payInvoiceParams struct {
@@ -298,9 +408,17 @@ func stepPayInvoice(t *testing.T, sc *ScenarioContext, params *yaml.Node) error 
 	if err != nil {
 		return err
 	}
-	bolt11, ok := saved.(string)
-	if !ok {
-		return fmt.Errorf("pay_invoice: %q was not saved as an invoice string", p.Invoice)
+	var bolt11 string
+	switch v := saved.(type) {
+	case string:
+		bolt11 = v
+	case *lsps.Lsps1CreateOrderResponse:
+		if v.Payment == nil || v.Payment.Bolt11 == nil || v.Payment.Bolt11.Invoice == "" {
+			return fmt.Errorf("pay_invoice: %q (an lsps1_create_order result) has no payable invoice", p.Invoice)
+		}
+		bolt11 = v.Payment.Bolt11.Invoice
+	default:
+		return fmt.Errorf("pay_invoice: %q was not saved as an invoice string or an lsps1_create_order result", p.Invoice)
 	}
 
 	var outgoingChanId uint64
