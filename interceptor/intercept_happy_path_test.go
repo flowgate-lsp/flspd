@@ -55,12 +55,12 @@ func newHappyPathInterceptor(cfg *config.NodeConfig, client *MockLightningClient
 
 // TestIntercept_RegisteredPayment_ChannelOpensSuccessfully covers the full
 // happy path through Intercept() itself (as opposed to openChannel or the
-// GetChannel/QueryRoutes polling loops in isolation, already covered
-// elsewhere): a registered payment with no existing channel triggers
-// openChannel, and once the mocked client reports the new channel as
-// immediately gettable and routable (first poll succeeds, so this test
-// doesn't wait out any real ticker), Intercept must resume the HTLC
-// onion with the resolved SCID/amounts.
+// WaitChannelPointActive/QueryRoutes polling loops in isolation, already
+// covered elsewhere): a registered payment with no existing channel
+// triggers openChannel, and once the mocked client reports the new
+// channel as immediately active and routable (first poll succeeds, so
+// this test doesn't wait out any real ticker), Intercept must resume the
+// HTLC onion with the resolved SCID/amounts.
 func TestIntercept_RegisteredPayment_ChannelOpensSuccessfully(t *testing.T) {
 	store := new(MockStore)
 	client := new(MockLightningClient)
@@ -83,7 +83,7 @@ func TestIntercept_RegisteredPayment_ChannelOpensSuccessfully(t *testing.T) {
 	store.On("SetFundingTx", req.PaymentHash, outpoint).Return(nil)
 
 	scid := lightning.ShortChannelID(12345)
-	client.On("GetChannel", destination, *outpoint).Return(&lightning.GetChannelResult{ConfirmedScid: &scid}, nil)
+	client.On("WaitChannelPointActive", destination, *outpoint, mock.Anything).Return(&lightning.GetChannelResult{ConfirmedScid: &scid}, nil)
 	client.On("QueryRoutes", destination, mock.Anything, uint64(scid)).Return([]*lightning.Route{
 		{Hops: []*lightning.Hop{{ChanId: uint64(scid)}}},
 	}, nil)

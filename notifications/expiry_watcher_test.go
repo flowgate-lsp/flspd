@@ -34,6 +34,9 @@ func (f *fakeExpiryLightningClient) OpenChannel(*lightning.OpenChannelRequest) (
 func (f *fakeExpiryLightningClient) GetChannel([]byte, wire.OutPoint) (*lightning.GetChannelResult, error) {
 	return nil, nil
 }
+func (f *fakeExpiryLightningClient) WaitChannelPointActive([]byte, wire.OutPoint, time.Time) (*lightning.GetChannelResult, error) {
+	return nil, nil
+}
 func (f *fakeExpiryLightningClient) GetPeerId(*lightning.ShortChannelID) ([]byte, error) {
 	return nil, nil
 }

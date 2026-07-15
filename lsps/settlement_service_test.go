@@ -62,6 +62,14 @@ func (m *MockLightningClient) GetChannel(peerID []byte, channelPoint wire.OutPoi
 	return args.Get(0).(*lightning.GetChannelResult), args.Error(1)
 }
 
+func (m *MockLightningClient) WaitChannelPointActive(peerID []byte, channelPoint wire.OutPoint, deadline time.Time) (*lightning.GetChannelResult, error) {
+	args := m.Called(peerID, channelPoint, deadline)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*lightning.GetChannelResult), args.Error(1)
+}
+
 func (m *MockLightningClient) GetPeerId(scid *lightning.ShortChannelID) ([]byte, error) {
 	args := m.Called(scid)
 	return args.Get(0).([]byte), args.Error(1)

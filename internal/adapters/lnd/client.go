@@ -510,6 +510,73 @@ func (c *LndClient) GetChannel(peerID []byte, channelPoint wire.OutPoint) (*ligh
 	return nil, fmt.Errorf("no channel found")
 }
 
+// WaitChannelPointActive blocks until the specific channel at
+// channelPoint becomes active, then returns its scid info -- driven by
+// the same channel-event subscription listenChannelEvents already
+// maintains (chansubs, keyed by channel point string, already used by
+// WaitChannelActive for its own "any channel with this peer" case)
+// instead of polling GetChannel on a fixed timer (P-1). Unlike
+// WaitChannelActive, chansubs here is keyed by the one specific
+// channelPoint the caller already knows about (returned by an earlier
+// OpenChannel call), not every channel with peerID, so a received signal
+// is always about the right channel.
+func (c *LndClient) WaitChannelPointActive(peerID []byte, channelPoint wire.OutPoint, deadline time.Time) (*lightning.GetChannelResult, error) {
+	point := channelPoint.String()
+
+	if result, err := c.GetChannel(peerID, channelPoint); err == nil {
+		return result, nil
+	}
+
+	signal := make(chan struct{}, 10)
+	defer close(signal)
+
+	c.submtx.Lock()
+	subid := c.index
+	c.index++
+	subs, ok := c.chansubs[point]
+	if !ok {
+		subs = make(map[uint64]chan struct{})
+		c.chansubs[point] = subs
+	}
+	subs[subid] = signal
+	c.submtx.Unlock()
+
+	defer func() {
+		c.submtx.Lock()
+		subs, ok := c.chansubs[point]
+		if ok {
+			delete(subs, subid)
+			if len(subs) == 0 {
+				delete(c.chansubs, point)
+			}
+		}
+		c.submtx.Unlock()
+	}()
+
+	// Re-check after subscribing, closing the race window between the
+	// first check above and the subscription being registered.
+	if result, err := c.GetChannel(peerID, channelPoint); err == nil {
+		return result, nil
+	}
+
+	for {
+		select {
+		case <-signal:
+			// The subscription is keyed by this exact channelPoint, so
+			// the event was about this channel -- but GetChannel could
+			// still miss on a genuine eventual-consistency gap between
+			// the event firing and ListChannels reflecting it. Keep
+			// waiting on a further signal rather than giving up on the
+			// first miss.
+			if result, err := c.GetChannel(peerID, channelPoint); err == nil {
+				return result, nil
+			}
+		case <-time.After(time.Until(deadline)):
+			return nil, fmt.Errorf("deadline exceeded waiting for channel %s to become active", point)
+		}
+	}
+}
+
 func (c *LndClient) GetClosedChannels(nodeID string, channelPoints map[string]uint64) (map[string]uint64, error) {
 	r := make(map[string]uint64)
 	if len(channelPoints) == 0 {

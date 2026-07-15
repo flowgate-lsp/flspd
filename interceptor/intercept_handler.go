@@ -280,146 +280,150 @@ func (i *Interceptor) Intercept(req core.InterceptRequest) core.InterceptResult 
 
 		deadline := time.Now().Add(60 * time.Second)
 
-		for {
-			chanResult, _ := i.client.GetChannel(destination, *channelPoint)
-			if chanResult != nil {
-				log.Info().Msgf("paymentHash: %s, channel opened successfully alias: '%v', confirmed: '%v'", reqPaymentHashStr, chanResult.AliasScid.ToString(), chanResult.ConfirmedScid.ToString())
+		// failChannelOpenTimeout is the shared failure path for both ways
+		// this can fail to produce a usable scid: WaitChannelPointActive
+		// itself timing out, or (rare) the channel becoming active with
+		// no scid assigned at all.
+		failChannelOpenTimeout := func(reason string) core.InterceptResult {
+			log.Warn().Msgf("Intercept: Channel open timed out. paymentHash=%s (%s)", reqPaymentHashStr, reason)
+			if data.orderId != "" {
+				go i.notificationService.NotifyOrderStateChanged(hex.EncodeToString(nextHop), data.orderId, "FAILED", "", "channel open timed out")
+			}
+			return core.InterceptResult{
+				Action:      core.INTERCEPT_FAIL_HTLC_WITH_CODE,
+				FailureCode: core.FAILURE_TEMPORARY_CHANNEL_FAILURE,
+			}
+		}
 
-				var scid *lightning.ShortChannelID
-				if chanResult.ConfirmedScid == nil {
-					if chanResult.AliasScid == nil {
-						log.Error().Msgf("Error: GetChannel: Both confirmed scid and alias scid are nil: %+v", chanResult)
-						<-time.After(1 * time.Second)
-						continue
-					}
-					scid = chanResult.AliasScid
-				} else {
-					scid = chanResult.ConfirmedScid
+		// P-1: event-driven wait (WaitChannelPointActive, backed by
+		// listenChannelEvents' existing subscription) instead of polling
+		// GetChannel on a fixed 1s timer.
+		chanResult, err := i.client.WaitChannelPointActive(destination, *channelPoint, deadline)
+		if err != nil {
+			log.Debug().Msgf("Intercept: paymentHash=%s waiting for channel to open for peer %x: %v", reqPaymentHashStr, destination, err)
+			return failChannelOpenTimeout(err.Error()), nil
+		}
+
+		{
+			log.Info().Msgf("paymentHash: %s, channel opened successfully alias: '%v', confirmed: '%v'", reqPaymentHashStr, chanResult.AliasScid.ToString(), chanResult.ConfirmedScid.ToString())
+
+			var scid *lightning.ShortChannelID
+			if chanResult.ConfirmedScid == nil {
+				if chanResult.AliasScid == nil {
+					log.Error().Msgf("Error: WaitChannelPointActive: Both confirmed scid and alias scid are nil: %+v", chanResult)
+					return failChannelOpenTimeout("channel became active with no scid assigned"), nil
 				}
+				scid = chanResult.AliasScid
+			} else {
+				scid = chanResult.ConfirmedScid
+			}
 
-				// Give LND a moment to propagate the new channel state to the router
-				// to avoid "no_route" errors. Even with OutgoingRequestedChanId,
-				// the switch link might not be fully active immediately.
-				// Verify that the route is available in the graph
-				// This avoids "no_route" errors if the switch link is not fully active yet.
-				// Use a minimal amount for verification to check strict connectivity/existence.
-				// We avoid checking the full amount here because the Router's view of likely-zero-conf
-				// channels might show 0 balance initially, causing "insufficient local balance" errors
-				// even if the Switch shows full bandwidth. We trust the Switch to handle the full amount check on resume.
-				routeParamsAmount := uint64(incomingAmountMloki)
+			// Give LND a moment to propagate the new channel state to the router
+			// to avoid "no_route" errors. Even with OutgoingRequestedChanId,
+			// the switch link might not be fully active immediately.
+			// Verify that the route is available in the graph
+			// This avoids "no_route" errors if the switch link is not fully active yet.
+			// Use a minimal amount for verification to check strict connectivity/existence.
+			// We avoid checking the full amount here because the Router's view of likely-zero-conf
+			// channels might show 0 balance initially, causing "insufficient local balance" errors
+			// even if the Switch shows full bandwidth. We trust the Switch to handle the full amount check on resume.
+			routeParamsAmount := uint64(incomingAmountMloki)
 
-				// Use a generous timeout (60s) to wait for the Router to sync the ZC balance.
-				// "Insufficient local balance" means we must wait longer, not give up or bypass.
-				routeTimeout := time.After(60 * time.Second)
-				routeTicker := time.NewTicker(500 * time.Millisecond) // Poll faster
-				defer routeTicker.Stop()
+			// Use a generous timeout (60s) to wait for the Router to sync the ZC balance.
+			// "Insufficient local balance" means we must wait longer, not give up or bypass.
+			routeTimeout := time.After(60 * time.Second)
+			routeTicker := time.NewTicker(500 * time.Millisecond) // Poll faster
+			defer routeTicker.Stop()
 
-				var targetScid uint64
-				if scid != nil {
-					targetScid = uint64(*scid)
-				}
+			var targetScid uint64
+			if scid != nil {
+				targetScid = uint64(*scid)
+			}
 
-			RouteLoop:
-				for {
-					routes, err := i.client.QueryRoutes(destination, routeParamsAmount, targetScid)
-					if err == nil {
-						for _, r := range routes {
-							if len(r.Hops) > 0 {
-								// Strict check: Ensure the route uses the newly opened channel
-								if r.Hops[0].ChanId == targetScid {
-									log.Debug().Msgf("Intercept: paymentHash=%s route found via SCID %d, resuming", reqPaymentHashStr, targetScid)
-									break RouteLoop
-								}
-								// If we found a route but via different SCID, log it
-								log.Debug().Msgf("Intercept: found route via SCID %d, waiting for target %d", r.Hops[0].ChanId, targetScid)
+		RouteLoop:
+			for {
+				routes, err := i.client.QueryRoutes(destination, routeParamsAmount, targetScid)
+				if err == nil {
+					for _, r := range routes {
+						if len(r.Hops) > 0 {
+							// Strict check: Ensure the route uses the newly opened channel
+							if r.Hops[0].ChanId == targetScid {
+								log.Debug().Msgf("Intercept: paymentHash=%s route found via SCID %d, resuming", reqPaymentHashStr, targetScid)
+								break RouteLoop
 							}
+							// If we found a route but via different SCID, log it
+							log.Debug().Msgf("Intercept: found route via SCID %d, waiting for target %d", r.Hops[0].ChanId, targetScid)
 						}
-					} else {
-						// Log error but continue polling. "insufficient local balance" is a common temporary state.
-						log.Trace().Err(err).Msgf("Intercept: QueryRoutes failed (waiting for sync), paymentHash=%s", reqPaymentHashStr)
 					}
-
-					select {
-					case <-routeTimeout:
-						log.Warn().Msgf("Intercept: QueryRoutes timed out using Best Effort for paymentHash=%s, resuming anyway", reqPaymentHashStr)
-						break RouteLoop
-					case <-routeTicker.C:
-						continue
-					}
+				} else {
+					// Log error but continue polling. "insufficient local balance" is a common temporary state.
+					log.Trace().Err(err).Msgf("Intercept: QueryRoutes failed (waiting for sync), paymentHash=%s", reqPaymentHashStr)
 				}
 
-				err = i.historyStore.UpdateChannels(context.TODO(), []*history.ChannelUpdate{{
-					NodeID:        i.nodeid,
-					PeerId:        destination,
-					AliasScid:     chanResult.AliasScid,
-					ConfirmedScid: chanResult.ConfirmedScid,
-					ChannelPoint:  channelPoint,
-					LastUpdate:    time.Now(),
-				}})
-				if err != nil {
-					// Don't break here, this is not critical.
-					log.Error().Msgf("paymentHash: %s, failed to insert newly opened channel in history store. %v: %v", reqPaymentHashStr, channelPoint.String(), err)
+				select {
+				case <-routeTimeout:
+					log.Warn().Msgf("Intercept: QueryRoutes timed out using Best Effort for paymentHash=%s, resuming anyway", reqPaymentHashStr)
+					break RouteLoop
+				case <-routeTicker.C:
+					continue
 				}
-
-				err = i.historyStore.AddOpenChannelHtlc(context.TODO(), &history.OpenChannelHtlc{
-					NodeId:              i.nodeid,
-					PeerId:              destination,
-					ChannelPoint:        channelPoint,
-					OriginalAmountMloki: req.OutgoingAmountMloki,
-					ForwardAmountMloki:  uint64(amt),
-					IncomingAmountMloki: req.IncomingAmountMloki,
-					ForwardTime:         time.Now(),
-				})
-				if err != nil {
-					// Don't break here, this is not critical.
-					log.Error().Msgf(
-						"paymentHash: %s, failed to insert htlc used for channel open in history store: channel: %v,"+
-							" original amount: %v, forward amount: %v, error: %v",
-						reqPaymentHashStr,
-						channelPoint.String(),
-						req.OutgoingAmountMloki,
-						amt,
-						err,
-					)
-				}
-
-				if data.orderId != "" {
-					go i.notificationService.NotifyOrderStateChanged(
-						hex.EncodeToString(destination),
-						data.orderId,
-						"COMPLETED",
-						channelPoint.String(),
-						"",
-					)
-				}
-
-				return core.InterceptResult{
-					Action:           core.INTERCEPT_RESUME_WITH_ONION,
-					Destination:      destination,
-					ChannelPoint:     channelPoint,
-					Scid:             *scid,
-					PaymentSecret:    paymentSecret,
-					AmountMloki:      uint64(amt),
-					TotalAmountMloki: uint64(outgoingAmountMloki),
-				}, nil
 			}
 
-			log.Debug().Msgf("Intercept: paymentHash=%s waiting for channel to open for peer %x", reqPaymentHashStr, destination)
-			if time.Now().After(deadline) {
-				log.Debug().Msgf("Intercept: paymentHash=%s getChannel timeout, stopping retries", reqPaymentHashStr)
-				break
+			err = i.historyStore.UpdateChannels(context.TODO(), []*history.ChannelUpdate{{
+				NodeID:        i.nodeid,
+				PeerId:        destination,
+				AliasScid:     chanResult.AliasScid,
+				ConfirmedScid: chanResult.ConfirmedScid,
+				ChannelPoint:  channelPoint,
+				LastUpdate:    time.Now(),
+			}})
+			if err != nil {
+				// Don't break here, this is not critical.
+				log.Error().Msgf("paymentHash: %s, failed to insert newly opened channel in history store. %v: %v", reqPaymentHashStr, channelPoint.String(), err)
 			}
-			<-time.After(1 * time.Second)
-		}
 
-		log.Warn().Msgf("Intercept: Channel open timed out. paymentHash=%s", reqPaymentHashStr)
-		if data.orderId != "" {
-			go i.notificationService.NotifyOrderStateChanged(hex.EncodeToString(nextHop), data.orderId, "FAILED", "", "channel open timed out")
+			err = i.historyStore.AddOpenChannelHtlc(context.TODO(), &history.OpenChannelHtlc{
+				NodeId:              i.nodeid,
+				PeerId:              destination,
+				ChannelPoint:        channelPoint,
+				OriginalAmountMloki: req.OutgoingAmountMloki,
+				ForwardAmountMloki:  uint64(amt),
+				IncomingAmountMloki: req.IncomingAmountMloki,
+				ForwardTime:         time.Now(),
+			})
+			if err != nil {
+				// Don't break here, this is not critical.
+				log.Error().Msgf(
+					"paymentHash: %s, failed to insert htlc used for channel open in history store: channel: %v,"+
+						" original amount: %v, forward amount: %v, error: %v",
+					reqPaymentHashStr,
+					channelPoint.String(),
+					req.OutgoingAmountMloki,
+					amt,
+					err,
+				)
+			}
+
+			if data.orderId != "" {
+				go i.notificationService.NotifyOrderStateChanged(
+					hex.EncodeToString(destination),
+					data.orderId,
+					"COMPLETED",
+					channelPoint.String(),
+					"",
+				)
+			}
+
+			return core.InterceptResult{
+				Action:           core.INTERCEPT_RESUME_WITH_ONION,
+				Destination:      destination,
+				ChannelPoint:     channelPoint,
+				Scid:             *scid,
+				PaymentSecret:    paymentSecret,
+				AmountMloki:      uint64(amt),
+				TotalAmountMloki: uint64(outgoingAmountMloki),
+			}, nil
 		}
-		return core.InterceptResult{
-			Action:      core.INTERCEPT_FAIL_HTLC_WITH_CODE,
-			FailureCode: core.FAILURE_TEMPORARY_CHANNEL_FAILURE,
-		}, nil
 	})
 
 	return resp.(core.InterceptResult)

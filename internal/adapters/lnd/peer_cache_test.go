@@ -3,6 +3,7 @@ package lnd
 import (
 	"context"
 	"encoding/hex"
+	"sync"
 	"testing"
 
 	"github.com/flokiorg/flnd/lnrpc"
@@ -21,6 +22,7 @@ import (
 type fakeLightningClient struct {
 	lnrpc.LightningClient
 
+	mu       sync.Mutex
 	channels []*lnrpc.Channel
 	peers    []*lnrpc.Peer
 
@@ -29,6 +31,8 @@ type fakeLightningClient struct {
 }
 
 func (f *fakeLightningClient) ListChannels(ctx context.Context, req *lnrpc.ListChannelsRequest, opts ...grpc.CallOption) (*lnrpc.ListChannelsResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if f.listChannelsErr != nil {
 		return nil, f.listChannelsErr
 	}
@@ -36,6 +40,8 @@ func (f *fakeLightningClient) ListChannels(ctx context.Context, req *lnrpc.ListC
 }
 
 func (f *fakeLightningClient) ListPeers(ctx context.Context, req *lnrpc.ListPeersRequest, opts ...grpc.CallOption) (*lnrpc.ListPeersResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if f.listPeersErr != nil {
 		return nil, f.listPeersErr
 	}

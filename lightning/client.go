@@ -77,6 +77,7 @@ type Client interface {
 	IsConnected(destination []byte) (bool, error)
 	OpenChannel(req *OpenChannelRequest) (*wire.OutPoint, error)
 	GetChannel(peerID []byte, channelPoint wire.OutPoint) (*GetChannelResult, error)
+	WaitChannelPointActive(peerID []byte, channelPoint wire.OutPoint, deadline time.Time) (*GetChannelResult, error)
 	GetPeerId(scid *ShortChannelID) ([]byte, error)
 	GetClosedChannels(nodeID string, channelPoints map[string]uint64) (map[string]uint64, error)
 	WaitOnline(peerID []byte, deadline time.Time) error
