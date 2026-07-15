@@ -1,0 +1,111 @@
+name: Integration tests (devnet)
+
+# Manual + nightly only, not on every push/PR: this suite builds four
+# sibling repos from source (see test/devnet/README.md's sibling-checkout
+# convention) and stands up a live lokid + 3x flnd regtest network before
+# testing against it, which realistically costs 10-20+ minutes and carries
+# more inherent flakiness risk than a unit-test suite. See BACKLOG.md
+# Phase 4 for the decision to keep this off the PR-blocking path.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 6 * * *'
+
+permissions:
+  contents: read
+
+jobs:
+  itest:
+    runs-on: ubuntu-latest
+    steps:
+      # flspd's own multi-repo dev convention (see
+      # deploy/docker-compose.dev.yml, test/devnet/docker-compose.yml):
+      # flspd and its sibling flokiorg repos are expected to sit next to
+      # each other, e.g. <workspace>/flowgate/flspd and
+      # <workspace>/flokiorg/<repo>. Mirrored here via actions/checkout's
+      # `path:` so test/devnet/docker-compose.yml's `../../../../flokiorg/*`
+      # relative build contexts resolve exactly as they do locally.
+      - name: Checkout flspd
+        uses: actions/checkout@v4
+        with:
+          path: flowgate/flspd
+
+      - name: Checkout flokiorg/go-flokicoin
+        uses: actions/checkout@v4
+        with:
+          repository: flokiorg/go-flokicoin
+          path: flokiorg/go-flokicoin
+
+      - name: Checkout flokiorg/flnd
+        uses: actions/checkout@v4
+        with:
+          repository: flokiorg/flnd
+          path: flokiorg/flnd
+
+      - name: Checkout flokiorg/walletd
+        uses: actions/checkout@v4
+        with:
+          repository: flokiorg/walletd
+          path: flokiorg/walletd
+
+      - name: Checkout flokiorg/flokicoin-neutrino
+        uses: actions/checkout@v4
+        with:
+          repository: flokiorg/flokicoin-neutrino
+          path: flokiorg/flokicoin-neutrino
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: flowgate/flspd/go.mod
+
+      - name: Create data dirs and seed configs
+        working-directory: flowgate/flspd/test/devnet
+        run: ./setup.sh
+
+      - name: Build images and start the devnet
+        working-directory: flowgate/flspd/test/devnet
+        run: docker compose up -d --build
+
+      - name: Wait for flnd roles to accept RPC
+        working-directory: flowgate/flspd/test/devnet
+        run: |
+          for role in lsp client payer; do
+            echo "Waiting for flnd-${role}..."
+            for i in $(seq 1 60); do
+              if ./flncli.sh "$role" getinfo >/dev/null 2>&1; then
+                echo "flnd-${role} ready"
+                break
+              fi
+              if [ "$i" -eq 60 ]; then
+                echo "flnd-${role} never became ready" >&2
+                docker compose logs "flnd-${role}"
+                exit 1
+              fi
+              sleep 2
+            done
+          done
+
+      # One-time bootstrap (test/devnet/README.md): fetch an address per
+      # role, wire into lokid's miningaddr list, restart chain once to
+      # load it -- safe only because nothing of value exists on this
+      # brand-new devnet yet. Then fund all three roles.
+      - name: Fund devnet roles
+        working-directory: flowgate/flspd/test/devnet
+        run: |
+          ./collect-addresses.sh
+          ./generate.sh 150
+
+      - name: Run integration tests
+        working-directory: flowgate/flspd
+        run: go test -timeout 20m -v ./test/itest/...
+
+      - name: Devnet logs (on failure)
+        if: failure()
+        working-directory: flowgate/flspd/test/devnet
+        run: docker compose logs
+
+      - name: Tear down devnet
+        if: always()
+        working-directory: flowgate/flspd/test/devnet
+        run: docker compose down -v

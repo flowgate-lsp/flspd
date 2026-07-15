@@ -39,7 +39,7 @@ number-soup and then get reorganized a second time.
 | 1 | Green the build + safety net | `go test ./... -race` passes in CI | ✅ T1-1..T1-5 done |
 | 2 | Fix defects on current structure | All P2 items merged w/ regression test | ✅ All items done: F-1, F-2, C-1, C-2, C-3, F-5, F-7, F-8, F-9, F-10, F-11, F-12, F-13 |
 | 3 | Unit-test coverage buildout | Critical-four packages ≥70–80% | ✅ Done: F-5, F-6, F-7, F-8, F-9, F-12, F-13, T1-4/T3-2..T3-6 all done. All four critical packages now clear the target: **postgresql 69.1%→81.2%, notifications 54.3%→70.3%, lsps 50.1%→78.6%, interceptor 58.3%→73.4%**. Notable finds along the way, not just coverage: `lsps1_settlement_store.go`'s `UpdateLsps1OrderFunding` silently no-ops on an unknown order_id; two near-duplicate `GetPaidLsps1Order` implementations disagree on their not-found contract (only one is actually reachable in production); `notification_service.go`'s `Notify()` return value is a real fast-fail signal `notifyAndWait` depends on (relevant background for the still-open Performance-backlog P-4 write-up below); a genuine data race in a `lsps` test itself (reading `mock.Mock.Calls` from a different goroutine than the one appending to it) caught by `-race`, not just written defensively. `handler_lsps2.go`'s `lsps2Buy` and `server.go`'s core JSON-RPC dispatch (`subscribeAndListen`/`handleMessage`/`route`) remain the largest *remaining* gaps in `lsps` specifically, but the package-level target is already met. `lnd` 4.7%, `common` 36.0%, `config` 93.4%, `lightning` 86.9%, `auth` 76.5% are not part of the critical four and untouched this round. |
-| 4 | YAML-driven integration tests | Runner + 3 seed scenarios merged | ✅ Runner built + all 3 seed scenarios landed (T4-1/T4-2). LSPS1 test client added; `lsps1_order_settle_and_open.yaml` and `lsps1_recovery_after_restart.yaml` (F-1 regression, real kill/restart) both pass on real flspd/flnd/chain processes. `lsps2_jit_happy_path.yaml` intentionally left known-failing on the distinct zero-conf-balance-sync race documented in T4-1 — not swept under the rug. `kill_lsp`/`restart_lsp` fault injection landed (T4-3, partial); relay-failure/mempool-fee fault injection not started. This package isn't wired into the CI gate yet (path-filtered out of `ci.yml`), so "pass in CI" is still open follow-up work. |
+| 4 | YAML-driven integration tests | Runner + 3 seed scenarios merged | ✅ Runner built + all 3 seed scenarios landed (T4-1/T4-2). LSPS1 test client added; `lsps1_order_settle_and_open.yaml` and `lsps1_recovery_after_restart.yaml` (F-1 regression, real kill/restart) both pass on real flspd/flnd/chain processes. `lsps2_jit_happy_path.yaml` intentionally left known-failing on the distinct zero-conf-balance-sync race documented in T4-1 — not swept under the rug. `kill_lsp`/`restart_lsp` fault injection landed (T4-3, partial); relay-failure/mempool-fee fault injection not started. Wired into CI as `.github/workflows/itest.yml` (2026-07-15) — `workflow_dispatch` + nightly, deliberately *not* on every push/PR (user's explicit call): the suite checks out and builds 4 sibling repos from source plus a live devnet before testing, realistically 10-20+ min with more inherent flakiness risk than a unit suite, not something to put in the PR-blocking path. |
 | 5 | Config model + secrets-by-reference | New model shipped behind compat shim | ✅ T5-1..T5-7 done (secrets-by-reference, unit/fee/channel-size model, profiles, CLI tooling, Settings.tsx re-skin — frontend not browser-verified, no automation tooling available) |
 | 6 | Repo structure / arbo migration | Tree matches target layout, build green throughout | ✅ Done. T6-1..T6-3 (format/ folded into common/, internal/adapters/ introduced, common/ split into core/ports/services/); T6-4 (rpc/→api/proto/rpc/, config/→platform/config/, build/→platform/build/, auth/→transport/auth/, notifications/ proto split→api/proto/notifications/, common/logger.go+log_enums.go→platform/logging/, notifications/server.go transport classification resolved "stays put", lsps/→lsps+transport/lsps/ and dashboard/→dashboard+transport/dashboard/ splits both landed on the real transport-vs-logic seam, verified live against devnet for lsps/); T6-5 (configs/examples/, test/itest/, deploy/, web/ — deploy/+web/ landed on explicit user go-ahead, stashed+reapplied someone else's uncommitted dev-tooling edits with re-derived paths) — all sub-items done. |
 | — | Performance backlog (parallel, non-blocking) | — | ◐ Investigated, not implemented: P-3 verified as no-op (never called hot); P-1/P-2 have concrete fix paths documented but need dedicated live-devnet regression verification; P-4's literal fix would regress `notifyAndWait`'s fast-fail behavior — narrower fix documented instead |
@@ -1069,10 +1069,39 @@ a new scenario requires zero Go code, only a new YAML file. **Landed with
 one deliberate exception**: all 3 scenarios exist and 2 of 3 pass; the
 third (`lsps2_jit_happy_path.yaml`) is intentionally left red pending the
 still-open zero-conf-balance-sync blocker from T4-1 rather than papered
-over. None of the 3 are part of the CI gate yet either way (path-filtered
-out of `ci.yml`), so "pass in CI" doesn't yet apply literally — wiring
-this package into CI (presumably a separate, devnet-provisioning-capable
-job, not the fast PR pipeline) is unstarted follow-up work.
+over.
+
+**CI wiring — done (2026-07-15), `.github/workflows/itest.yml`.** Not
+the fast PR pipeline: `workflow_dispatch` + nightly cron, an explicit
+user call given the tradeoffs. `test/itest` needs a live devnet, which
+needs 4 sibling repos (`flokiorg/go-flokicoin`, `flnd`, `walletd`,
+`flokicoin-neutrino` — confirmed all public, no auth needed) checked
+out at the same relative multi-repo layout local dev already assumes
+(`<workspace>/flowgate/flspd` + `<workspace>/flokiorg/*` — mirrored via
+`actions/checkout`'s `path:`) and built from source, realistically
+10-20+ min with more inherent flakiness risk than a unit suite — not
+something to block every PR on. Sequencing follows `test/devnet/
+README.md`'s own documented flow, which `StartDevnet` (test/itest/
+devnet.go) does *not* fully automate itself: `setup.sh` (seed configs)
+→ `docker compose up -d --build` → poll each flnd role's RPC until it
+responds → `collect-addresses.sh` + `generate.sh 150` (one-time
+mining-address bootstrap + funding, per `devnet_smoke_test.go`'s own
+comment that roles must be "pre-funded by ./collect-addresses.sh +
+./generate.sh" before any test can run) → `go test ./test/itest/...`.
+Verified beyond YAML syntax: the sibling-repo build-context paths
+resolve correctly (checked via `docker compose config` against this
+session's own local checkout, which already mirrors the exact
+`flowgate/flspd` + `flokiorg/*` layout the workflow assumes) and
+`setup.sh` runs cleanly in isolation (verified in a scratch copy,
+produces the expected config files including the T4-1 payer-role
+scid-alias/zero-conf strip). **Not verified**: a full fresh-build
+dry run of `docker compose up -d --build` against the actual GitHub
+Actions runner — the devnet's `container_name`s are hardcoded (not
+scoped by `COMPOSE_PROJECT_NAME`), so testing this locally would have
+required tearing down the long-lived devnet several other Phase 4/6
+verifications this session depended on, which wasn't worth the risk.
+Recommend triggering `workflow_dispatch` once by hand to confirm
+before relying on the nightly schedule.
 
 ---
 
