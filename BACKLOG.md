@@ -36,9 +36,9 @@ number-soup and then get reorganized a second time.
 | Phase | Theme | Gate to proceed | Status |
 |---|---|---|---|
 | 0 | Contain live secret exposure | Untracked, purged, guarded | ✅ Done — confirmed test data, no rotation needed |
-| 1 | Green the build + safety net | `go test ./... -race` passes in CI | ◐ T1-1..T1-3 done; T1-4, T1-5 open |
+| 1 | Green the build + safety net | `go test ./... -race` passes in CI | ◐ T1-1..T1-4 done; T1-5 open |
 | 2 | Fix defects on current structure | All P2 items merged w/ regression test | ✅ All items done: F-1, F-2, C-1, C-2, C-3, F-5, F-7, F-8, F-9, F-10, F-11, F-12, F-13 |
-| 3 | Unit-test coverage buildout | Critical-four packages ≥70–80% | ◐ In progress: F-5, F-6, F-7, F-9, F-12, F-13 done, T3-2/T3-3/T3-4/T3-5/T3-6 done; interceptor 38.9%, lsps 49.4%, postgresql 69.1%, notifications 54.3%, lnd 4.7%, common 36.0%, config 93.4%, lightning 86.9%, auth 76.5% |
+| 3 | Unit-test coverage buildout | Critical-four packages ≥70–80% | ◐ In progress: F-5, F-6, F-7, F-8, F-9, F-12, F-13 done, T1-4/T3-2/T3-3/T3-4/T3-5/T3-6 done; interceptor 58.3%, lsps 50.1%, postgresql 69.1%, notifications 54.3%, lnd 4.7%, common 36.0%, config 93.4%, lightning 86.9%, auth 76.5% |
 | 4 | YAML-driven integration tests | Runner + 3 seed scenarios merged | ◐ Foundation built + proven (Devnet/FlspdProcess/LSPS2 client, 2 more real bugs found — F-10 additions); YAML schema/runner not started; scenario 1's Go-level proof blocked on a devnet gossip-propagation gap, see T4-1 |
 | 5 | Config model + secrets-by-reference | New model shipped behind compat shim | ✅ T5-1..T5-7 done (secrets-by-reference, unit/fee/channel-size model, profiles, CLI tooling, Settings.tsx re-skin — frontend not browser-verified, no automation tooling available) |
 | 6 | Repo structure / arbo migration | Tree matches target layout, build green throughout | ◐ T6-1..T6-3 done (format/ folded into common/, internal/adapters/ introduced, common/ split into core/ports/services/); T6-5 partial (configs/examples/, test/itest/ done; deploy/, web/ deliberately deferred — uncommitted dev-tooling state + sibling-checkout paths); T6-4 (transport/platform/proto) not started, scope genuinely ambiguous (lsps/ is mostly business logic, not pure transport) |
@@ -195,15 +195,23 @@ table-driven tests in Phase 3.
 **Acceptance criteria:** at least one characterization test exists per
 public entrypoint of `Interceptor` and `Lsps1SettlementService`.
 
-**Status:** ◐ Partially covered, not done. `Lsps1SettlementService`'s state
-transitions are already reasonably pinned by the existing
-`TestProcessSettledInvoice_*` tests in `lsps/settlement_service_test.go`.
-`Interceptor.Intercept()` itself (as opposed to `resolvePayment`, which T1-1
-now covers well) still has no direct test — doing so needs a full
-`lightning.Client` + `notifications.Notifier` + `history.Store` mock set,
-which is real scaffolding work, not a quick addition. Deferred rather than
-rushed; revisit before starting Phase 5/6, since those are the phases this
-item actually gates.
+**Status:** ✅ Done (commit `f97a63d`). `Lsps1SettlementService`'s state
+transitions were already reasonably pinned by the existing
+`TestProcessSettledInvoice_*` tests. Added 8 characterization tests for
+`Interceptor.Intercept()`'s own entry-point control flow (unregistered
+forward, hard resolvePayment failure, GetPeerId failure, routing to a
+different next hop, IsConnected failure, all three probe-detection
+branches) — the scaffolding turned out lighter than expected, reusing
+`interceptor/`'s already-built `MockStore`/`MockLightningClient`/
+`MockNotifier` rather than needing new fakes from scratch. Deliberately
+scoped to the entry point's control flow, not the JIT-channel-open +
+confirmation-polling path (needs real/mocked time delays, already covered
+separately by `openChannel`'s own tests) — matches this item's own
+"tripwire, not exhaustive" framing. Found and fixed a real gap in the
+existing `MockStore.PaymentInfo` along the way: it silently hardcoded
+several return values to nil regardless of what a test configured, making
+"registered payment" scenarios impossible to construct through it.
+`interceptor` coverage: 38.9% → 58.3%.
 
 ### T1-5: Full CI/CD pipeline review & modernization
 **Severity:** Medium · **Depends on:** T1-3 (done — this extends it)
