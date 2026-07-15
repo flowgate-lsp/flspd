@@ -333,6 +333,18 @@ func (s *Lsps1SettlementService) recoverStuckOrders() {
 			Msgf("LSPS1 Settlement: Found %d stuck PAID orders, recovering...", len(paidOrders))
 
 		for _, order := range paidOrders {
+			// F-8: a PAID order that already has funding recorded means
+			// openChannelForOrder's OpenChannel call already succeeded on
+			// some earlier run — the only way it's still PAID (not
+			// COMPLETED) is that the COMPLETED state write itself failed
+			// or never ran (e.g. flspd crashed between the two writes).
+			// Calling openChannelForOrder again here would try to open a
+			// SECOND channel for the same order. Reconcile against actual
+			// LND state instead of blindly retrying.
+			if order.FundingTxid != nil && order.FundingOutpoint != nil {
+				s.reconcileFundedOrder(order)
+				continue
+			}
 			s.openChannelForOrder(order)
 		}
 	}
@@ -340,6 +352,53 @@ func (s *Lsps1SettlementService) recoverStuckOrders() {
 	// Also check CREATED orders: if the invoice was settled in LND while flspd
 	// was down, the order never progressed. Look each one up directly in LND.
 	s.recoverSettledCreatedOrders()
+}
+
+// reconcileFundedOrder handles a PAID order that already has funding details
+// recorded (F-8): rather than risk opening a duplicate channel, it verifies
+// the previously-opened channel is actually active in LND and, if so,
+// transitions the order straight to COMPLETED. If the channel can't be
+// found (e.g. force-closed before recovery ran), this deliberately does
+// NOT fall back to retrying OpenChannel — that ambiguous case (was the
+// channel ever really there?) needs a human to look, not a guess that
+// risks a duplicate open.
+func (s *Lsps1SettlementService) reconcileFundedOrder(order *core.Lsps1Order) {
+	peerId, err := hex.DecodeString(order.PeerId)
+	if err != nil {
+		log.Error().Err(err).Str("order_id", order.OrderId).Msg("LSPS1 Settlement: Failed to decode peer ID during funded-order reconciliation")
+		return
+	}
+
+	outpoint, err := lightning.NewOutPointFromString(fmt.Sprintf("%s:%d", *order.FundingTxid, *order.FundingOutpoint))
+	if err != nil {
+		log.Error().Err(err).Str("order_id", order.OrderId).Msg("LSPS1 Settlement: Stored funding outpoint is invalid, cannot reconcile")
+		return
+	}
+
+	channelPoint := fmt.Sprintf("%s:%d", *order.FundingTxid, *order.FundingOutpoint)
+	if _, err := s.client.GetChannel(peerId, *outpoint); err != nil {
+		log.Warn().Err(err).
+			Str("order_id", order.OrderId).
+			Str("channel_point", channelPoint).
+			Msg("LSPS1 Settlement: Order has recorded funding but no matching active channel found in LND — leaving PAID for manual review, not retrying OpenChannel")
+		return
+	}
+
+	log.Info().
+		Str("component", string(common.LogComponentSettlement)).
+		Str("order_id", order.OrderId).
+		Str("channel_point", channelPoint).
+		Msg("LSPS1 Settlement: Recorded funding verified active in LND — reconciling order to COMPLETED")
+
+	_, err = s.openingStore.UpdateLsps1OrderState(order.OrderId, string(Lsps1OrderStateCompleted), string(Lsps1OrderStatePaid), string(Lsps1OrderStatePaid))
+	if err != nil {
+		log.Error().Err(err).Str("order_id", order.OrderId).Msg("LSPS1 Settlement: Failed to reconcile order state to COMPLETED")
+		return
+	}
+
+	if s.notificationService != nil {
+		go s.notificationService.NotifyOrderStateChanged(order.PeerId, order.OrderId, string(Lsps1OrderStateCompleted), channelPoint, "")
+	}
 }
 
 // recoverSettledCreatedOrders queries LND for any CREATED order whose invoice
