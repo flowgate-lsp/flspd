@@ -1,0 +1,54 @@
+# LSPS2 JIT channel purchase: client asks the LSP for a quote, creates an
+# invoice with a routing hint through the not-yet-real channel, a
+# third-party payer pays it, and flspd's HTLC interceptor opens the real
+# channel on receipt.
+#
+# KNOWN FAILING (see BACKLOG.md's T4-1 "New blocker found immediately
+# behind it"): the pay_invoice step currently ends in NO_ROUTE. This is
+# NOT the gossip-propagation bug T4-1 originally tracked (that one's
+# fixed -- see test/devnet/setup.sh) -- it's a distinct race between
+# flspd's own 60s best-effort wait for the fresh zero-conf channel's
+# balance to sync into the LSP's router, and the payer's own pathfinding
+# give-up point, which in observed runs land in the same second. The
+# order does reach COMPLETED server-side even when this scenario reports
+# failure -- check the LSP's own log, not just this test's exit code, when
+# debugging further.
+name: lsps2_jit_happy_path
+description: >
+  Buy a JIT channel via LSPS2, pay the resulting invoice, and assert the
+  real zero-conf channel opens between the LSP and the client.
+steps:
+  - auto_accept_channels:
+      as: client
+  - connect_peer:
+      from: client
+      to: lsp
+  - connect_peer:
+      from: payer
+      to: lsp
+  - open_channel:
+      from: payer
+      to: lsp
+      capacity_loki: 50000000
+      min_confs: 1
+  - mine_blocks:
+      count: 6
+  - lsps2_buy:
+      as: client
+      lsp: lsp
+      token: itest-token
+      payment_size_mloki: 5000000000
+      save_as: buy1
+  - create_jit_invoice:
+      as: client
+      from: buy1
+      memo: itest JIT purchase
+      save_as: invoice1
+  - pay_invoice:
+      as: payer
+      invoice: invoice1
+      outgoing_channel_to: lsp
+      timeout_seconds: 100
+assertions:
+  - channel_exists:
+      between: [lsp, client]

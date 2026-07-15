@@ -39,7 +39,7 @@ number-soup and then get reorganized a second time.
 | 1 | Green the build + safety net | `go test ./... -race` passes in CI | ✅ T1-1..T1-5 done |
 | 2 | Fix defects on current structure | All P2 items merged w/ regression test | ✅ All items done: F-1, F-2, C-1, C-2, C-3, F-5, F-7, F-8, F-9, F-10, F-11, F-12, F-13 |
 | 3 | Unit-test coverage buildout | Critical-four packages ≥70–80% | ◐ In progress: F-5, F-6, F-7, F-8, F-9, F-12, F-13 done, T1-4/T3-2/T3-3/T3-4/T3-5/T3-6 done; interceptor 58.3%, lsps 50.1%, postgresql 69.1%, notifications 54.3%, lnd 4.7%, common 36.0%, config 93.4%, lightning 86.9%, auth 76.5% |
-| 4 | YAML-driven integration tests | Runner + 3 seed scenarios merged | ◐ Foundation built + proven (Devnet/FlspdProcess/LSPS2 client, 2 more real bugs found — F-10 additions); gossip-propagation blocker root-caused + fixed (see T4-1); scenario 1's Go-level proof now reaches server-side COMPLETED but still races a distinct zero-conf-balance-sync timing issue; YAML schema/runner not started |
+| 4 | YAML-driven integration tests | Runner + 3 seed scenarios merged | ◐ Foundation built + proven (Devnet/FlspdProcess/LSPS2 client, 2 more real bugs found — F-10 additions); gossip-propagation blocker root-caused + fixed (see T4-1); YAML runner built and working (T4-1/T4-2) with scenario 1 wired through it — known-failing on a distinct zero-conf-balance-sync race, documented, not part of the CI gate; scenarios 2/3 need a new LSPS1 test client, not started; T4-3 fault injection not started |
 | 5 | Config model + secrets-by-reference | New model shipped behind compat shim | ✅ T5-1..T5-7 done (secrets-by-reference, unit/fee/channel-size model, profiles, CLI tooling, Settings.tsx re-skin — frontend not browser-verified, no automation tooling available) |
 | 6 | Repo structure / arbo migration | Tree matches target layout, build green throughout | ◐ T6-1..T6-3 done (format/ folded into common/, internal/adapters/ introduced, common/ split into core/ports/services/); T6-5 partial (configs/examples/, test/itest/ done; deploy/, web/ deliberately deferred — uncommitted dev-tooling state + sibling-checkout paths); T6-4 (transport/platform/proto) not started, scope genuinely ambiguous (lsps/ is mostly business logic, not pure transport) |
 | — | Performance backlog (parallel, non-blocking) | — | ☐ Not started |
@@ -1006,13 +1006,42 @@ caught and blocked by the safety classifier on the following command, user
 re-authorized a fresh re-provision). Don't repeat that: ask first.
 
 ### T4-2: Seed scenarios
-1. `lsps2_jit_happy_path.yaml` — buy → pay → zero-conf channel open. Go-level
-   proof (`itest/lsps2_jit_test.go`) exists and is close (see T4-1's
-   blocking-issue writeup) but not yet green.
+**Status (2026-07-15):** ◐ Runner built (T4-1's actual deliverable, not
+just the seed scenarios): `test/itest/scenario.go` (`Scenario`/`VerbCall`
+types, strict YAML decoding — unknown top-level keys, unknown verbs, and
+unknown per-verb params are all hard errors at load time, not silently
+ignored), `test/itest/scenario_steps.go` /
+`test/itest/scenario_asserts.go` (the `map[string]StepFn` /
+`map[string]AssertFn` registries T4-1 specified), and
+`test/itest/runner_test.go` (`TestScenarios` globs `scenarios/*.yaml`,
+runs each as a named subtest against a fresh flspd + Postgres on the
+shared devnet). `test/itest/scenario_test.go` covers the parsing/
+validation logic itself with no devnet required. Step verbs implemented
+so far: `connect_peer`, `open_channel` (idempotent, mirrors the existing
+Go-level test's reuse logic), `mine_blocks`, `auto_accept_channels`,
+`lsps2_buy`, `create_jit_invoice`, `pay_invoice`; one assertion verb,
+`channel_exists`.
+
+1. `lsps2_jit_happy_path.yaml` — buy → pay → zero-conf channel open. Now
+   wired through the actual YAML runner (`test/itest/scenarios/`) rather
+   than only the hand-written Go-level proof (`lsps2_jit_test.go`, kept
+   alongside it) — confirmed to fail at the exact same step
+   (`pay_invoice`) for the exact same reason as the Go-level test: see
+   T4-1's "new blocker found immediately behind it." **Known-failing, not
+   swept under the rug** — the scenario file's own header comment
+   explains why and points back here. Not part of the CI gate either way
+   (this whole package is path-filtered out of `ci.yml`'s test job).
 2. `lsps1_order_settle_and_open.yaml` — manual order → settle → auto-open.
+   **Not started.** Needs a new LSPS1 test client (order creation +
+   watching for the on-chain settlement payment) comparable in scope to
+   what `lsps2_client.go` took for LSPS2 — nothing like it exists yet in
+   `test/itest/`.
 3. `lsps1_recovery_after_restart.yaml` — reproduces F-1: settle invoice, kill
    the LSP mid-flight, restart, assert **exactly one** channel opens (not
-   two) and the order reaches COMPLETED.
+   two) and the order reaches COMPLETED. **Not started**, same LSPS1
+   client dependency as #2, plus needs a `kill_lsp`-style fault-injection
+   step (see T4-3, which this scenario also needs regardless of T4-3's
+   own broader scope).
 
 ### T4-3: External-party fault injection
 Extend the scenario schema to script relay failure modes
