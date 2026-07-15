@@ -247,14 +247,17 @@ func CreateJitInvoice(ctx context.Context, clientRaw lnrpc.LightningClient, buyR
 // terminal state, returning an error if it fails or times out.
 //
 // outgoingChanId pins the first hop explicitly rather than leaving it to
-// graph-based pathfinding. This devnet's channels are opened with
-// option-scid-alias/zero-conf negotiated, and (at least in this 3-node
-// private regtest topology) the channel_update announcing a channel's
-// routing policy for one side was observed to never propagate to its
-// direct peer even after 90+ seconds and a fresh reconnect — leaving
-// pathfinding unable to find a route through an otherwise perfectly
-// healthy, active, sufficiently-funded channel it doesn't own the
-// still-missing policy for. Pass 0 to fall back to normal pathfinding.
+// graph-based pathfinding. This used to be load-bearing: with
+// option-scid-alias/zero-conf negotiated identically on every devnet role,
+// the payer<->lsp channel_update never propagated to either side at all
+// (root-caused to flnd's funding manager mishandling the alias-edge
+// delete/re-add for non-zero-conf channels that still negotiated the
+// feature -- see BACKLOG.md's T4-1 gossip-propagation finding). That's
+// fixed at the devnet-config level now (test/devnet/setup.sh strips those
+// features from the payer role), so pathfinding can find this hop on its
+// own -- pinning it here is now just cheap, harmless defense in depth
+// against picking a worse/stale route. Pass 0 to fall back to normal
+// pathfinding.
 func PayInvoice(ctx context.Context, router routerrpc.RouterClient, bolt11 string, outgoingChanId uint64, timeout time.Duration) (*lnrpc.Payment, error) {
 	stream, err := router.SendPaymentV2(ctx, &routerrpc.SendPaymentRequest{
 		PaymentRequest: bolt11,

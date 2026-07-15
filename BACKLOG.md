@@ -39,7 +39,7 @@ number-soup and then get reorganized a second time.
 | 1 | Green the build + safety net | `go test ./... -race` passes in CI | ✅ T1-1..T1-5 done |
 | 2 | Fix defects on current structure | All P2 items merged w/ regression test | ✅ All items done: F-1, F-2, C-1, C-2, C-3, F-5, F-7, F-8, F-9, F-10, F-11, F-12, F-13 |
 | 3 | Unit-test coverage buildout | Critical-four packages ≥70–80% | ◐ In progress: F-5, F-6, F-7, F-8, F-9, F-12, F-13 done, T1-4/T3-2/T3-3/T3-4/T3-5/T3-6 done; interceptor 58.3%, lsps 50.1%, postgresql 69.1%, notifications 54.3%, lnd 4.7%, common 36.0%, config 93.4%, lightning 86.9%, auth 76.5% |
-| 4 | YAML-driven integration tests | Runner + 3 seed scenarios merged | ◐ Foundation built + proven (Devnet/FlspdProcess/LSPS2 client, 2 more real bugs found — F-10 additions); YAML schema/runner not started; scenario 1's Go-level proof blocked on a devnet gossip-propagation gap, see T4-1 |
+| 4 | YAML-driven integration tests | Runner + 3 seed scenarios merged | ◐ Foundation built + proven (Devnet/FlspdProcess/LSPS2 client, 2 more real bugs found — F-10 additions); gossip-propagation blocker root-caused + fixed (see T4-1); scenario 1's Go-level proof now reaches server-side COMPLETED but still races a distinct zero-conf-balance-sync timing issue; YAML schema/runner not started |
 | 5 | Config model + secrets-by-reference | New model shipped behind compat shim | ✅ T5-1..T5-7 done (secrets-by-reference, unit/fee/channel-size model, profiles, CLI tooling, Settings.tsx re-skin — frontend not browser-verified, no automation tooling available) |
 | 6 | Repo structure / arbo migration | Tree matches target layout, build green throughout | ◐ T6-1..T6-3 done (format/ folded into common/, internal/adapters/ introduced, common/ split into core/ports/services/); T6-5 partial (configs/examples/, test/itest/ done; deploy/, web/ deliberately deferred — uncommitted dev-tooling state + sibling-checkout paths); T6-4 (transport/platform/proto) not started, scope genuinely ambiguous (lsps/ is mostly business logic, not pure transport) |
 | — | Performance backlog (parallel, non-blocking) | — | ☐ Not started |
@@ -925,53 +925,78 @@ Phase 2, both verified with real before/after runs, not just reasoning):
    Fixed by always mapping to `TEMPORARY_CHANNEL_FAILURE`, the one code
    this interceptor path can actually deliver.
 
-**Blocking issue, not yet resolved:** `TestLsps2JitHappyPath` (Go-level
-proof for the first seed scenario) gets all the way through get_info →
-buy → invoice-with-hint → payment attempt → **the JIT channel actually
-opens and the LSPS5 order reaches `COMPLETED` server-side** (confirmed in
-a real run's log) — but the *payer's own* `SendPaymentV2` pathfinding
-intermittently/consistently fails with `FAILURE_REASON_NO_ROUTE` even
-when `OutgoingChanId` pins the first hop explicitly and the channel is
-confirmed + `Active: true`.
+**Gossip-propagation blocker: root-caused and fixed (2026-07-15).**
+Hypothesis (a) from the original investigation was right. Root cause,
+traced into `flokiorg/flnd` source directly:
 
-Root-caused this far: `getchaninfo` on the payer→lsp channel shows each
-side's `channel_update` policy known *only locally* — LSP sees its own
-side populated and the payer's side `null`; payer sees the reverse. Ruled
-out simple trickle-timer latency specifically: `flnd/config.go`'s
-`defaultTrickleDelay` is 90s (announcements are deliberately batched, not
-broadcast instantly), so a first pass assumed "just wait longer" — but a
-controlled poll against a single untouched channel (nothing else
-happening on the devnet) still showed zero propagation after 170+
-seconds, i.e. nearly two full trickle cycles. So this isn't a "give it
-more time" problem; something is actually suppressing the exchange
-between these two directly-connected peers. Untested hypotheses for a
-fresh run at this: (a) `protocol.option-scid-alias`+`zero-conf` negotiated
-globally may make flnd treat *all* channels as effectively-unadvertised
-for gossip purposes, not just explicitly-private ones — check by opening
-a channel with those features disabled and see if its `channel_update`
-propagates normally; (b) a 3-node fully-meshed private network might need
-an explicit `--gossip.pinned-syncers` config (LND's syncer selection
-logic may be leaving both peers as passive syncers with neither actively
-pulling); (c) an flnd-fork-specific regression, checked by diffing this
-behavior against the upstream LND version it forked from.
+- `protocol.option-scid-alias`/`protocol.zero-conf` were enabled
+  identically on all three devnet roles (`flnd.conf.sample`). These are
+  feature bits negotiated *per peer connection* (via `init`), not per
+  channel — with both payer and lsp advertising `option-scid-alias`, it
+  gets negotiated for *every* channel between them, including the
+  ordinary (non-zero-conf, not explicitly private) payer↔lsp routing
+  channel `OpenNormalChannel` opens.
+- `funding/manager.go`'s post-6-conf announcement path
+  (`completeChan.NegotiatedAliasFeature() && !completeChan.IsZeroConf()`)
+  treats any such channel as an alias channel needing special handling:
+  it calls `f.cfg.AliasManager.DeleteSixConfs` +
+  `f.cfg.DeleteAliasEdge`/`f.addToGraph` to rewrite the edge *before*
+  `f.announceChannel` broadcasts the real `channel_announcement`. On this
+  fork (and reproducibly, so not obviously fork-specific — this is
+  upstream-mirrored code, see `git log -p` on `discovery/gossiper.go`),
+  that delete-then-re-add sequence left the edge missing from the graph
+  DB. Confirmed directly in `flnd-lsp`/`flnd-payer` logs for the exact
+  affected SCID: `DISC: ignoring remote ChannelAnnouncement1 for own
+  channel` (a real, correct guard in `discovery/gossiper.go` —
+  `ProcessRemoteAnnouncement` rejects any `ChannelAnnouncement1` naming
+  our own key, since normally the *local* announcement path inserts the
+  edge first) followed permanently by `GRPH: unable to add channel: edge
+  not found` / `GRDB: UpdateEdgePolicy faild: edge not found` every time
+  either side tried to publish a `channel_update` for that SCID — so
+  neither side's policy could ever land in either graph, no matter how
+  long you wait (confirmed: still zero propagation after 14+ hours / ~560
+  trickle cycles on the original channel).
+- **Fix:** the payer role doesn't need scid-alias/zero-conf at
+  all — it never receives a JIT channel, only routes payments through an
+  ordinary public channel. `test/devnet/setup.sh` now strips
+  `protocol.option-scid-alias`/`protocol.zero-conf` from the payer's
+  config only (mirrors the existing LSP-only `requireinterceptor` sed
+  pattern). LSP↔client is unaffected — that negotiation is independent,
+  per that connection, and still needs (and still gets) both features for
+  real JIT channels.
+- **Verified live:** closed the old (poisoned) payer↔lsp channel, applied
+  the same config change to the running devnet's
+  `data/flnd-payer/flnd.conf` (gitignored, not part of the fix itself —
+  `setup.sh` is), restarted `flnd-payer`, opened a fresh channel. Within
+  ~50 seconds (well under one 90s trickle cycle) `getnodeinfo` from *both*
+  sides showed *both* directions' `channel_update` policy populated —
+  first time either side has ever seen the other's policy for a
+  payer↔lsp channel on this devnet.
 
-**Recommended next step, not yet tried:** stop trying to make graph-based
-pathfinding work at all — `routerrpc.BuildRoute` + `SendToRouteV2` build
-and send an *explicitly specified* route (hop pubkeys + first-hop
-`OutgoingChanId`) without depending on the local graph having full policy
-data for every edge. This may not resolve the *phantom* (LSP→client) hop,
-since `BuildRoute` still needs *some* per-hop routing info for that leg —
-worth checking whether it accepts the same hop-hint fee/cltv data
-`SendPaymentV2`'s route hints do, since if so this sidesteps the gossip
-gap entirely rather than working around it.
-
-`OutgoingChanId` alone measurably changed the failure mode (from instant
-`NO_ROUTE` to a ~70s run that reached the interceptor and got a real
-`FAILURE_REASON_TIMEOUT`) but didn't fully resolve it on repeat attempts —
-worth keeping regardless of what else changes. The devnet itself,
-`FlspdProcess`, and the LSPS2 client are all solid and reusable regardless
-of how this specific gossip gap gets resolved; this is purely a routing/
-pathfinding-layer blocker on top of infrastructure that already works.
+**New blocker found immediately behind it (not yet resolved):** with the
+edge now fully gossiped, `TestLsps2JitHappyPath` progresses much further
+— flspd's interceptor engages on the *first* HTLC attempt (previously it
+never got that far), opens the real zero-conf channel, and **the LSPS5
+order reaches `COMPLETED` server-side** — but the run still ends in
+`FAILURE_REASON_NO_ROUTE` on the payer's side. This is a different bug
+from the gossip gap: the interceptor's own `routeTimeout` (60s,
+`interceptor/intercept_handler.go`) polls `QueryRoutes` waiting for the
+LSP's *own* router to see the freshly-opened zero-conf channel as having
+sufficient local balance — and in the observed run, `QueryRoutes` returned
+`insufficient local balance` continuously for the *entire* 60 seconds,
+never resolving, before the interceptor gave up and resumed the HTLC
+best-effort. That resume and the payer's own give-up landed in the same
+second (10:22:12 in the captured run) — a race, not a hang. Ruled out
+`routerrpc.BuildRoute`+`SendToRouteV2` as a workaround (BACKLOG's own
+previously-recommended next step): this fork's `BuildRouteRequest` proto
+(`lnrpc/routerrpc/router.proto`) has no `route_hints`-equivalent field,
+only `hop_pubkeys` + `outgoing_chan_id` — it has no way to supply per-hop
+fee/cltv data for a hop with no real graph edge, so it fundamentally can't
+build a route through a still-phantom JIT hop the way `SendPaymentV2`'s
+bolt11 route hints can. Whatever fixes this needs to be on the "why does
+the LSP's own zero-conf channel balance never sync into its router within
+60s" side, not a payer-side pathfinding workaround. `FlspdProcess`, the
+devnet, and the LSPS2 client all remain solid and reusable regardless.
 
 **Also learned the hard way:** this devnet's chain/wallet state is meant
 to be treated as disposable session-to-session (see `test/devnet/README.md`)
