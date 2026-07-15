@@ -16,12 +16,12 @@ build: build-backend build-cli build-frontend
 # Build the flspd daemon
 build-backend:
     go get {{PKG}}/cmd/flspd
-    CGO_ENABLED=0 go build -v -trimpath -o flspd -ldflags "-s -w -X {{PKG}}/build.tag={{VERSION}}" ./cmd/flspd
+    CGO_ENABLED=0 go build -v -trimpath -o flspd -ldflags "-s -w -X {{PKG}}/platform/build.tag={{VERSION}}" ./cmd/flspd
 
 # Build the revenue CLI
 build-cli:
     go get {{PKG}}/cmd/flspd_revenue_cli
-    CGO_ENABLED=0 go build -v -trimpath -o flspd_revenue_cli -ldflags="-s -w -X {{PKG}}/build.tag={{VERSION}}" ./cmd/flspd_revenue_cli
+    CGO_ENABLED=0 go build -v -trimpath -o flspd_revenue_cli -ldflags="-s -w -X {{PKG}}/platform/build.tag={{VERSION}}" ./cmd/flspd_revenue_cli
 
 # Build the frontend production bundle
 build-frontend:
@@ -35,9 +35,9 @@ deploy-frontend: build-frontend
 dist:
     mkdir -p dist
     @echo "Building for linux/amd64..."
-    GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -v -trimpath -o dist/flspd-linux-amd64 -ldflags "-s -w -X {{PKG}}/build.tag={{VERSION}}" ./cmd/flspd
+    GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -v -trimpath -o dist/flspd-linux-amd64 -ldflags "-s -w -X {{PKG}}/platform/build.tag={{VERSION}}" ./cmd/flspd
     @echo "Building for linux/arm64..."
-    GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -v -trimpath -o dist/flspd-linux-arm64 -ldflags "-s -w -X {{PKG}}/build.tag={{VERSION}}" ./cmd/flspd
+    GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -v -trimpath -o dist/flspd-linux-arm64 -ldflags "-s -w -X {{PKG}}/platform/build.tag={{VERSION}}" ./cmd/flspd
 
 ### --- 🚀 Development --- ###
 

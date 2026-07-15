@@ -12,11 +12,11 @@ import (
 
 	ecies "github.com/ecies/go/v2"
 	btcec "github.com/flokiorg/go-flokicoin/crypto"
+	rpc "github.com/flowgate-lsp/flspd/api/proto/rpc"
 	"github.com/flowgate-lsp/flspd/common"
 	"github.com/flowgate-lsp/flspd/core"
 	"github.com/flowgate-lsp/flspd/interceptor"
 	"github.com/flowgate-lsp/flspd/ports"
-	rpc "github.com/flowgate-lsp/flspd/rpc"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/flokiorg/flnd/lnwire"

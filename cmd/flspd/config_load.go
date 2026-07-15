@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/flowgate-lsp/flspd/config"
+	"github.com/flowgate-lsp/flspd/platform/config"
 	"gopkg.in/yaml.v3"
 )
 

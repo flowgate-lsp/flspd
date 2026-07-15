@@ -3,8 +3,8 @@ package core
 import (
 	ecies "github.com/ecies/go/v2"
 	btcec "github.com/flokiorg/go-flokicoin/crypto"
-	"github.com/flowgate-lsp/flspd/config"
 	"github.com/flowgate-lsp/flspd/lightning"
+	"github.com/flowgate-lsp/flspd/platform/config"
 	"golang.org/x/sync/singleflight"
 )
 

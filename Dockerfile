@@ -25,10 +25,10 @@ ARG COMMIT=unknown
 # -ldflags explanation:
 # -w -s: strip debug information for smaller binary
 # -X ...: inject version information into build variables
-RUN go build -ldflags "-w -s -X github.com/flowgate-lsp/flspd/build.tag=${TAG} -X github.com/flowgate-lsp/flspd/build.revision=${COMMIT}" -o /bin/flspd ./cmd/flspd
+RUN go build -ldflags "-w -s -X github.com/flowgate-lsp/flspd/platform/build.tag=${TAG} -X github.com/flowgate-lsp/flspd/platform/build.revision=${COMMIT}" -o /bin/flspd ./cmd/flspd
 
 # Build flspd_revenue_cli
-RUN go build -ldflags "-w -s -X github.com/flowgate-lsp/flspd/build.tag=${TAG} -X github.com/flowgate-lsp/flspd/build.revision=${COMMIT}" -o /bin/flspd_revenue_cli ./cmd/flspd_revenue_cli
+RUN go build -ldflags "-w -s -X github.com/flowgate-lsp/flspd/platform/build.tag=${TAG} -X github.com/flowgate-lsp/flspd/platform/build.revision=${COMMIT}" -o /bin/flspd_revenue_cli ./cmd/flspd_revenue_cli
 
 # Runtime Stage
 FROM alpine:latest@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b

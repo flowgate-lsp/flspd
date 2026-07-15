@@ -10,9 +10,9 @@ import (
 
 	"github.com/flokiorg/flnd/lnrpc"
 	"github.com/flokiorg/flnd/lnrpc/routerrpc"
-	"github.com/flowgate-lsp/flspd/config"
 	"github.com/flowgate-lsp/flspd/core"
 	"github.com/flowgate-lsp/flspd/lightning"
+	"github.com/flowgate-lsp/flspd/platform/config"
 	"github.com/flowgate-lsp/flspd/ports"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"

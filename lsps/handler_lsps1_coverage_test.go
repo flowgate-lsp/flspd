@@ -6,8 +6,8 @@ import (
 	"testing"
 
 	"github.com/flokiorg/flnd/lnrpc"
-	"github.com/flowgate-lsp/flspd/config"
 	"github.com/flowgate-lsp/flspd/core"
+	"github.com/flowgate-lsp/flspd/platform/config"
 
 	// "github.com/flowgate-lsp/flspd/lsps/mocks" // Removed
 	"github.com/stretchr/testify/assert"

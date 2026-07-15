@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/flowgate-lsp/flspd/config"
 	"github.com/flowgate-lsp/flspd/lsps"
+	"github.com/flowgate-lsp/flspd/platform/config"
 	"github.com/urfave/cli"
 	"gopkg.in/yaml.v3"
 )

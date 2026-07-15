@@ -10,9 +10,9 @@ import (
 	"github.com/caddyserver/certmagic"
 	"github.com/rs/zerolog/log"
 
+	rpc "github.com/flowgate-lsp/flspd/api/proto/rpc"
 	"github.com/flowgate-lsp/flspd/notifications"
 	"github.com/flowgate-lsp/flspd/ports"
-	rpc "github.com/flowgate-lsp/flspd/rpc"
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"

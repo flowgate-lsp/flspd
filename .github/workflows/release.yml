@@ -57,7 +57,7 @@ jobs:
           CGO_ENABLED: 0
         run: |
           VERSION=${{ needs.prepare.outputs.version }}
-          LDFLAGS="-s -w -X github.com/flowgate-lsp/flspd/build.tag=${VERSION}"
+          LDFLAGS="-s -w -X github.com/flowgate-lsp/flspd/platform/build.tag=${VERSION}"
 
 
           mkdir -p dist

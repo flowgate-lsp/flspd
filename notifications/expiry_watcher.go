@@ -5,8 +5,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/flowgate-lsp/flspd/config"
 	"github.com/flowgate-lsp/flspd/lightning"
+	"github.com/flowgate-lsp/flspd/platform/config"
 	"github.com/rs/zerolog/log"
 )
 

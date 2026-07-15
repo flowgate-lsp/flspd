@@ -41,7 +41,7 @@ number-soup and then get reorganized a second time.
 | 3 | Unit-test coverage buildout | Critical-four packages ≥70–80% | ◐ In progress: F-5, F-6, F-7, F-8, F-9, F-12, F-13 done, T1-4/T3-2/T3-3/T3-4/T3-5/T3-6 done; interceptor 58.3%, lsps 50.1%, postgresql 69.1%, notifications 54.3%, lnd 4.7%, common 36.0%, config 93.4%, lightning 86.9%, auth 76.5% |
 | 4 | YAML-driven integration tests | Runner + 3 seed scenarios merged | ◐ Foundation built + proven (Devnet/FlspdProcess/LSPS2 client, 2 more real bugs found — F-10 additions); gossip-propagation blocker root-caused + fixed (see T4-1); YAML runner built and working (T4-1/T4-2) with scenario 1 wired through it — known-failing on a distinct zero-conf-balance-sync race, documented, not part of the CI gate; scenarios 2/3 need a new LSPS1 test client, not started; T4-3 fault injection not started |
 | 5 | Config model + secrets-by-reference | New model shipped behind compat shim | ✅ T5-1..T5-7 done (secrets-by-reference, unit/fee/channel-size model, profiles, CLI tooling, Settings.tsx re-skin — frontend not browser-verified, no automation tooling available) |
-| 6 | Repo structure / arbo migration | Tree matches target layout, build green throughout | ◐ T6-1..T6-3 done (format/ folded into common/, internal/adapters/ introduced, common/ split into core/ports/services/); T6-5 partial (configs/examples/, test/itest/ done; deploy/, web/ deliberately deferred — uncommitted dev-tooling state + sibling-checkout paths); T6-4 (transport/platform/proto) not started, scope genuinely ambiguous (lsps/ is mostly business logic, not pure transport) |
+| 6 | Repo structure / arbo migration | Tree matches target layout, build green throughout | ◐ T6-1..T6-3 done (format/ folded into common/, internal/adapters/ introduced, common/ split into core/ports/services/); T6-4 partial (rpc/→api/proto/rpc/, config/→platform/config/, build/→platform/build/, auth/→transport/auth/ done; notifications/ proto split, lsps/ and dashboard/ transport-vs-logic splits, common/ logging split deliberately deferred — genuine symbol-level ambiguity, not mechanical risk); T6-5 partial (configs/examples/, test/itest/ done; deploy/, web/ deliberately deferred — uncommitted dev-tooling state + sibling-checkout paths) |
 | — | Performance backlog (parallel, non-blocking) | — | ☐ Not started |
 
 ---
@@ -1274,6 +1274,84 @@ suite green throughout.
 auth); `platform/` for config/logging/build; `api/proto/` as the one home
 for `.proto` + generated code (currently interleaved with hand-written logic
 in `rpc/`, `notifications/`).
+
+**Status (2026-07-15):** ◐ Partially done — the mechanical, low-risk moves
+landed; the ones needing real symbol-level business-logic-vs-transport
+separation (same rigor T6-3 needed) are deliberately deferred, not rushed.
+
+Landed, each verified with `go build`/`go vet`/full test suite green
+before moving to the next:
+- `rpc/` → `api/proto/rpc/` (`.proto` + generated `.pb.go`/`_grpc.pb.go`
+  + `genproto.sh`, plus `node_context.go` — a small (37-line) piece of
+  gRPC auth-context glue kept alongside its proto types rather than
+  further split into `transport/grpc/`, since splitting it would mean
+  every one of its 3 call sites needing *both* packages imported under
+  separate aliases for zero real separation-of-concerns benefit; not the
+  purest possible split, but a deliberate, documented one). Package name
+  (`rpc`) unchanged, only the import path moved — 3 importers
+  (`cmd/flspd/{grpc_server,channel_opener_server}.go`,
+  `notifications/server.go`) needed a one-line path fix each.
+- `config/` → `platform/config/` (25 importers — the largest file count
+  in this pass, but a pure import-path rename since the package name
+  (`config`) didn't change; every reference was already unaliased
+  `"github.com/flowgate-lsp/flspd/config"`, confirmed before doing a bulk
+  sed across all 25). Caught and fixed one real fallout:
+  `secretref_test.go`'s `os.ReadFile("../configs/examples/...")` assumed
+  `config/` sat one level below repo root — now two levels deep
+  (`platform/config/`), needed an extra `../`.
+- `build/` → `platform/build/` (4 Go importers, pure path rename). Also
+  updated the 4 non-Go `-ldflags -X github.com/flowgate-lsp/flspd/build.tag=...`
+  references that inject the version string at build time — these use
+  the import path as a bare string, so `git mv` alone doesn't catch them:
+  `Dockerfile` (both `flspd` and `flspd_revenue_cli` build stages),
+  `.github/workflows/release.yml`, and 4 occurrences across `justfile`'s
+  `build-backend`/`build-cli`/`dist` recipes. Verified the injection still
+  actually works post-move by building a throwaway binary with the new
+  `-X` path and `strings`-grepping the injected tag out of it, not just
+  trusting `go build` succeeding.
+- `auth/` → `transport/auth/` (1 importer, `dashboard/service.go`) — the
+  cleanest case in this pass: NIP-98 HTTP auth verification has no
+  separate "business logic" dimension to split out, it *is* the
+  transport-layer concern.
+
+**Deliberately not done, same reasoning as T6-5's own precedent below**
+(genuine architectural ambiguity needing careful per-symbol work, not
+mechanical risk):
+- `notifications/`'s `.proto`/generated code vs. hand-written logic split.
+  Unlike `rpc/`, this one can't be a clean mechanical move: the
+  hand-written files (`server.go`, `cleanup.go`, `expiry_watcher.go`,
+  `notification_service.go`, `store.go`) reference the proto-generated
+  types (`NotificationsServer`, `EncryptedNotificationRequest`, ...)
+  *unqualified*, because today they're in the same package. Moving just
+  the generated files to `api/proto/notifications/` means every one of
+  those unqualified references across every hand-written file needs to
+  become package-qualified — a real, if mechanical-once-planned, sweep
+  T6-3's own ~46-file audit is the right template for, not something to
+  improvise inside a broader T6-4 pass. `notifications/server.go` (the
+  actual gRPC service impl, an inbound surface) is also a `transport/`
+  candidate by T6-4's own definition, layering a second decision on top
+  of the proto split.
+- `lsps/`'s transport (JSON-RPC plumbing) vs. business logic
+  (LSPS0/1/2/5 protocol implementation, order/settlement handling) split
+  — flagged as genuinely ambiguous when T4-1 first ran into this same
+  question; still true here. `lsps/` is mostly protocol business logic
+  wearing a JSON-RPC transport on top, not a thin transport layer with
+  logic accidentally leaking in — a wholesale move to `transport/lsps/`
+  would misclassify the bulk of the package.
+- `dashboard/`'s HTTP-handler (transport) vs. config-update/analytics
+  (business logic) split — same shape of problem as `lsps/`; recall
+  C-1/C-2/C-3 (Phase 2) were all bugs *in* `dashboard/service.go`'s
+  config-handling logic, not its HTTP plumbing, which is itself evidence
+  this package mixes the two rather than being pure transport.
+- `common/logger.go` + `log_enums.go` → `platform/logging/` (the last
+  piece of T6-3's own predicted `platform/` destination for these) — not
+  attempted this pass. `common`'s log-component/log-action taxonomy is
+  referenced from ~18 importers, but unlike `config/`'s move, some of
+  those files use *other* `common` symbols too (`TimeFormat`,
+  `ValidateWebhookUrl`, `ParsePrivateKey` — the residual T6-3 explicitly
+  left with "no natural domain home"), so this isn't a blind
+  whole-package path rename either; it needs the same
+  file-by-file/symbol-by-symbol classification as the proto splits above.
 
 ### T6-5: Relocate samples, deploy, frontend
 `configs/examples/` for the sample YAML/env files (out of repo root);

@@ -6,9 +6,9 @@ import (
 	"fmt"
 
 	ecies "github.com/ecies/go/v2"
+	rpc "github.com/flowgate-lsp/flspd/api/proto/rpc"
 	"github.com/flowgate-lsp/flspd/common"
 	"github.com/flowgate-lsp/flspd/lightning"
-	rpc "github.com/flowgate-lsp/flspd/rpc"
 	"github.com/rs/zerolog/log"
 	"google.golang.org/protobuf/proto"
 )

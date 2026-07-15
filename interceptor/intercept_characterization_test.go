@@ -3,8 +3,8 @@ package interceptor
 import (
 	"testing"
 
-	"github.com/flowgate-lsp/flspd/config"
 	"github.com/flowgate-lsp/flspd/core"
+	"github.com/flowgate-lsp/flspd/platform/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )

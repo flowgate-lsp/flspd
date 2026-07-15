@@ -15,7 +15,7 @@ import (
 	"time"
 
 	btcec "github.com/flokiorg/go-flokicoin/crypto"
-	"github.com/flowgate-lsp/flspd/config"
+	"github.com/flowgate-lsp/flspd/platform/config"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
 )

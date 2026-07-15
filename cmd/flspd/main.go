@@ -5,7 +5,7 @@ import (
 
 	"github.com/rs/zerolog/log"
 
-	"github.com/flowgate-lsp/flspd/build"
+	"github.com/flowgate-lsp/flspd/platform/build"
 	"github.com/urfave/cli"
 )
 
