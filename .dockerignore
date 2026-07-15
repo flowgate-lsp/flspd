@@ -8,8 +8,7 @@ flspd
 flspd_revenue_cli
 
 # Docker
-Dockerfile
-docker-compose.yml
+deploy/
 .dockerignore
 
 # Data

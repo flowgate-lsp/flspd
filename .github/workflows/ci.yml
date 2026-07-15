@@ -21,11 +21,11 @@ jobs:
         with:
           filters: |
             docker:
-              - 'Dockerfile'
+              - 'deploy/Dockerfile'
               - 'go.mod'
               - 'go.sum'
             frontend:
-              - 'frontend/**'
+              - 'web/**'
 
   test:
     runs-on: ubuntu-latest
@@ -73,7 +73,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: frontend
+        working-directory: web
     steps:
       - uses: actions/checkout@v4
 
@@ -82,7 +82,7 @@ jobs:
         with:
           node-version: '22'
           cache: npm
-          cache-dependency-path: frontend/package-lock.json
+          cache-dependency-path: web/package-lock.json
 
       - name: Install dependencies
         run: npm ci
@@ -114,13 +114,15 @@ jobs:
 
       # Build-only, no push: this just proves the production Dockerfile
       # still builds against the changed go.mod/go.sum/Dockerfile. It
-      # covers Dockerfile (repo-root context) only -- Dockerfile.dev needs
-      # sibling flokiorg checkouts (see docker-compose.dev.yml) that don't
+      # covers deploy/Dockerfile (repo-root context, since it COPYs the
+      # full source tree) only -- deploy/Dockerfile.dev needs sibling
+      # flokiorg checkouts (see deploy/docker-compose.dev.yml) that don't
       # exist on a plain CI runner, so it isn't validated here.
       - name: Build image
         uses: docker/build-push-action@v5
         with:
           context: .
+          file: deploy/Dockerfile
           push: false
           build-args: |
             TAG=ci-validate

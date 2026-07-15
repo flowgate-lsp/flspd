@@ -2,7 +2,7 @@ services:
   flspd:
     build:
       context: ../../
-      dockerfile: flowgate/flspd/Dockerfile.dev
+      dockerfile: flowgate/flspd/deploy/Dockerfile.dev
       args:
         TAG: "v1.0.0"
         COMMIT: "dockerCode"
@@ -66,13 +66,13 @@ services:
 
   frontend:
     build:
-      context: ./frontend
+      context: ./web
       dockerfile: Dockerfile.dev
     container_name: flspd-frontend
     ports:
       - "5183:5173"
     volumes:
-      - ./frontend:/app
+      - ./web:/app
       - /app/node_modules
     environment:
       - VITE_API_BASE_URL=http://localhost:9090

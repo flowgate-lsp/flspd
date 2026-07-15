@@ -2,7 +2,7 @@ set shell := ["bash", "-c"]
 
 VERSION := `cat VERSION`
 PKG := "github.com/flowgate-lsp/flspd"
-COMPOSE := "docker compose -f docker-compose.dev.yml"
+COMPOSE := "docker compose -f deploy/docker-compose.dev.yml --project-directory ."
 
 # Default recipe: show help
 default:
@@ -25,11 +25,11 @@ build-cli:
 
 # Build the frontend production bundle
 build-frontend:
-    cd frontend && npm run build
+    cd web && npm run build
 
 # Deploy the frontend to Cloudflare Workers
 deploy-frontend: build-frontend
-    cd frontend && npx wrangler deploy
+    cd web && npx wrangler deploy
 
 # Build for various platforms (CI/CD)
 dist:
@@ -53,11 +53,11 @@ setup-backend:
 
 # Install frontend dependencies
 setup-frontend:
-    cd frontend && npm install
+    cd web && npm install
 
 # Start the frontend in development mode but connected to a production/remote backend
 frontend-dev-prod url:
-    cd frontend && VITE_PROXY_URL={{url}} npm run dev
+    cd web && VITE_PROXY_URL={{url}} npm run dev
 
 # Start the stack or a specific service
 up service="":
@@ -88,7 +88,7 @@ sh service cmd="/bin/sh":
 # Clean build artifacts (binaries, dist output, air's tmp/ build dir, compiled test binaries)
 clean:
     rm -f flspd flspd_revenue_cli
-    rm -rf dist frontend/dist tmp
+    rm -rf dist web/dist tmp
     find . -name "*.test" -type f -delete
 
 # Deep clean: build artifacts, docker volumes, AND local dev state (data/ —
@@ -114,7 +114,7 @@ test-lsps:
 
 # Run frontend tests
 test-frontend:
-    cd frontend && npm run test
+    cd web && npm run test
 
 # Run Go linter (required by .agents/skills/golang-pro)
 lint:

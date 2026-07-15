@@ -10,6 +10,6 @@ nodes.json
 *.log
 data/
 node_modules/
-frontend/node_modules/
+web/node_modules/
 .agents/
 skills-lock.json
