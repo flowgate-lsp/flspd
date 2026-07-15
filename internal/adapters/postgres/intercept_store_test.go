@@ -3,7 +3,10 @@ package postgres
 import (
 	"context"
 	"testing"
+	"time"
 
+	"github.com/flokiorg/go-flokicoin/chaincfg/chainhash"
+	"github.com/flokiorg/go-flokicoin/wire"
 	"github.com/flowgate-lsp/flspd/core"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -126,4 +129,62 @@ func TestInterceptStore_GetLsps2Order_NotFound(t *testing.T) {
 	got, err := interceptStore.GetLsps2Order(uint64(1)<<62 | 0xdeadbeef)
 	assert.NoError(t, err)
 	assert.Nil(t, got)
+}
+
+// TestSetFundingTx_UpdatesPaymentRow is the regression test for the write
+// side of a payment's funding info: interceptor/intercept_handler.go's
+// openChannel calls this right after a channel opens, and PaymentInfo's
+// returned channelPoint is what the F-8 recovery path (and normal
+// duplicate-forward detection) both key off. Previously had zero coverage.
+func TestSetFundingTx_UpdatesPaymentRow(t *testing.T) {
+	store := NewPostgresInterceptStore(testPool)
+
+	paymentHash := []byte("setfundingtx-test-hash-32-bytes!")
+	require.Len(t, paymentHash, 32)
+	require.NoError(t, store.RegisterPayment("token", "order-setfundingtx", &openingFeeParamsFixture, []byte("dest"), paymentHash, []byte("secret"), 1000, 990, ""))
+
+	var txHash chainhash.Hash
+	copy(txHash[:], []byte("setfundingtx-fixture-txid-32byte"))
+	channelPoint := &wire.OutPoint{Hash: txHash, Index: 3}
+
+	err := store.SetFundingTx(paymentHash, channelPoint)
+	require.NoError(t, err)
+
+	_, _, _, _, _, _, _, _, gotChannelPoint, _, err := store.PaymentInfo(paymentHash)
+	require.NoError(t, err)
+	require.NotNil(t, gotChannelPoint, "PaymentInfo must report the channel point SetFundingTx just wrote")
+	assert.Equal(t, txHash, gotChannelPoint.Hash)
+	assert.Equal(t, uint32(3), gotChannelPoint.Index)
+}
+
+// TestInterceptStore_GetPaidLsps1Order_FindsOldestUnfunded covers the live
+// production call path (interceptor/intercept_handler.go's resolvePayment,
+// via i.store.GetPaidLsps1Order) for falling back to a matching PAID LSPS1
+// order when a payment doesn't resolve via the normal payments/lsps2 path.
+func TestInterceptStore_GetPaidLsps1Order_FindsOldestUnfunded(t *testing.T) {
+	interceptStore := NewPostgresInterceptStore(testPool)
+	peer := "peer-intercept-fifo"
+
+	insertPaidOrder(t, "intercept-fifo-older", peer, time.Now().Add(-time.Hour), nil)
+	insertPaidOrder(t, "intercept-fifo-newer", peer, time.Now(), nil)
+
+	order, err := interceptStore.GetPaidLsps1Order(peer)
+	require.NoError(t, err)
+	require.NotNil(t, order)
+	assert.Equal(t, "intercept-fifo-older", order.OrderId)
+}
+
+// TestInterceptStore_GetPaidLsps1Order_NotFoundReturnsNilNil covers the
+// "no matching order" branch, which callers rely on to mean "not an LSPS1
+// JIT candidate" rather than treating it as an error -- unlike
+// PostgresOpeningStore's separate copy of this query in
+// lsps1_settlement_store.go, which has no such pgx.ErrNoRows handling
+// (see TestGetPaidLsps1Order_OldestUnfundedForPeer's sibling test for that
+// contrast).
+func TestInterceptStore_GetPaidLsps1Order_NotFoundReturnsNilNil(t *testing.T) {
+	interceptStore := NewPostgresInterceptStore(testPool)
+
+	order, err := interceptStore.GetPaidLsps1Order("no-such-peer-has-orders")
+	assert.NoError(t, err)
+	assert.Nil(t, order)
 }
