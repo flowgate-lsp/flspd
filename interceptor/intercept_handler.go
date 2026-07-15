@@ -323,11 +323,33 @@ func (i *Interceptor) Intercept(req core.InterceptRequest) core.InterceptResult 
 			// the switch link might not be fully active immediately.
 			// Verify that the route is available in the graph
 			// This avoids "no_route" errors if the switch link is not fully active yet.
-			// Use a minimal amount for verification to check strict connectivity/existence.
-			// We avoid checking the full amount here because the Router's view of likely-zero-conf
-			// channels might show 0 balance initially, causing "insufficient local balance" errors
-			// even if the Switch shows full bandwidth. We trust the Switch to handle the full amount check on resume.
-			routeParamsAmount := uint64(incomingAmountMloki)
+			//
+			// Use a minimal amount for verification to check strict
+			// connectivity/existence -- deliberately *not* the full incoming
+			// amount, despite that being what the code here used to do (see
+			// git history). Root-caused live (2026-07-15) rather than
+			// assumed: openChannel sizes JIT channel capacity as
+			// incomingAmountMloki (converted to loki) plus only
+			// AdditionalChannelCapacity's configured padding -- neither that
+			// formula nor ValidateJit's own compatibility checks account for
+			// the ~1% mandatory channel reserve locked on each side, so a
+			// tightly-padded JIT channel's actual *spendable* local balance
+			// on the LSP's side is structurally less than the full incoming
+			// amount. Querying routes for that full amount here doesn't fail
+			// because the router hasn't synced yet (a transient, waitable
+			// condition) -- it fails because the amount asked for can never
+			// be satisfied by this channel's own local balance, so the old
+			// 60s poll always ran out the clock rather than ever resolving.
+			// The channel's own configured HTLC minimum is a value the
+			// Switch guarantees this channel can carry, so it proves
+			// graph-routability without hitting that structural mismatch;
+			// the Switch's own accounting (not the Router's graph-based
+			// estimate) does the real amount check when the HTLC actually
+			// resumes.
+			routeParamsAmount := chanResult.HtlcMinimumMloki
+			if routeParamsAmount == 0 {
+				routeParamsAmount = 1000 // 1 loki floor if the channel reports no configured minimum
+			}
 
 			// Use a generous timeout (60s) to wait for the Router to sync the ZC balance.
 			// "Insufficient local balance" means we must wait longer, not give up or bypass.
