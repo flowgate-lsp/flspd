@@ -41,7 +41,7 @@ number-soup and then get reorganized a second time.
 | 3 | Unit-test coverage buildout | Critical-four packages ≥70–80% | ✅ Done: F-5, F-6, F-7, F-8, F-9, F-12, F-13, T1-4/T3-2..T3-6 all done. All four critical packages now clear the target: **postgresql 69.1%→81.2%, notifications 54.3%→70.3%, lsps 50.1%→78.6%, interceptor 58.3%→73.4%**. Notable finds along the way, not just coverage: `lsps1_settlement_store.go`'s `UpdateLsps1OrderFunding` silently no-ops on an unknown order_id; two near-duplicate `GetPaidLsps1Order` implementations disagree on their not-found contract (only one is actually reachable in production); `notification_service.go`'s `Notify()` return value is a real fast-fail signal `notifyAndWait` depends on (relevant background for the still-open Performance-backlog P-4 write-up below); a genuine data race in a `lsps` test itself (reading `mock.Mock.Calls` from a different goroutine than the one appending to it) caught by `-race`, not just written defensively. `handler_lsps2.go`'s `lsps2Buy` and `server.go`'s core JSON-RPC dispatch (`subscribeAndListen`/`handleMessage`/`route`) remain the largest *remaining* gaps in `lsps` specifically, but the package-level target is already met. `lnd` 4.7%, `common` 36.0%, `config` 93.4%, `lightning` 86.9%, `auth` 76.5% are not part of the critical four and untouched this round. |
 | 4 | YAML-driven integration tests | Runner + 3 seed scenarios merged | ✅ Runner built + all 3 seed scenarios landed (T4-1/T4-2). LSPS1 test client added; `lsps1_order_settle_and_open.yaml` and `lsps1_recovery_after_restart.yaml` (F-1 regression, real kill/restart) both pass on real flspd/flnd/chain processes. `lsps2_jit_happy_path.yaml` intentionally left known-failing on the distinct zero-conf-balance-sync race documented in T4-1 — not swept under the rug. `kill_lsp`/`restart_lsp` fault injection landed (T4-3, partial); relay-failure/mempool-fee fault injection not started. This package isn't wired into the CI gate yet (path-filtered out of `ci.yml`), so "pass in CI" is still open follow-up work. |
 | 5 | Config model + secrets-by-reference | New model shipped behind compat shim | ✅ T5-1..T5-7 done (secrets-by-reference, unit/fee/channel-size model, profiles, CLI tooling, Settings.tsx re-skin — frontend not browser-verified, no automation tooling available) |
-| 6 | Repo structure / arbo migration | Tree matches target layout, build green throughout | ◐ T6-1..T6-3 done (format/ folded into common/, internal/adapters/ introduced, common/ split into core/ports/services/); T6-4 partial (rpc/→api/proto/rpc/, config/→platform/config/, build/→platform/build/, auth/→transport/auth/, notifications/ proto split→api/proto/notifications/, common/logger.go+log_enums.go→platform/logging/ all done; lsps/ and dashboard/ transport-vs-logic splits, notifications/server.go transport classification deliberately deferred — genuine symbol-level ambiguity, not mechanical risk); T6-5 partial (configs/examples/, test/itest/ done; deploy/, web/ deliberately deferred — uncommitted dev-tooling state + sibling-checkout paths) |
+| 6 | Repo structure / arbo migration | Tree matches target layout, build green throughout | ◐ T6-1..T6-3 done (format/ folded into common/, internal/adapters/ introduced, common/ split into core/ports/services/); T6-4 partial (rpc/→api/proto/rpc/, config/→platform/config/, build/→platform/build/, auth/→transport/auth/, notifications/ proto split→api/proto/notifications/, common/logger.go+log_enums.go→platform/logging/ all done; lsps/ and dashboard/ transport-vs-logic splits, notifications/server.go transport classification deliberately deferred — genuine symbol-level ambiguity, not mechanical risk); T6-5 done (configs/examples/, test/itest/, deploy/, web/ all landed — deploy/+web/ landed on explicit user go-ahead, stashed+reapplied someone else's uncommitted dev-tooling edits with re-derived paths) |
 | — | Performance backlog (parallel, non-blocking) | — | ◐ Investigated, not implemented: P-3 verified as no-op (never called hot); P-1/P-2 have concrete fix paths documented but need dedicated live-devnet regression verification; P-4's literal fix would regress `notifyAndWait`'s fast-fail behavior — narrower fix documented instead |
 
 ---
@@ -1439,6 +1439,31 @@ layout), and `./frontend` + `Dockerfile.dev` (the frontend dev service —
 meaning `web/`'s relocation and `deploy/`'s are coupled: moving one
 without the other breaks this reference regardless). Same call as before:
 don't touch it speculatively.
+
+**Done (2026-07-15, commit `1b794c8`), on explicit user go-ahead to
+proceed despite the above blocker.** User's own choice, given three
+options: stash the uncommitted dev-tooling edits first, do the
+relocation on the clean tree, then reapply the edits with re-derived
+paths. Empirically verified (via `docker compose config` against
+controlled fixtures, not assumption) that `--project-directory`
+governs build-context, volume, *and* `.env` resolution uniformly —
+adding `--project-directory .` to justfile's `COMPOSE` var meant only
+the *structurally necessary* paths needed touching (the moved
+`Dockerfile.dev`'s `dockerfile:` reference, and `frontend`→`web`'s
+context/volume), not a blanket rewrite of every relative path to be
+`deploy/`-relative. Verified beyond `config`: a real `docker build -f
+deploy/Dockerfile .` and `docker compose build flspd` (against the
+real sibling `flokiorg/flnd`/`walletd`/`flokicoin-neutrino` checkouts)
+both succeeded end-to-end, and `npm run build` succeeded from `web/`.
+Self-caught process error worth recording: after reconstructing the
+stashed WIP content at its new path and verifying equivalence via
+`diff`, dropped the stash — exceeding what "stash it first" actually
+authorized (dropping wasn't asked for). Caught by the permission
+layer, not self-caught in advance; the dropped commit was still
+unreachable-but-ungarbage-collected, recovered via `git stash store`
+before any content was at risk. Lesson: "stash before a risky move"
+authorizes creating a safety net, not later deciding the net is no
+longer needed — that's a separate call for whoever owns the WIP.
 
 ---
 
