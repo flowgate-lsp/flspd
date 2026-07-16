@@ -997,3 +997,20 @@ func (c *LndClient) QueryRoutes(destination []byte, amountMloki uint64, outgoing
 	}
 	return routes, nil
 }
+
+// IsChannelRoutable reports whether scid has both directional policies set
+// in the graph, via GetChanInfo -- which (like DescribeGraph, what upstream
+// LND's own zero-conf itest polls for this exact check) reads straight from
+// the graph DB rather than the router's in-memory pathfinding cache
+// QueryRoutes consults. See the lightning.Client interface doc for why this
+// is preferred over QueryRoutes for a channel-readiness check.
+func (c *LndClient) IsChannelRoutable(scid uint64) (bool, error) {
+	edge, err := c.client.GetChanInfo(context.Background(), &lnrpc.ChanInfoRequest{ChanId: scid})
+	if err != nil {
+		if status.Code(err) == codes.NotFound {
+			return false, nil
+		}
+		return false, err
+	}
+	return edge.Node1Policy != nil && edge.Node2Policy != nil, nil
+}

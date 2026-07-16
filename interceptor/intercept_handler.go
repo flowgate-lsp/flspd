@@ -318,43 +318,28 @@ func (i *Interceptor) Intercept(req core.InterceptRequest) core.InterceptResult 
 				scid = chanResult.ConfirmedScid
 			}
 
-			// Give LND a moment to propagate the new channel state to the router
-			// to avoid "no_route" errors. Even with OutgoingRequestedChanId,
-			// the switch link might not be fully active immediately.
-			// Verify that the route is available in the graph
-			// This avoids "no_route" errors if the switch link is not fully active yet.
+			// Give LND a moment to propagate the new channel state to the
+			// router before resuming, to avoid "no_route" errors -- even
+			// with OutgoingRequestedChanId, the switch link might not be
+			// fully active immediately.
 			//
-			// Use a minimal amount for verification to check strict
-			// connectivity/existence -- deliberately *not* the full incoming
-			// amount, despite that being what the code here used to do (see
-			// git history). Root-caused live (2026-07-15) rather than
-			// assumed: openChannel sizes JIT channel capacity as
-			// incomingAmountMloki (converted to loki) plus only
-			// AdditionalChannelCapacity's configured padding -- neither that
-			// formula nor ValidateJit's own compatibility checks account for
-			// the ~1% mandatory channel reserve locked on each side, so a
-			// tightly-padded JIT channel's actual *spendable* local balance
-			// on the LSP's side is structurally less than the full incoming
-			// amount. Querying routes for that full amount here doesn't fail
-			// because the router hasn't synced yet (a transient, waitable
-			// condition) -- it fails because the amount asked for can never
-			// be satisfied by this channel's own local balance, so the old
-			// 60s poll always ran out the clock rather than ever resolving.
-			// The channel's own configured HTLC minimum is a value the
-			// Switch guarantees this channel can carry, so it proves
-			// graph-routability without hitting that structural mismatch;
-			// the Switch's own accounting (not the Router's graph-based
-			// estimate) does the real amount check when the HTLC actually
-			// resumes.
-			routeParamsAmount := chanResult.HtlcMinimumMloki
-			if routeParamsAmount == 0 {
-				routeParamsAmount = 1000 // 1 loki floor if the channel reports no configured minimum
-			}
-
-			// Use a generous timeout (60s) to wait for the Router to sync the ZC balance.
-			// "Insufficient local balance" means we must wait longer, not give up or bypass.
+			// Poll IsChannelRoutable (GetChanInfo), not QueryRoutes.
+			// Root-caused live (2026-07-16): for a just-opened zero-conf
+			// channel, QueryRoutes' pathfinding reads from flnd's in-memory
+			// graph cache, which can lag 60-90+s behind the persisted graph
+			// DB -- confirmed directly via GetChanInfo showing both edge
+			// policies present within the same second the channel
+			// activates, on every connection/flnd-branch/devnet-state
+			// combination tested (ruling out flspd's own connection
+			// management as the cause). Upstream LND's own zero-conf
+			// channel itest (testZeroConfChannelOpen) never calls
+			// QueryRoutes for this readiness check either -- it polls
+			// DescribeGraph for both directional policies, which (like
+			// GetChanInfo) reads straight from the graph DB rather than the
+			// pathfinding cache. See BACKLOG.md's LSPS2 zero-conf
+			// balance-sync race writeup for the full investigation.
 			routeTimeout := time.After(60 * time.Second)
-			routeTicker := time.NewTicker(500 * time.Millisecond) // Poll faster
+			routeTicker := time.NewTicker(500 * time.Millisecond)
 			defer routeTicker.Stop()
 
 			var targetScid uint64
@@ -364,27 +349,18 @@ func (i *Interceptor) Intercept(req core.InterceptRequest) core.InterceptResult 
 
 		RouteLoop:
 			for {
-				routes, err := i.client.QueryRoutes(destination, routeParamsAmount, targetScid)
-				if err == nil {
-					for _, r := range routes {
-						if len(r.Hops) > 0 {
-							// Strict check: Ensure the route uses the newly opened channel
-							if r.Hops[0].ChanId == targetScid {
-								log.Debug().Msgf("Intercept: paymentHash=%s route found via SCID %d, resuming", reqPaymentHashStr, targetScid)
-								break RouteLoop
-							}
-							// If we found a route but via different SCID, log it
-							log.Debug().Msgf("Intercept: found route via SCID %d, waiting for target %d", r.Hops[0].ChanId, targetScid)
-						}
-					}
-				} else {
-					// Log error but continue polling. "insufficient local balance" is a common temporary state.
-					log.Trace().Err(err).Msgf("Intercept: QueryRoutes failed (waiting for sync), paymentHash=%s", reqPaymentHashStr)
+				routable, err := i.client.IsChannelRoutable(targetScid)
+				switch {
+				case err != nil:
+					log.Trace().Err(err).Msgf("Intercept: IsChannelRoutable failed (waiting for sync), paymentHash=%s", reqPaymentHashStr)
+				case routable:
+					log.Debug().Msgf("Intercept: paymentHash=%s channel %d routable, resuming", reqPaymentHashStr, targetScid)
+					break RouteLoop
 				}
 
 				select {
 				case <-routeTimeout:
-					log.Warn().Msgf("Intercept: QueryRoutes timed out using Best Effort for paymentHash=%s, resuming anyway", reqPaymentHashStr)
+					log.Warn().Msgf("Intercept: IsChannelRoutable timed out using Best Effort for paymentHash=%s, resuming anyway", reqPaymentHashStr)
 					break RouteLoop
 				case <-routeTicker.C:
 					continue

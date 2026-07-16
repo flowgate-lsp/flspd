@@ -285,6 +285,11 @@ func (m *MockLightningClient) QueryRoutes(destination []byte, amountMloki uint64
 	return args.Get(0).([]*lightning.Route), args.Error(1)
 }
 
+func (m *MockLightningClient) IsChannelRoutable(scid uint64) (bool, error) {
+	args := m.Called(scid)
+	return args.Bool(0), args.Error(1)
+}
+
 // MockHistoryStore for testing
 type MockHistoryStore struct {
 	mock.Mock

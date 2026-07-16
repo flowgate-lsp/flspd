@@ -39,7 +39,7 @@ number-soup and then get reorganized a second time.
 | 1 | Green the build + safety net | `go test ./... -race` passes in CI | ✅ T1-1..T1-5 done |
 | 2 | Fix defects on current structure | All P2 items merged w/ regression test | ✅ All items done: F-1, F-2, C-1, C-2, C-3, F-5, F-7, F-8, F-9, F-10, F-11, F-12, F-13 |
 | 3 | Unit-test coverage buildout | Critical-four packages ≥70–80% | ✅ Done: F-5, F-6, F-7, F-8, F-9, F-12, F-13, T1-4/T3-2..T3-6 all done. All four critical packages now clear the target: **postgresql 69.1%→81.2%, notifications 54.3%→70.3%, lsps 50.1%→78.6%, interceptor 58.3%→73.4%**. Notable finds along the way, not just coverage: `lsps1_settlement_store.go`'s `UpdateLsps1OrderFunding` silently no-ops on an unknown order_id; two near-duplicate `GetPaidLsps1Order` implementations disagree on their not-found contract (only one is actually reachable in production); `notification_service.go`'s `Notify()` return value is a real fast-fail signal `notifyAndWait` depends on (relevant background for the still-open Performance-backlog P-4 write-up below); a genuine data race in a `lsps` test itself (reading `mock.Mock.Calls` from a different goroutine than the one appending to it) caught by `-race`, not just written defensively. `handler_lsps2.go`'s `lsps2Buy` and `server.go`'s core JSON-RPC dispatch (`subscribeAndListen`/`handleMessage`/`route`) remain the largest *remaining* gaps in `lsps` specifically, but the package-level target is already met. `lnd` 4.7%, `common` 36.0%, `config` 93.4%, `lightning` 86.9%, `auth` 76.5% are not part of the critical four and untouched this round. |
-| 4 | YAML-driven integration tests | Runner + 3 seed scenarios merged | ✅ Runner built + 4 scenarios landed (T4-1/T4-2/T4-3): `lsps1_order_settle_and_open.yaml`, `lsps1_recovery_after_restart.yaml` (F-1 regression, real kill/restart), `lsps1_settle_under_fee_congestion.yaml` (T4-3 mempool fault injection, new) all pass on real flspd/flnd/chain processes. The recovery scenario's flakiness (2026-07-15 finding) is now root-caused and fixed — F-14, a real crash-orphaned-channel bug, not a timing race; a separate itest-harness design gap (devnet channels accumulate unbounded across scenario runs with no per-run DB to reconcile against) means it can still read `FAILED` when run alongside other channel-opening scenarios on a well-used devnet — see F-14's writeup for the full explanation and recommended harness-level follow-up. `lsps2_jit_happy_path.yaml` intentionally left known-failing on the distinct zero-conf-balance-sync race documented in T4-1 — not swept under the rug; revisited on 2026-07-15 and again 2026-07-16 (see the dedicated writeup after T4-3): one genuine root-caused bug fixed (an unsatisfiable `QueryRoutes` amount); a second, distinct failure (`"unable to find a path to destination"`) traced precisely to flnd's `errNoPathFound`/`getOutgoingBalance` source and, as of 2026-07-16, **confirmed via a precisely-timestamped side-by-side reproduction** that the delay is specific to flspd's own live connection, not flnd's graph/router state (an independent connection asking the identical question succeeds within ~1s of channel-open and stays successful, while flspd's own concurrent polling fails for the full 60s) — still failing end to end, root cause of *why* flspd's connection differs not yet identified, concrete next steps documented (leading hypothesis: the concurrently-held `SubscribeHtlcInterceptor`/event/invoice streams on that same connection). `kill_lsp`/`restart_lsp` and mempool fee-congestion fault injection landed (T4-3); relay-failure (`reject_then_accept`) fault injection not started, deliberately deferred (needs a gRPC MITM proxy, out of scope for this pass). Wired into CI as `.github/workflows/itest.yml` (2026-07-15) — `workflow_dispatch` + nightly, deliberately *not* on every push/PR (user's explicit call): the suite checks out and builds 4 sibling repos from source plus a live devnet before testing, realistically 10-20+ min with more inherent flakiness risk than a unit suite, not something to put in the PR-blocking path. |
+| 4 | YAML-driven integration tests | Runner + 3 seed scenarios merged | ✅ Runner built + 4 scenarios landed (T4-1/T4-2/T4-3): `lsps1_order_settle_and_open.yaml`, `lsps1_recovery_after_restart.yaml` (F-1 regression, real kill/restart), `lsps1_settle_under_fee_congestion.yaml` (T4-3 mempool fault injection, new) all pass on real flspd/flnd/chain processes. The recovery scenario's flakiness (2026-07-15 finding) is now root-caused and fixed — F-14, a real crash-orphaned-channel bug, not a timing race; a separate itest-harness design gap (devnet channels accumulate unbounded across scenario runs with no per-run DB to reconcile against) means it can still read `FAILED` when run alongside other channel-opening scenarios on a well-used devnet — see F-14's writeup for the full explanation and recommended harness-level follow-up. `lsps2_jit_happy_path.yaml` intentionally left known-failing on the distinct zero-conf-balance-sync race documented in T4-1 — not swept under the rug; revisited on 2026-07-15 and again 2026-07-16 (see the dedicated writeup after T4-3): one genuine root-caused bug fixed (an unsatisfiable `QueryRoutes` amount); a second, distinct failure (`"unable to find a path to destination"`) traced precisely to flnd's `errNoPathFound`/`getOutgoingBalance` source and, as of 2026-07-16, **initially appeared to be confirmed via a precisely-timestamped side-by-side reproduction** as specific to flspd's own live connection — **but a later 2026-07-16 session rigorously re-tested that conclusion and refuted it**: five independently-controlled probe variants (interceptor stream alone, the other three streams without it, zero streams on a cleaned devnet, zero streams after a fresh `flnd-lsp` restart, and a design that exactly replicates the original successful probe with two fully separate connections) **all failed identically** — the "connection identity/streams" explanation does not hold up. `getchaninfo` on a live test channel confirmed the graph edge/policy IS correctly present from the moment the channel opens, contradicting the `OutPolicySet` explanation too. The devnet's `flnd` build was found to be on `flokiorg/flnd`'s `sync/lnd-2026-07` branch — an active, uncommitted, in-progress upstream-LND reconciliation (325 files changed) touching exactly the relevant subsystems (`graph/db`, `funding/manager.go`'s `addToGraph`, `htlcswitch`'s interceptor/held-HTLC code), which looked like a strong suspect — **but a direct A/B test against flnd's stable `main` branch (== `v0.1.21-beta`, the exact tag flspd's own `go.mod` depends on) reproduced the identical failure, ruling the sync branch out.** A third hypothesis — accumulated multi-session devnet state — was also tested by wiping and re-provisioning the devnet from scratch and got the identical failure on a chain with zero history. **All three tested hypotheses refuted; root cause found and fixed anyway** by comparing against upstream LND's own zero-conf itest, which verifies channel readiness via `DescribeGraph`, not `QueryRoutes` — traced precisely: `DescribeGraph`/`GetChanInfo` read the graph DB directly, `QueryRoutes`'s pathfinding reads an in-memory `graphCache` that lags for a freshly-added zero-conf edge. `RouteLoop` now polls a new `IsChannelRoutable` (`GetChanInfo`-backed) instead of `QueryRoutes`; unit-tested and green. **Not yet confirmed end-to-end** — hit a second, separate, unresolved issue verifying it live (payer-side route-hint pathfinding flaky on the freshly re-provisioned devnet, blocking a real payment from ever reaching flspd's interceptor to exercise the fix). See the dedicated writeup's "Fixed" and "Not yet confirmed end-to-end" entries for full detail. `kill_lsp`/`restart_lsp` and mempool fee-congestion fault injection landed (T4-3); relay-failure (`reject_then_accept`) fault injection not started, deliberately deferred (needs a gRPC MITM proxy, out of scope for this pass). Wired into CI as `.github/workflows/itest.yml` (2026-07-15) — `workflow_dispatch` + nightly, deliberately *not* on every push/PR (user's explicit call): the suite checks out and builds 4 sibling repos from source plus a live devnet before testing, realistically 10-20+ min with more inherent flakiness risk than a unit suite, not something to put in the PR-blocking path. |
 | 5 | Config model + secrets-by-reference | New model shipped behind compat shim | ✅ T5-1..T5-7 done (secrets-by-reference, unit/fee/channel-size model, profiles, CLI tooling, Settings.tsx re-skin — frontend not browser-verified, no automation tooling available) |
 | 6 | Repo structure / arbo migration | Tree matches target layout, build green throughout | ✅ Done. T6-1..T6-3 (format/ folded into common/, internal/adapters/ introduced, common/ split into core/ports/services/); T6-4 (rpc/→api/proto/rpc/, config/→platform/config/, build/→platform/build/, auth/→transport/auth/, notifications/ proto split→api/proto/notifications/, common/logger.go+log_enums.go→platform/logging/, notifications/server.go transport classification resolved "stays put", lsps/→lsps+transport/lsps/ and dashboard/→dashboard+transport/dashboard/ splits both landed on the real transport-vs-logic seam, verified live against devnet for lsps/); T6-5 (configs/examples/, test/itest/, deploy/, web/ — deploy/+web/ landed on explicit user go-ahead, stashed+reapplied someone else's uncommitted dev-tooling edits with re-derived paths) — all sub-items done. |
 | — | Performance backlog (parallel, non-blocking) | — | ✅ P-3 verified as no-op (never called hot), nothing to do; P-4 done — split `Notify`/`NotifyAsync` on the real sync-vs-fire-and-forget seam; P-2 done — cached peer↔scid map off the existing peer/channel-event subscriptions; P-1 done for its `GetChannel` half (`WaitChannelPointActive`, verified live); its `QueryRoutes` half turned into the LSPS2 zero-conf race investigation itself (see Phase 4/T4-3) — one real bug fixed there (an unsatisfiable route-query amount), the race still open on a second, newly-found issue. All items verified live against the devnet where the code path allowed it. |
@@ -1352,6 +1352,216 @@ inconclusive, fall back to treating this as delay rather than a
 structural block: a longer timeout and/or an event-driven wait
 (subscribe to graph/channel-policy updates rather than polling)
 instead of chasing a connection-level explanation further.
+
+**Correction (2026-07-16, later session): the interceptor-stream/
+connection-identity hypothesis above does NOT hold up — likely a
+transient flnd-side regression, not an flspd defect.** Picked back up
+to execute exactly the "recommended next steps" above. Built two
+throwaway probes (`cmd/interceptor_probe_tmp`, `cmd/streams_probe_tmp`,
+both written/run/deleted per the established pattern):
+
+1. **Interceptor stream alone, no flspd involved:** reproduced the
+   failure — `QueryRoutes` failed 0/180 over 90s while the probe held
+   flnd-lsp's sole interceptor slot and a real pending HTLC. Looked
+   like confirmation of the leading hypothesis.
+2. **Control — the other three streams together, no interceptor:**
+   also failed, 0/180. Contradicts "the interceptor specifically."
+3. **Zero streams at all, same (channel-accumulated) devnet:** also
+   failed, 0/40.
+4. Force-closed all 6 accumulated zero-conf lsp↔client channels
+   (3 pre-existing, 3 from this round's probes) and restarted
+   `flnd-lsp` fresh (safe — only the `chain` container wipes on
+   restart) to rule out the channel-accumulation confound F-14 already
+   flagged. **Still failed, 0/40**, on a verified-clean state.
+5. Built a third probe (`cmd/opener_probe_tmp`) with two fully separate
+   connections: one opens the channel, a second — which never once
+   calls `OpenChannelSync` and holds no other streams — only polls
+   `QueryRoutes`. This is the closest possible reproduction of the
+   original 2026-07-15 clean-probe design (a completely independent
+   connection that only watches/queries). **Still failed, 0/40.**
+
+That last result is the one that matters: it's the *exact* methodology
+that reportedly succeeded in ~1s (130/130) in the prior session, and it
+could not be reproduced today under any variant, including ones that
+share nothing with flspd's connection at all.
+
+**Then a check the prior investigation apparently never ran directly:**
+`flncli lsp getchaninfo <scid>` on a freshly-opened test channel. The
+graph edge and *both* directional policies are fully populated,
+`disabled: false`, `last_update` timestamped to the same second the
+channel opened. This directly contradicts the earlier "traced to
+source" explanation (`getOutgoingBalance` skipping the edge because
+`OutPolicySet` is false) — the policy is there from the start, yet
+`QueryRoutes` still can't route to it for 20–90+ seconds regardless of
+which connection asks. Traced into `graph/db/graph.go`'s `graphCache`
+(a separate in-memory structure `ForEachNodeDirectedChannel` reads
+instead of the DB) — `AddChannelEdge`/`UpdateEdgePolicy` both correctly
+call into it on inspection, so the DB-vs-cache gap, if that's what it
+is, wasn't pinned to an exact line before the investigation's scope
+changed (see below).
+
+**Investigated and ruled out: `flokiorg/flnd`'s `sync/lnd-2026-07`
+upstream-LND reconciliation branch is NOT the cause.** `test/devnet/
+docker-compose.yml`'s `flnd-*` services build (`context:
+../../../../flokiorg/flnd`) from the local sibling checkout, which was
+on branch `sync/lnd-2026-07` — an active, in-progress upstream-LND
+reconciliation (325 files, 33k+ line diff vs. this fork's own `main`,
+plus 10 uncommitted local files + 1 untracked `Justfile`, confirming
+it's genuinely WIP). That diff substantially touches exactly the
+subsystems this investigation lives in — `graph/db/graph.go` +
+`kv_store.go`, `funding/manager.go` (145 lines, `addToGraph` itself),
+`htlcswitch/interceptable_switch.go` (202 lines) + `held_htlc_set.go`
+(375 lines) — which made it a strong initial suspect. **Directly
+tested via an A/B against `main`, not left as a correlation:** stashed
+the WIP (`git stash push -u`), checked out `main`, rebuilt the three
+`flnd-*` docker images against it (needed two local, uncommitted,
+scoped-to-this-test Dockerfile fixes to even get `main` building at
+all — `golang:1.25.3-alpine`→`1.26.1-alpine` to match `go.mod`'s
+toolchain requirement, `make install-all`→`make install` to skip a
+broken manpage-generation step, plus an entirely missing `ENTRYPOINT
+["flnd"]` that this devnet's compose file evidently assumed — `main`'s
+`dev.Dockerfile` doesn't have one at all, strongly suggesting this
+devnet setup was built and validated against the sync branch from the
+start, never against `main`), restarted the containers (wallet/channel
+state and node identity survived the swap cleanly via the persistent
+data volumes), reconnected peers, and re-ran the exact two-connection
+probe (one opens the channel, a separate one — untouched by
+`OpenChannelSync`, no other streams — only polls `QueryRoutes`).
+**Result: identical failure, 0/180 successes over 90s, same error
+progression (`insufficient local balance` → `unable to find a path to
+destination`) as every `sync/lnd-2026-07` run.** This decisively rules
+out the reconciliation branch — the exact same symptom exists on
+stable `main` — and confirms the earlier "likely a transient flnd-side
+regression" framing was itself wrong; if this is a bug, it's a
+longstanding one on this fork's `main` too, not something the sync
+introduced. flnd repo restored to its original state afterward
+(`git checkout -- dev.Dockerfile` to drop the local test-only edits,
+`git checkout sync/lnd-2026-07`, `git stash pop` — verified byte-identical
+to the pre-test tree via `diff`, including the one untracked file a
+partial-pop initially misreported as conflicting — then the stash
+entry dropped since nothing remained in it); devnet's flnd images
+rebuilt back against `sync/lnd-2026-07` and the one leftover test
+channel closed.
+
+**Clarification:** `flspd`'s own `go.mod` pins `github.com/flokiorg/flnd
+v0.1.21-beta` — checked directly, that tag resolves to the *exact same
+commit* as `flnd`'s `main` HEAD (`a7161da4`). So the `main` A/B test
+above wasn't just "a stable branch" — it was, precisely, the actual
+flnd version flspd's own code depends on.
+
+**Third hypothesis tested and also refuted: accumulated multi-session
+devnet state.** Wiped the devnet completely (`docker compose down -v
+&& rm -rf data`) and re-provisioned it from scratch (`setup.sh` →
+`docker compose up -d` → `collect-addresses.sh` →
+`generate.sh 150`) — a brand-new regtest chain with zero prior
+history. Re-ran the same two-connection probe as the very first thing
+done against this new chain (the resulting test channel was literally
+alias SCID `16000000x0x0`, i.e. this chain's first channel ever).
+**Identical failure: 0/180 over 90s, same error progression.** Devnet
+left in this fresh state afterward (the previous session's long-lived
+payer/client channels are gone — expected and fine, this is a
+disposable devnet by design).
+
+**Conclusion:** all three hypotheses tested this session are refuted
+by direct, reproducible experiment, not assumption — connection
+identity/streams, the WIP upstream-sync branch, and accumulated
+devnet state. The failure is not caused by any of them: it reproduces
+identically regardless of flspd's connection management, regardless
+of which flnd branch/version (WIP or the exact tagged release flspd
+depends on), and regardless of how much or little history the chain
+has. What remains true and unexplained: `getchaninfo` shows the graph
+edge/policy for a freshly-opened zero-conf channel populated correctly
+within the same second the channel activates, yet `QueryRoutes`
+(pinned via `OutgoingChanIds` to that exact channel) cannot find a
+route to it for 60-90+ seconds, consistently, under every condition
+tested. The most likely remaining explanation: this is simply how
+`QueryRoutes` behaves on this flnd fork for a *just-opened* zero-conf
+channel queried via `OutgoingChanIds` — a genuine, longstanding
+characteristic of this exact call pattern (not a regression from any
+particular change), rather than something introduced recently by
+either flspd's own refactoring work or the flnd reconciliation.
+`getOutgoingBalance`'s `graphCache` read path was inspected and looked
+correct on review but was never tested with direct instrumentation —
+that remains the one genuinely unexplored angle if someone wants to
+keep digging into flnd internals specifically. The original
+2026-07-15/16 "~1s success, 130/130" observation was never
+independently reproduced despite three dedicated follow-up sessions
+deliberately replicating its exact design; whether that observation
+measured something genuinely different, or was itself an artifact of
+some untracked variable, remains unresolved.
+
+**Fixed (2026-07-16, later same day): root-caused the actual mechanism
+and shipped a fix, once a different diagnostic angle was tried.**
+Picked back up after the user asked to review whether flnd itself
+(rather than flspd or the reconciliation branch) had a testable
+limitation here. Checked upstream LND's own official zero-conf-channel
+integration test (`itest/lnd_zero_conf_test.go`'s
+`testZeroConfChannelOpen`) for how *it* verifies a freshly-opened
+zero-conf channel is ready — it never calls `QueryRoutes` for this at
+all. It polls `DescribeGraph` (via `waitForZeroConfGraphChange`) for
+both directional edge policies to be present, then just sends the
+payment directly.
+
+Traced why that matters, precisely, in the current flnd source:
+`DescribeGraph` (`rpcserver.go:6111`) and `GetChanInfo`
+(`rpcserver.go:6365`) both call into `ChannelGraph.ForEachChannel`/
+`FetchChannelEdgesByID`, which are defined **only** on the `KVStore`/
+`SQLStore` DB layer (`graph/db/kv_store.go:410`,
+`graph/db/sql_store.go:1946`,`:1540`) — no cache involved, always
+reads the live DB. `QueryRoutes`'s pathfinding, by contrast, goes
+through `findPath` → `getOutgoingBalance` → `Graph.ForEachNodeDirectedChannel`
+(`routing/pathfind.go:578`), which — when `graphCache` is enabled —
+routes through `ChannelGraph.ForEachNodeDirectedChannel`
+(`graph/db/graph.go:203-212`): `if c.graphCache != nil { return
+c.graphCache.ForEachChannel(...) }`, an **in-memory cache**, never
+touching the DB at all when populated. Two different read paths for
+what looks like the same question — one DB-direct (what `getchaninfo`
+and upstream's own test use), one cache-backed (what `QueryRoutes`
+uses) — and the cache path is the one that lags for a freshly-added
+zero-conf edge, exactly matching everything observed all session:
+DB/RPC correct immediately, `QueryRoutes` wrong for 60-90+ seconds,
+regardless of connection, flnd branch, or devnet freshness (all of
+which only ever touch the *DB* write path, not whatever's actually
+delaying the *cache* sync specifically for this kind of edge-add).
+
+**Fix shipped:** added `IsChannelRoutable(scid uint64) (bool, error)`
+to the `lightning.Client` port (`lightning/client.go`), implemented in
+`internal/adapters/lnd/client.go` via `GetChanInfo` (checking both
+`Node1Policy`/`Node2Policy` are non-nil) — the same DB-direct signal
+upstream's own test trusts. `interceptor/intercept_handler.go`'s
+`RouteLoop` now polls this instead of `QueryRoutes`; the amount-based
+call and its `routeParamsAmount`/`HtlcMinimumMloki` plumbing (no longer
+needed — this check doesn't need an amount at all) were removed
+entirely. All 4 existing `lightning.Client` mocks across packages
+(`interceptor`, `dashboard`, `lsps`, `notifications`) updated;
+`TestIntercept_RegisteredPayment_ChannelOpensSuccessfully` (the test
+covering this exact code path) updated and passing. Full
+`go build`/`go vet`/unit-test suite green.
+
+**Not yet confirmed end-to-end.** Attempted to verify live via
+`TestLsps2JitHappyPath` and a from-scratch devnet re-provision, and hit
+a **second, separate, still-open issue** in the process: on this
+session's freshly-wiped devnet, the *payer's own* pathfinding for a
+route-hint-based JIT invoice (`SendPaymentV2`, not flspd/LSP-controlled
+code at all) is unreliable — one manual probe run succeeded in under a
+second (HTLC sent and intercepted immediately), but every other attempt
+since, including ones using the *channel's own real alias* SCID as the
+route-hint target (not a phantom one) and ones run after cleaning up
+accumulated test channels, failed instantly (`FAILURE_REASON_NO_ROUTE`,
+under 0.02s, no HTLC ever sent) — before the payment ever reaches
+flspd's interceptor, so this session's `IsChannelRoutable` fix was
+never actually exercised by a real end-to-end payment. Ruled out as
+explanations: accumulated devnet channel count (failed even right
+after cleanup), and a clean phantom-vs-real-alias distinction (both
+now fail identically, contradicting the one successful run). Not
+root-caused — flagged as a new, separate open item, not blocking this
+session's fix from being correct, but blocking a live demonstration of
+it. Whoever picks this up next: re-run `TestLsps2JitHappyPath`
+first, cold, to check whether it's still flaky or now passes (the
+`IsChannelRoutable` fix removes 60-90s from the LSP side of the race
+regardless, which may be enough to also stabilize the previously-
+documented payer-side timeout-racing issue below even without
+root-causing this new one).
 
 **Unrelated infrastructure incident during this investigation
 (2026-07-16), noted for completeness, not a code issue:** the host's

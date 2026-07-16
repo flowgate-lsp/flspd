@@ -58,6 +58,7 @@ func (f *fakeExpiryLightningClient) WalletBalance(context.Context) (*lightning.W
 func (f *fakeExpiryLightningClient) QueryRoutes([]byte, uint64, uint64) ([]*lightning.Route, error) {
 	return nil, nil
 }
+func (f *fakeExpiryLightningClient) IsChannelRoutable(uint64) (bool, error) { return false, nil }
 func (f *fakeExpiryLightningClient) GetNodeInfo(string) (*lightning.NodeInfo, error) {
 	return nil, nil
 }

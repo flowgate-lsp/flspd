@@ -152,6 +152,11 @@ func (m *MockLightningClient) QueryRoutes(destination []byte, amountMloki uint64
 	return res, args.Error(1)
 }
 
+func (m *MockLightningClient) IsChannelRoutable(scid uint64) (bool, error) {
+	args := m.Called(scid)
+	return args.Bool(0), args.Error(1)
+}
+
 func (m *MockLightningClient) GetNodeInfo(pubkey string) (*lightning.NodeInfo, error) {
 	args := m.Called(pubkey)
 	res, _ := args.Get(0).(*lightning.NodeInfo)

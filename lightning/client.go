@@ -90,6 +90,15 @@ type Client interface {
 
 	GetBlockHeight() (uint32, error)
 	QueryRoutes(destination []byte, amountMloki uint64, outgoingChanId uint64) ([]*Route, error)
+	// IsChannelRoutable reports whether scid has both directional policies
+	// present in the graph -- the same signal upstream LND's own zero-conf
+	// itest coverage checks for (DescribeGraph), which reads straight from
+	// the graph DB. Prefer this over QueryRoutes for a "is this freshly
+	// opened channel ready yet" check: QueryRoutes' pathfinding reads from
+	// an in-memory graph cache that can lag well behind the DB for a
+	// locally-added zero-conf edge, even though the DB itself is correct
+	// within the same second the channel activates.
+	IsChannelRoutable(scid uint64) (bool, error)
 	GetNodeInfo(pubkey string) (*NodeInfo, error)
 }
 

@@ -39,8 +39,8 @@ func (f *fakeHistoryStore) AddOpenChannelHtlc(context.Context, *history.OpenChan
 
 // newHappyPathInterceptor extends newTestInterceptor's fixture pattern
 // (open_channel_test.go) with a historyStore, needed once Intercept()'s
-// flow reaches past openChannel into the GetChannel/QueryRoutes polling
-// loops and the history-store writes on success.
+// flow reaches past openChannel into the GetChannel/IsChannelRoutable
+// polling loops and the history-store writes on success.
 func newHappyPathInterceptor(cfg *config.NodeConfig, client *MockLightningClient, store *MockStore, notifier *MockNotifier) *Interceptor {
 	return &Interceptor{
 		config:              config.NewNodeConfigRef(cfg),
@@ -55,8 +55,8 @@ func newHappyPathInterceptor(cfg *config.NodeConfig, client *MockLightningClient
 
 // TestIntercept_RegisteredPayment_ChannelOpensSuccessfully covers the full
 // happy path through Intercept() itself (as opposed to openChannel or the
-// WaitChannelPointActive/QueryRoutes polling loops in isolation, already
-// covered elsewhere): a registered payment with no existing channel
+// WaitChannelPointActive/IsChannelRoutable polling loops in isolation,
+// already covered elsewhere): a registered payment with no existing channel
 // triggers openChannel, and once the mocked client reports the new
 // channel as immediately active and routable (first poll succeeds, so
 // this test doesn't wait out any real ticker), Intercept must resume the
@@ -84,9 +84,7 @@ func TestIntercept_RegisteredPayment_ChannelOpensSuccessfully(t *testing.T) {
 
 	scid := lightning.ShortChannelID(12345)
 	client.On("WaitChannelPointActive", destination, *outpoint, mock.Anything).Return(&lightning.GetChannelResult{ConfirmedScid: &scid}, nil)
-	client.On("QueryRoutes", destination, mock.Anything, uint64(scid)).Return([]*lightning.Route{
-		{Hops: []*lightning.Hop{{ChanId: uint64(scid)}}},
-	}, nil)
+	client.On("IsChannelRoutable", uint64(scid)).Return(true, nil)
 
 	notifier := new(MockNotifier)
 	notifier.On("NotifyAsync", mock.Anything, mock.Anything, mock.Anything).Maybe()
