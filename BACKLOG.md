@@ -1306,11 +1306,15 @@ something specific to flspd's own polling loop or gRPC client
 connection not observing state a fresh, independent call sees.
 **This single data point was not yet cleanly reproduced side-by-side**:
 a follow-up attempt to run a tight, timestamped comparison loop used an
-invalid CLI flag (`--amt_msat` does not exist on `lncli`/`flncli` —
-only whole-loki `--amt`) for its entire duration, invalidating that
-run's "fail" results as CLI usage errors rather than real routing
-failures; a second follow-up attempt hit an unrelated, apparently
-transient devnet connectivity blip (interceptor stream closed before
+invalid CLI flag (guessed `--amt_msat` by analogy with upstream
+Bitcoin-LND's own `lncli queryroutes` flag, without checking first —
+`flncli queryroutes` has no sub-loki-precision flag at all, only
+whole-loki `--amt`; flnd's own CLI help text is itself inconsistent
+about this, still describing some unrelated flags as "msat" rather
+than "mloki") for its entire duration, invalidating that run's "fail"
+results as CLI usage errors rather than real routing failures; a
+second follow-up attempt hit an unrelated, apparently transient devnet
+connectivity blip (interceptor stream closed before
 ever seeing an HTLC, unrelated to the JIT/QueryRoutes path) rather than
 reproducing the comparison. The underlying bug itself reproduced
 normally (~60s timeout, `errNoPathFound`) on the *next* clean attempt
