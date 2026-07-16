@@ -198,6 +198,13 @@ func (i *Interceptor) Intercept(req core.InterceptRequest) core.InterceptResult 
 			}, nil
 		}
 
+		// Tracked so the routing policy (in particular TimeLockDelta, see
+		// UpdateChannelPolicy's doc comment on lightning.Client) is applied
+		// exactly once per channel, right after it's confirmed active below
+		// -- not on every subsequent HTLC/retry that reuses an
+		// already-open channelPoint.
+		justOpened := channelPoint == nil
+
 		// The first htlc of a MPP will open the channel.
 		if channelPoint == nil {
 			// TODO: When opening_fee_params is enforced, turn this check in a temporary channel failure.
@@ -259,7 +266,7 @@ func (i *Interceptor) Intercept(req core.InterceptRequest) core.InterceptResult 
 				log.Info().Msgf("Intercept: Expired registration but current fee is cheaper, proceeding. paymentHash=%s", reqPaymentHashStr)
 			}
 
-			channelPoint, err = i.openChannel(req.PaymentHash, destination, incomingAmountMloki, tag, data.isJit)
+			channelPoint, err = i.openChannel(req.PaymentHash, destination, incomingAmountMloki, outgoingAmountMloki, tag, data.isJit)
 			if err != nil {
 				log.Error().Msgf("paymentHash: %s, openChannel(%x, %v) err: %v", reqPaymentHashStr, destination, incomingAmountMloki, err)
 				if data.orderId != "" {
@@ -318,6 +325,26 @@ func (i *Interceptor) Intercept(req core.InterceptRequest) core.InterceptResult 
 				scid = chanResult.ConfirmedScid
 			}
 
+			var targetScid uint64
+			if scid != nil {
+				targetScid = uint64(*scid)
+			}
+
+			// Routing policy (in particular TimeLockDelta) is applied and
+			// verified inside RouteLoop below, not just once here --
+			// UpdateChannelPolicy's own success return isn't proof the
+			// change actually stuck (see its doc comment on
+			// lightning.Client), and a single unverified call can silently
+			// no-op: confirmed live 2026-07-16, a channel whose
+			// UpdateChannelPolicy call returned no error still showed
+			// time_lock_delta=800 (flnd's own devnet-wide default) in its
+			// own graph record minutes later, with every payer attempt
+			// failing IncorrectCltvExpiry (expected >=800, configured 40)
+			// the whole time. RouteLoop retries the call on every tick
+			// until IsChannelPolicyApplied confirms it, rather than
+			// assuming one attempt is enough.
+			routingPolicy := routingPolicyFor(cfg, data.isJit)
+
 			// Give LND a moment to propagate the new channel state to the
 			// router before resuming, to avoid "no_route" errors -- even
 			// with OutgoingRequestedChanId, the switch link might not be
@@ -342,18 +369,22 @@ func (i *Interceptor) Intercept(req core.InterceptRequest) core.InterceptResult 
 			routeTicker := time.NewTicker(500 * time.Millisecond)
 			defer routeTicker.Stop()
 
-			var targetScid uint64
-			if scid != nil {
-				targetScid = uint64(*scid)
-			}
-
 		RouteLoop:
 			for {
 				routable, err := i.client.IsChannelRoutable(targetScid)
+				policyApplied := true
+				if justOpened {
+					policyApplied, err = i.client.IsChannelPolicyApplied(targetScid, destination, routingPolicy.TimeLockDelta)
+					if err == nil && !policyApplied {
+						if uerr := i.client.UpdateChannelPolicy(*channelPoint, routingPolicy); uerr != nil {
+							log.Warn().Err(uerr).Msgf("Intercept: paymentHash=%s failed to apply channel policy", reqPaymentHashStr)
+						}
+					}
+				}
 				switch {
 				case err != nil:
-					log.Trace().Err(err).Msgf("Intercept: IsChannelRoutable failed (waiting for sync), paymentHash=%s", reqPaymentHashStr)
-				case routable:
+					log.Trace().Err(err).Msgf("Intercept: IsChannelRoutable/IsChannelPolicyApplied failed (waiting for sync), paymentHash=%s", reqPaymentHashStr)
+				case routable && policyApplied:
 					log.Debug().Msgf("Intercept: paymentHash=%s channel %d routable, resuming", reqPaymentHashStr, targetScid)
 					break RouteLoop
 				}
@@ -497,7 +528,7 @@ func (i *Interceptor) notifyAndWait(reqPaymentHashStr string, nextHop []byte, is
 	return nil
 }
 
-func (i *Interceptor) openChannel(paymentHash, destination []byte, incomingAmountMloki int64, tag *string, isJit bool) (*wire.OutPoint, error) {
+func (i *Interceptor) openChannel(paymentHash, destination []byte, incomingAmountMloki, outgoingAmountMloki int64, tag *string, isJit bool) (*wire.OutPoint, error) {
 	// Snapshot once so this channel-open decision is made against one
 	// internally consistent config even if the dashboard updates it
 	// concurrently mid-flight (C-3).
@@ -506,6 +537,29 @@ func (i *Interceptor) openChannel(paymentHash, destination []byte, incomingAmoun
 	capacity := incomingAmountMloki/1000 + cfg.AdditionalChannelCapacity
 	if capacity == cfg.PublicChannelAmount {
 		capacity++
+	}
+
+	// A channel can never actually forward more than ~99% of its own
+	// capacity to the far side: BOLT2 requires the funding party (the LSP,
+	// which puts up 100% of a JIT channel's capacity) to always keep a ~1%
+	// reserve on its own side of the channel, and flnd enforces this at the
+	// link level regardless of what forwarding policy is advertised (see
+	// flnd/server.go's RequiredRemoteMaxValue: capacity - capacity/100).
+	// incomingAmountMloki/1000 + AdditionalChannelCapacity doesn't budget
+	// for this reserve at all, so for a large-enough payment relative to
+	// the fixed padding, capacity*0.99 ends up smaller than
+	// outgoingAmountMloki -- the amount that actually needs to cross the
+	// channel, net of flspd's own JIT opening fee -- and the payment
+	// becomes permanently unroutable no matter how long the payer's client
+	// waits or retries. Root-caused 2026-07-16 from a live
+	// FAILURE_REASON_NO_ROUTE traced to flnd's own advertised
+	// htlc_maximum_msat on the freshly opened channel being smaller than
+	// the forwarded amount. Make sure capacity leaves that reserve on top
+	// of what needs to be forwarded, so AdditionalChannelCapacity is real
+	// headroom above the structural floor rather than partially consumed
+	// by it.
+	if minCapacity := outgoingAmountMloki/1000*100/99 + cfg.AdditionalChannelCapacity; minCapacity > capacity {
+		capacity = minCapacity
 	}
 
 	fee, err := i.feeEstimator.EstimateFeeRate(
@@ -553,23 +607,7 @@ func (i *Interceptor) openChannel(paymentHash, destination []byte, incomingAmoun
 		fee.TargetConf,
 	)
 
-	// For JIT channels, use zero routing fees to avoid circular dependency:
-	// Client pays to their own invoice, so charging routing fees would require
-	// them to pay more than the invoice amount, causing FeeInsufficient errors.
-	var routingPolicy *lightning.RoutingPolicy
-	if isJit {
-		routingPolicy = &lightning.RoutingPolicy{
-			Ppm:           0, // Zero fee rate for JIT
-			BaseMloki:     0, // Zero base fee for JIT
-			TimeLockDelta: cfg.TimeLockDelta,
-		}
-	} else {
-		routingPolicy = &lightning.RoutingPolicy{
-			Ppm:           uint32(cfg.FeeRate * 1_000_000),
-			BaseMloki:     cfg.BaseFeeMloki,
-			TimeLockDelta: cfg.TimeLockDelta,
-		}
-	}
+	routingPolicy := routingPolicyFor(cfg, isJit)
 
 	channelPoint, err := i.client.OpenChannel(&lightning.OpenChannelRequest{
 		Destination:     destination,
@@ -594,6 +632,28 @@ func (i *Interceptor) openChannel(paymentHash, destination []byte, incomingAmoun
 	)
 	err = i.store.SetFundingTx(paymentHash, channelPoint)
 	return channelPoint, err
+}
+
+// routingPolicyFor builds the forwarding policy for a channel opened to
+// service a registered payment. For JIT channels, use zero routing fees to
+// avoid circular dependency: the client pays to their own invoice, so
+// charging routing fees would require them to pay more than the invoice
+// amount, causing FeeInsufficient errors. Shared between openChannel (the
+// initial OpenChannelRequest) and the follow-up UpdateChannelPolicy call
+// once the channel is confirmed active, so both agree on the same policy.
+func routingPolicyFor(cfg *config.NodeConfig, isJit bool) *lightning.RoutingPolicy {
+	if isJit {
+		return &lightning.RoutingPolicy{
+			Ppm:           0, // Zero fee rate for JIT
+			BaseMloki:     0, // Zero base fee for JIT
+			TimeLockDelta: cfg.TimeLockDelta,
+		}
+	}
+	return &lightning.RoutingPolicy{
+		Ppm:           uint32(cfg.FeeRate * 1_000_000),
+		BaseMloki:     cfg.BaseFeeMloki,
+		TimeLockDelta: cfg.TimeLockDelta,
+	}
 }
 
 // computeJitOutgoingAmount derives the amount to forward for an LSPS2 JIT

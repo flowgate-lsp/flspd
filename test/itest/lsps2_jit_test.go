@@ -68,6 +68,8 @@ func TestLsps2JitHappyPath(t *testing.T) {
 		return err == nil && connected
 	}, 20*time.Second, 500*time.Millisecond, "payer must connect to lsp")
 
+	const paymentSizeMloki = 5_000_000_000 // 5,000,000 loki gross
+
 	// JIT only covers the LSP's not-yet-real *last* hop to the client — the
 	// payer still needs an existing, funded, confirmed channel to the LSP to
 	// route the payment through in the first place. Capacity must comfortably
@@ -80,16 +82,37 @@ func TestLsps2JitHappyPath(t *testing.T) {
 	// unconditional new channel every run piles up redundant ones against
 	// the same peer — observed to make pathfinding pick the newest,
 	// not-yet-graph-synced channel and fail the payment with NO_ROUTE.
-	payerChannels, err := payerLightning.ListChannels()
-	require.NoError(t, err)
-	var payerToLspChanId uint64
-	for _, ch := range payerChannels {
-		if hex.EncodeToString(ch.PeerId) == lspInfo.Pubkey && ch.ConfirmedScid != nil {
-			payerToLspChanId = uint64(*ch.ConfirmedScid)
-			break
+	//
+	// Reuse requires enough *local balance* to cover this run's payment,
+	// not just an existing confirmed channel: this same channel gets
+	// reused (and its balance permanently spent down, since every
+	// successful run really does move paymentSizeMloki through it) across
+	// every run against this long-lived devnet, and once it drops below
+	// paymentSizeMloki, every subsequent attempt fails instantly with
+	// FAILURE_REASON_NO_ROUTE / flnd's own "insufficient local balance" --
+	// root-caused 2026-07-16 after this exact symptom had been chased
+	// across multiple earlier sessions as a mysterious, unrelated
+	// payer-side pathfinding bug (see BACKLOG.md). Require comfortably
+	// more than the payment size so the channel's own ~1% reserve doesn't
+	// immediately re-trigger the same failure.
+	minPayerBalanceLoki := int64(2 * (paymentSizeMloki / 1000))
+	sufficientPayerChannel := func() (uint64, bool) {
+		resp, err := payerRaw.ListChannels(ctx, &lnrpc.ListChannelsRequest{})
+		if err != nil {
+			return 0, false
 		}
+		for _, ch := range resp.Channels {
+			if ch.RemotePubkey == lspInfo.Pubkey && ch.Active && ch.LocalBalance >= minPayerBalanceLoki {
+				return ch.ChanId, true
+			}
+		}
+		return 0, false
 	}
-	if payerToLspChanId == 0 {
+
+	var payerToLspChanId uint64
+	if id, ok := sufficientPayerChannel(); ok {
+		payerToLspChanId = id
+	} else {
 		_, err = OpenNormalChannel(ctx, payerRaw, lspInfo.Pubkey, 50_000_000, 1)
 		require.NoError(t, err)
 		require.NoError(t, d.MineBlocks(6))
@@ -100,18 +123,12 @@ func TestLsps2JitHappyPath(t *testing.T) {
 	// it too early fails with FAILURE_REASON_INSUFFICIENT_BALANCE even
 	// though the channel is well-funded.
 	require.Eventually(t, func() bool {
-		resp, err := payerRaw.ListChannels(ctx, &lnrpc.ListChannelsRequest{})
-		if err != nil {
-			return false
+		id, ok := sufficientPayerChannel()
+		if ok {
+			payerToLspChanId = id
 		}
-		for _, ch := range resp.Channels {
-			if ch.RemotePubkey == lspInfo.Pubkey && ch.Active {
-				payerToLspChanId = ch.ChanId
-				return true
-			}
-		}
-		return false
-	}, 30*time.Second, time.Second, "payer<->lsp channel must confirm and become active")
+		return ok
+	}, 30*time.Second, time.Second, "payer<->lsp channel must confirm, activate, and have enough balance")
 	require.NotZero(t, payerToLspChanId)
 	require.Eventually(t, func() bool {
 		channels, err := lspClient.ListChannels()
@@ -128,13 +145,12 @@ func TestLsps2JitHappyPath(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, menu, "LSP must offer at least one opening_fee_params option")
 
-	const paymentSizeMloki = 5_000_000_000 // 5,000,000 loki gross
 	buyResult, err := lsps2Client.Buy(ctx, menu[0], paymentSizeMloki)
 	require.NoError(t, err)
 	require.NotEmpty(t, buyResult.JITChannelScid)
 	assert.Equal(t, lspInfo.Pubkey, buyResult.LspNodeId)
 
-	bolt11, _, err := CreateJitInvoice(ctx, clientRaw, buyResult, paymentSizeMloki, "itest JIT purchase")
+	bolt11, _, err := CreateJitInvoice(ctx, clientRaw, buyResult, menu[0], paymentSizeMloki, "itest JIT purchase")
 	require.NoError(t, err)
 	require.NotEmpty(t, bolt11)
 

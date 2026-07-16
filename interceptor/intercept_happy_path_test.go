@@ -84,7 +84,9 @@ func TestIntercept_RegisteredPayment_ChannelOpensSuccessfully(t *testing.T) {
 
 	scid := lightning.ShortChannelID(12345)
 	client.On("WaitChannelPointActive", destination, *outpoint, mock.Anything).Return(&lightning.GetChannelResult{ConfirmedScid: &scid}, nil)
+	client.On("UpdateChannelPolicy", *outpoint, mock.Anything).Return(nil)
 	client.On("IsChannelRoutable", uint64(scid)).Return(true, nil)
+	client.On("IsChannelPolicyApplied", uint64(scid), destination, mock.Anything).Return(true, nil)
 
 	notifier := new(MockNotifier)
 	notifier.On("NotifyAsync", mock.Anything, mock.Anything, mock.Anything).Maybe()

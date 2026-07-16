@@ -31,6 +31,12 @@ func (f *fakeExpiryLightningClient) IsConnected([]byte) (bool, error)           
 func (f *fakeExpiryLightningClient) OpenChannel(*lightning.OpenChannelRequest) (*wire.OutPoint, error) {
 	return nil, nil
 }
+func (f *fakeExpiryLightningClient) UpdateChannelPolicy(wire.OutPoint, *lightning.RoutingPolicy) error {
+	return nil
+}
+func (f *fakeExpiryLightningClient) IsChannelPolicyApplied(uint64, []byte, uint32) (bool, error) {
+	return false, nil
+}
 func (f *fakeExpiryLightningClient) GetChannel([]byte, wire.OutPoint) (*lightning.GetChannelResult, error) {
 	return nil, nil
 }

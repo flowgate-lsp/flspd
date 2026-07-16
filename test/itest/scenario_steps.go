@@ -202,6 +202,7 @@ type lsps2BuyParams struct {
 // lsps2BuySaved bundles what later steps need to build/pay the JIT invoice.
 type lsps2BuySaved struct {
 	Result           *lsps.Lsps2BuyResult
+	FeeParams        lsps.Lsps2OpeningFeeParams
 	PaymentSizeMloki uint64
 }
 
@@ -242,7 +243,7 @@ func stepLsps2Buy(t *testing.T, sc *ScenarioContext, params *yaml.Node) error {
 	if err != nil {
 		return fmt.Errorf("lsps2 buy: %w", err)
 	}
-	return sc.save(p.SaveAs, &lsps2BuySaved{Result: result, PaymentSizeMloki: p.PaymentSizeMloki})
+	return sc.save(p.SaveAs, &lsps2BuySaved{Result: result, FeeParams: menu[0], PaymentSizeMloki: p.PaymentSizeMloki})
 }
 
 // --- create_jit_invoice: {as: <role>, from: <save_as ref>, memo: str, save_as: name} ---
@@ -276,7 +277,7 @@ func stepCreateJitInvoice(t *testing.T, sc *ScenarioContext, params *yaml.Node) 
 	if err != nil {
 		return err
 	}
-	bolt11, _, err := CreateJitInvoice(sc.Ctx, asRaw, buy.Result, buy.PaymentSizeMloki, p.Memo)
+	bolt11, _, err := CreateJitInvoice(sc.Ctx, asRaw, buy.Result, buy.FeeParams, buy.PaymentSizeMloki, p.Memo)
 	if err != nil {
 		return fmt.Errorf("creating jit invoice: %w", err)
 	}

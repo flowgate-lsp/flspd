@@ -75,6 +75,11 @@ func (m *MockLightningClient) OpenChannel(req *lightning.OpenChannelRequest) (*w
 	return res, args.Error(1)
 }
 
+func (m *MockLightningClient) UpdateChannelPolicy(channelPoint wire.OutPoint, policy *lightning.RoutingPolicy) error {
+	args := m.Called(channelPoint, policy)
+	return args.Error(0)
+}
+
 func (m *MockLightningClient) GetChannel(peerID []byte, channelPoint wire.OutPoint) (*lightning.GetChannelResult, error) {
 	args := m.Called(peerID, channelPoint)
 	res, _ := args.Get(0).(*lightning.GetChannelResult)
@@ -154,6 +159,11 @@ func (m *MockLightningClient) QueryRoutes(destination []byte, amountMloki uint64
 
 func (m *MockLightningClient) IsChannelRoutable(scid uint64) (bool, error) {
 	args := m.Called(scid)
+	return args.Bool(0), args.Error(1)
+}
+
+func (m *MockLightningClient) IsChannelPolicyApplied(scid uint64, peerPubkey []byte, timeLockDelta uint32) (bool, error) {
+	args := m.Called(scid, peerPubkey, timeLockDelta)
 	return args.Bool(0), args.Error(1)
 }
 

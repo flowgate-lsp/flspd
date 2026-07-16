@@ -76,6 +76,21 @@ type Client interface {
 	GetInfo() (*GetInfoResult, error)
 	IsConnected(destination []byte) (bool, error)
 	OpenChannel(req *OpenChannelRequest) (*wire.OutPoint, error)
+	// UpdateChannelPolicy sets policy (fees + CLTV delta) on an
+	// already-open channel. This is deliberately separate from
+	// OpenChannel: OpenChannelSync has no CLTV-delta field, but applying
+	// it via a follow-up call *immediately* after OpenChannelSync returns
+	// -- before the channel's own link is registered -- silently
+	// no-ops the CLTV delta specifically, even though the RPC reports no
+	// error and the fee fields do take effect (confirmed live
+	// 2026-07-16: the channel stayed stuck at flnd's own devnet-wide
+	// default of 800 blocks instead of the requested 40, which by itself
+	// was enough to make every forwarding attempt fail with
+	// hop.FinalHtlcInvalidCltv -- initially indistinguishable from the
+	// unrelated payer-side pathfinding issues chased across earlier
+	// sessions, see BACKLOG.md). Callers must wait for the channel to be
+	// confirmed active (WaitChannelPointActive) before calling this.
+	UpdateChannelPolicy(channelPoint wire.OutPoint, policy *RoutingPolicy) error
 	GetChannel(peerID []byte, channelPoint wire.OutPoint) (*GetChannelResult, error)
 	WaitChannelPointActive(peerID []byte, channelPoint wire.OutPoint, deadline time.Time) (*GetChannelResult, error)
 	GetPeerId(scid *ShortChannelID) ([]byte, error)
@@ -99,6 +114,13 @@ type Client interface {
 	// locally-added zero-conf edge, even though the DB itself is correct
 	// within the same second the channel activates.
 	IsChannelRoutable(scid uint64) (bool, error)
+	// IsChannelPolicyApplied reports whether the local node's own
+	// advertised policy for scid already shows timeLockDelta. Needed
+	// because UpdateChannelPolicy's own success return doesn't guarantee
+	// this yet -- see its doc comment for why. peerPubkey identifies
+	// which side of the channel is the remote peer, so the other side
+	// can be checked as "ours".
+	IsChannelPolicyApplied(scid uint64, peerPubkey []byte, timeLockDelta uint32) (bool, error)
 	GetNodeInfo(pubkey string) (*NodeInfo, error)
 }
 

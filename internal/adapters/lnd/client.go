@@ -466,24 +466,33 @@ func (c *LndClient) OpenChannel(req *lightning.OpenChannelRequest) (*wire.OutPoi
 		return nil, err
 	}
 
-	// If a routing policy was provided with a TimeLockDelta, we need to update the channel policy
-	// since OpenChannelSync does not support setting the TimeLockDelta during creation.
-	if req.RoutingPolicy != nil && req.RoutingPolicy.TimeLockDelta > 0 {
-		_, err = c.client.UpdateChannelPolicy(context.Background(), &lnrpc.PolicyUpdateRequest{
-			Scope: &lnrpc.PolicyUpdateRequest_ChanPoint{
-				ChanPoint: channelPoint,
-			},
-			BaseFeeMsat:   int64(req.RoutingPolicy.BaseMloki),
-			FeeRate:       float64(req.RoutingPolicy.Ppm) / 1_000_000,
-			TimeLockDelta: req.RoutingPolicy.TimeLockDelta,
-		})
-		if err != nil {
-			log.Error().Msgf("LND: failed to update channel policy with TimeLockDelta %d: %v", req.RoutingPolicy.TimeLockDelta, err)
-			// We don't return error here because the channel is already opened.
-		}
-	}
+	// TimeLockDelta (and any other routing policy) is applied separately,
+	// once the channel is confirmed active -- see UpdateChannelPolicy's
+	// doc comment on lightning.Client for why doing it here, immediately
+	// after OpenChannelSync returns, doesn't reliably take effect.
 
 	return result, nil
+}
+
+func (c *LndClient) UpdateChannelPolicy(channelPoint wire.OutPoint, policy *lightning.RoutingPolicy) error {
+	if policy == nil {
+		return nil
+	}
+
+	_, err := c.client.UpdateChannelPolicy(context.Background(), &lnrpc.PolicyUpdateRequest{
+		Scope: &lnrpc.PolicyUpdateRequest_ChanPoint{
+			ChanPoint: &lnrpc.ChannelPoint{
+				FundingTxid: &lnrpc.ChannelPoint_FundingTxidBytes{
+					FundingTxidBytes: channelPoint.Hash[:],
+				},
+				OutputIndex: channelPoint.Index,
+			},
+		},
+		BaseFeeMsat:   int64(policy.BaseMloki),
+		FeeRate:       float64(policy.Ppm) / 1_000_000,
+		TimeLockDelta: policy.TimeLockDelta,
+	})
+	return err
 }
 
 func (c *LndClient) GetChannel(peerID []byte, channelPoint wire.OutPoint) (*lightning.GetChannelResult, error) {
@@ -1013,4 +1022,27 @@ func (c *LndClient) IsChannelRoutable(scid uint64) (bool, error) {
 		return false, err
 	}
 	return edge.Node1Policy != nil && edge.Node2Policy != nil, nil
+}
+
+func (c *LndClient) IsChannelPolicyApplied(scid uint64, peerPubkey []byte, timeLockDelta uint32) (bool, error) {
+	edge, err := c.client.GetChanInfo(context.Background(), &lnrpc.ChanInfoRequest{ChanId: scid})
+	if err != nil {
+		if status.Code(err) == codes.NotFound {
+			return false, nil
+		}
+		return false, err
+	}
+
+	peerHex := hex.EncodeToString(peerPubkey)
+	var ourPolicy *lnrpc.RoutingPolicy
+	switch peerHex {
+	case edge.Node1Pub:
+		ourPolicy = edge.Node2Policy
+	case edge.Node2Pub:
+		ourPolicy = edge.Node1Policy
+	default:
+		return false, fmt.Errorf("peer %s is neither side of channel %d", peerHex, scid)
+	}
+
+	return ourPolicy != nil && ourPolicy.TimeLockDelta == timeLockDelta, nil
 }

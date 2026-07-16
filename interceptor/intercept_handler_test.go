@@ -7,7 +7,6 @@ import (
 	"github.com/flokiorg/go-flokicoin/wire"
 	"github.com/flowgate-lsp/flspd/core"
 	"github.com/flowgate-lsp/flspd/lightning"
-	"github.com/flowgate-lsp/flspd/platform/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )
@@ -209,55 +208,10 @@ func TestComputeJitOutgoingAmount(t *testing.T) {
 	}
 }
 
-// TestOpenChannel_CapacityLogic verifies that padding and floor are correctly applied
-func TestOpenChannel_CapacityLogic(t *testing.T) {
-	tests := []struct {
-		name                string
-		incomingAmountMloki int64
-		padding             int64
-		minFloor            uint64
-		expectedCapacity    int64
-	}{
-		{
-			name:                "Small payment + Padding hits Floor",
-			incomingAmountMloki: 100 * 1000, // 100 sat
-			padding:             21000,
-			minFloor:            20000,
-			expectedCapacity:    21100, // 100 + 21000
-		},
-		{
-			name:                "Tiny payment + Small padding floors",
-			incomingAmountMloki: 100 * 1000,
-			padding:             500,
-			minFloor:            20000,
-			expectedCapacity:    20000, // Floor!
-		},
-		{
-			name:                "Large payment + Padding",
-			incomingAmountMloki: 500000 * 1000,
-			padding:             21000,
-			minFloor:            20000,
-			expectedCapacity:    521000,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			interceptor := &Interceptor{
-				config: config.NewNodeConfigRef(&config.NodeConfig{
-					AdditionalChannelCapacity: tt.padding,
-					MinChannelCapacityLoki:    tt.minFloor,
-				}),
-			}
-
-			// Verify the math in openChannel
-			cfg := interceptor.config.Load()
-			capacity := tt.incomingAmountMloki/1000 + cfg.AdditionalChannelCapacity
-			if uint64(capacity) < cfg.MinChannelCapacityLoki {
-				capacity = int64(cfg.MinChannelCapacityLoki)
-			}
-
-			assert.Equal(t, tt.expectedCapacity, capacity, "Capacity calculation mismatch")
-		})
-	}
-}
+// Capacity-sizing behavior (padding, network floor, and the reserve floor
+// that guarantees outgoingAmountMloki is actually forwardable) is covered
+// by the real-call tests in open_channel_test.go
+// (TestOpenChannel_Success_NonJitUsesConfiguredRoutingFee,
+// TestOpenChannel_RejectsCapacityBelowNetworkFloor,
+// TestOpenChannel_CapacityLeavesRoomForChannelReserve), which exercise
+// openChannel itself rather than a standalone copy of its math.

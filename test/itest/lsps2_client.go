@@ -209,26 +209,59 @@ func (c *Lsps2Client) Buy(ctx context.Context, params lsps.Lsps2OpeningFeeParams
 	return &buyResult, nil
 }
 
-// CreateJitInvoice builds a bolt11 invoice for amountMloki with a single
-// route hint through the LSP at the phantom JIT SCID lsps2.buy returned —
-// this is what tells the payer's router "route through this node using
-// this (not-yet-real) channel," which is what triggers flspd's HTLC
-// interceptor to open the real channel on receipt.
-func CreateJitInvoice(ctx context.Context, clientRaw lnrpc.LightningClient, buyResult *lsps.Lsps2BuyResult, amountMloki uint64, memo string) (string, []byte, error) {
+// CreateJitInvoice builds a bolt11 invoice for paymentSizeMloki (the amount
+// the payer will actually send) with a single route hint through the LSP at
+// the phantom JIT SCID lsps2.buy returned — this is what tells the payer's
+// router "route through this node using this (not-yet-real) channel," which
+// is what triggers flspd's HTLC interceptor to open the real channel on
+// receipt.
+//
+// This LSP only implements LSPS2's client_trusts_lsp=false mode (see
+// handler_lsps2.go's Lsps2BuyResult, which hardcodes ClientTrustsLsp:
+// false), meaning it forwards paymentSizeMloki *minus its own opening fee*,
+// not the full amount. The invoice's own amount must therefore be that net
+// amount, not the gross payment size, or the client's own link rejects the
+// forwarded HTLC outright: the final hop's onion payload would declare the
+// gross amount while the actual delivered HTLC carries less, which BOLT04
+// treats as underpaying (hop.FinalHtlcInvalidAmount) — reproduced live
+// 2026-07-16 ("expected <=4980079681 mSAT, got 5000000000 mSAT") and
+// initially misread as a payer-side pathfinding/flakiness bug across
+// several earlier sessions before being traced here (see BACKLOG.md). The
+// route hint's own FeeBaseMsat carries the opening fee so the payer's
+// pathfinding adds it back on top of the net amount when computing how
+// much to actually send — exactly how a real LSPS2 wallet derives both
+// numbers from the quoted opening_fee_params, replicated here to match
+// flspd's own split exactly (interceptor/intercept_handler.go's
+// computeJitOutgoingAmount).
+func CreateJitInvoice(ctx context.Context, clientRaw lnrpc.LightningClient, buyResult *lsps.Lsps2BuyResult, feeParams lsps.Lsps2OpeningFeeParams, paymentSizeMloki uint64, memo string) (string, []byte, error) {
 	scid, err := lightning.NewShortChannelIDFromString(buyResult.JITChannelScid)
 	if err != nil {
 		return "", nil, fmt.Errorf("parsing jit_channel_scid: %w", err)
 	}
 
+	minFeeMloki, err := strconv.ParseUint(feeParams.MinFeeMloki, 10, 64)
+	if err != nil {
+		return "", nil, fmt.Errorf("parsing min_fee_mloki: %w", err)
+	}
+
+	rate := float64(feeParams.Proportional) / 1_000_000.0
+	netMloki := uint64(float64(paymentSizeMloki) / (1.0 + rate))
+	fee := paymentSizeMloki - netMloki
+	if fee < minFeeMloki {
+		fee = minFeeMloki
+		netMloki = paymentSizeMloki - fee
+	}
+
 	inv := &lnrpc.Invoice{
 		Memo:      memo,
-		ValueMsat: int64(amountMloki),
+		ValueMsat: int64(netMloki),
 		RouteHints: []*lnrpc.RouteHint{
 			{
 				HopHints: []*lnrpc.HopHint{
 					{
 						NodeId:          buyResult.LspNodeId,
 						ChanId:          uint64(*scid),
+						FeeBaseMsat:     uint32(fee),
 						CltvExpiryDelta: uint32(buyResult.LspCltvExpiryDelta),
 					},
 				},
