@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/flokiorg/flnd/lnrpc"
+	"github.com/flokiorg/flnd/lnrpc/invoicesrpc"
 	"github.com/flowgate-lsp/flspd/core"
 	"github.com/flowgate-lsp/flspd/platform/config"
 
@@ -80,7 +80,7 @@ func TestHandleLsps1CreateOrder_Matrix(t *testing.T) {
 					MinFeeMloki: 1000, Proportional: 100,
 				}}, nil)
 				os.On("CountLsps1Orders", mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
-				lc.On("AddInvoice", mock.Anything, mock.Anything).Return(&lnrpc.AddInvoiceResponse{PaymentRequest: "lnbc..."}, nil)
+				lc.On("AddHoldInvoice", mock.Anything, mock.Anything).Return(&invoicesrpc.AddHoldInvoiceResp{PaymentRequest: "lnbc..."}, nil)
 				os.On("RegisterLsps1Order", mock.Anything).Return(nil)
 				notif.On("NotifyOrderStateChanged", mock.Anything, mock.Anything, "CREATED", "", "").Return(true, nil)
 			},
@@ -241,9 +241,9 @@ func TestHandleLsps1CreateOrder_FeeMatchesUnifiedFeeFunction(t *testing.T) {
 		MinFeeMloki: minFeeMloki, Proportional: proportional,
 	}}, nil)
 	mockOS.On("CountLsps1Orders", mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
-	mockLC.On("AddInvoice", mock.Anything, mock.MatchedBy(func(inv *lnrpc.Invoice) bool {
-		return inv.Value == wantFeeLoki // clientBalance is 0, so order total == fee
-	})).Return(&lnrpc.AddInvoiceResponse{PaymentRequest: "lnbc..."}, nil)
+	mockLC.On("AddHoldInvoice", mock.Anything, mock.MatchedBy(func(req *invoicesrpc.AddHoldInvoiceRequest) bool {
+		return req.Value == wantFeeLoki // clientBalance is 0, so order total == fee
+	})).Return(&invoicesrpc.AddHoldInvoiceResp{PaymentRequest: "lnbc..."}, nil)
 	mockOS.On("RegisterLsps1Order", mock.MatchedBy(func(order *core.Lsps1Order) bool {
 		return order.FeeTotalLoki == wantFeeLoki
 	})).Return(nil)

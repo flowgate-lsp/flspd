@@ -2,12 +2,14 @@ package lsps
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"time"
 
-	"github.com/flokiorg/flnd/lnrpc"
+	"github.com/flokiorg/flnd/lnrpc/invoicesrpc"
 	"github.com/flowgate-lsp/flspd/core"
 	"github.com/flowgate-lsp/flspd/platform/logging"
 	"github.com/rs/zerolog/log"
@@ -340,10 +342,26 @@ func (s *Handlers) handleLsps1CreateOrder(req *JsonRpcRequest, peer []byte) *Jso
 
 	orderTotal := clientBalance + feeLoki
 
-	// Generate Invoice
+	// Generate a hold invoice: the LSP (not LND) generates and holds the
+	// preimage, so the payer's HTLC is only ACCEPTED, not settled, until
+	// settlement_service decides the channel open will actually happen --
+	// letting a failed order be cancelled (instant, on-chain-fee-free)
+	// instead of requiring the slow RefundOnchainAddress path.
+	var preimage [32]byte
+	if _, err := rand.Read(preimage[:]); err != nil {
+		log.Error().
+			Err(err).
+			Str("component", string(logging.LogComponentLSPS1)).
+			Str("action", string(logging.LogActionFailure)).
+			Msg("LSPS1: Failed to generate hold invoice preimage")
+		return NewJsonRpcErrorResponse(req.Id, -32603, "Internal error creating invoice", nil)
+	}
+	paymentHash := sha256.Sum256(preimage[:])
+
 	memo := "Inbound Liquidity Order"
-	inv, err := s.lndClient.AddInvoice(context.Background(), &lnrpc.Invoice{
+	inv, err := s.lndClient.AddHoldInvoice(context.Background(), &invoicesrpc.AddHoldInvoiceRequest{
 		Memo:    memo,
+		Hash:    paymentHash[:],
 		Value:   int64(orderTotal),
 		Expiry:  int64(orderExpiry.Seconds()),
 		Private: true,
@@ -353,13 +371,14 @@ func (s *Handlers) handleLsps1CreateOrder(req *JsonRpcRequest, peer []byte) *Jso
 			Err(err).
 			Str("component", string(logging.LogComponentLSPS1)).
 			Str("action", string(logging.LogActionFailure)).
-			Msg("LSPS1: Failed to create LND invoice for order")
+			Msg("LSPS1: Failed to create LND hold invoice for order")
 		return NewJsonRpcErrorResponse(req.Id, -32603, "Internal error creating invoice", nil)
 	}
 
 	orderID, _ := generateUUID()
 	now := time.Now()
 	expiry := now.Add(orderExpiry)
+	preimageHex := hex.EncodeToString(preimage[:])
 
 	// Persist Order
 	order := &core.Lsps1Order{
@@ -376,6 +395,7 @@ func (s *Handlers) handleLsps1CreateOrder(req *JsonRpcRequest, peer []byte) *Jso
 		OrderState:                   string(Lsps1OrderStateCreated),
 		PaymentState:                 string(Lsps1PaymentStateExpectPayment),
 		PaymentInvoice:               inv.PaymentRequest,
+		PaymentPreimage:              &preimageHex,
 		RefundOnchainAddress:         params.RefundOnchainAddress,
 		OrderTotalLoki:               int64(orderTotal),
 		FeeTotalLoki:                 int64(feeLoki),

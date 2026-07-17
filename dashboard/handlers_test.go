@@ -343,6 +343,16 @@ func (m *MockLightningClient) LookupInvoiceState(ctx context.Context, paymentReq
 	return args.Get(0).(lightning.InvoiceState), args.Error(1)
 }
 
+func (m *MockLightningClient) SettleInvoice(ctx context.Context, preimage []byte) error {
+	args := m.Called(ctx, preimage)
+	return args.Error(0)
+}
+
+func (m *MockLightningClient) CancelInvoice(ctx context.Context, paymentHash []byte) error {
+	args := m.Called(ctx, paymentHash)
+	return args.Error(0)
+}
+
 func TestDashboardService_RPC(t *testing.T) {
 	mockNodes := new(MockNodesService)
 	mockOpeningSvc := new(MockOpeningService)

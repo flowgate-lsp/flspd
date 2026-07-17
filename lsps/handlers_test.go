@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/flokiorg/flnd/lnrpc"
+	"github.com/flokiorg/flnd/lnrpc/invoicesrpc"
 	btcec "github.com/flokiorg/go-flokicoin/crypto"
 	"github.com/flowgate-lsp/flspd/core"
 	"github.com/flowgate-lsp/flspd/platform/config"
@@ -42,6 +43,14 @@ func (m *MockLndClient) AddInvoice(ctx context.Context, req *lnrpc.Invoice) (*ln
 		return nil, args.Error(1)
 	}
 	return args.Get(0).(*lnrpc.AddInvoiceResponse), args.Error(1)
+}
+
+func (m *MockLndClient) AddHoldInvoice(ctx context.Context, req *invoicesrpc.AddHoldInvoiceRequest) (*invoicesrpc.AddHoldInvoiceResp, error) {
+	args := m.Called(ctx, req)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*invoicesrpc.AddHoldInvoiceResp), args.Error(1)
 }
 
 func (m *MockLndClient) GetBlockHeight() (uint32, error) {
@@ -405,8 +414,8 @@ func TestLsps1CreateOrder(t *testing.T) {
 	// Mock Liquidity Check (Success)
 	mockLiquidity.On("CheckOnChainLiquidity", mock.Anything, mock.Anything).Return(nil)
 
-	// Mock AddInvoice
-	mockLnd.On("AddInvoice", mock.Anything, mock.AnythingOfType("*lnrpc.Invoice")).Return(&lnrpc.AddInvoiceResponse{
+	// Mock AddHoldInvoice
+	mockLnd.On("AddHoldInvoice", mock.Anything, mock.AnythingOfType("*invoicesrpc.AddHoldInvoiceRequest")).Return(&invoicesrpc.AddHoldInvoiceResp{
 		PaymentRequest: "lnbcrt1...",
 	}, nil)
 

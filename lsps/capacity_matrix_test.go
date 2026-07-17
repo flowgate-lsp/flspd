@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/flokiorg/flnd/lnrpc"
+	"github.com/flokiorg/flnd/lnrpc/invoicesrpc"
 	btcec "github.com/flokiorg/go-flokicoin/crypto"
 	"github.com/flowgate-lsp/flspd/core"
 	"github.com/flowgate-lsp/flspd/platform/config"
@@ -167,7 +167,7 @@ func verifyLsps1Capacity(t *testing.T, tc matrixScenario, minFloor uint64) {
 	liquidity.On("CheckOnChainLiquidity", mock.Anything, mock.Anything).Return(nil)
 	store.On("GetFeeParamsMenu", mock.Anything, mock.Anything).Return([]*core.OpeningFeeParams{}, nil)
 	store.On("CountLsps1Orders", mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
-	lnd.On("AddInvoice", mock.Anything, mock.Anything).Return(&lnrpc.AddInvoiceResponse{}, nil)
+	lnd.On("AddHoldInvoice", mock.Anything, mock.Anything).Return(&invoicesrpc.AddHoldInvoiceResp{}, nil)
 	store.On("RegisterLsps1Order", mock.Anything).Return(nil)
 	notif.On("NotifyOrderStateChanged", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(true, nil)
 

@@ -58,6 +58,8 @@ func (f *fakeExpiryLightningClient) SubscribeInvoices() (<-chan *lightning.Invoi
 func (f *fakeExpiryLightningClient) LookupInvoiceState(context.Context, string) (lightning.InvoiceState, error) {
 	return 0, nil
 }
+func (f *fakeExpiryLightningClient) SettleInvoice(context.Context, []byte) error { return nil }
+func (f *fakeExpiryLightningClient) CancelInvoice(context.Context, []byte) error { return nil }
 func (f *fakeExpiryLightningClient) WalletBalance(context.Context) (*lightning.WalletBalanceResult, error) {
 	return nil, nil
 }

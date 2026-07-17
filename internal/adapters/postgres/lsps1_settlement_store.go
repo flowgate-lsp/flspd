@@ -10,10 +10,10 @@ import (
 // GetLsps1OrderByPaymentInvoice retrieves an LSPS1 order by its payment invoice string
 func (s *PostgresOpeningStore) GetLsps1OrderByPaymentInvoice(paymentInvoice string) (*core.Lsps1Order, error) {
 	row := s.pool.QueryRow(context.Background(),
-		`SELECT order_id, peer_id, lsp_balance_loki, client_balance_loki, 
-			funding_confirms_within_blocks, required_channel_confirmations, 
-			channel_expiry_blocks, token, announce_channel, created_at, 
-			order_state, payment_state, payment_invoice, funding_txid, funding_outpoint,
+		`SELECT order_id, peer_id, lsp_balance_loki, client_balance_loki,
+			funding_confirms_within_blocks, required_channel_confirmations,
+			channel_expiry_blocks, token, announce_channel, created_at,
+			order_state, payment_state, payment_invoice, payment_preimage, funding_txid, funding_outpoint,
 			COALESCE(refund_onchain_address, ''), COALESCE(order_total_loki, 0), COALESCE(fee_total_loki, 0)
 		FROM lsps1.orders WHERE payment_invoice=$1`, paymentInvoice)
 
@@ -22,7 +22,7 @@ func (s *PostgresOpeningStore) GetLsps1OrderByPaymentInvoice(paymentInvoice stri
 		&order.OrderId, &order.PeerId, &order.LspBalanceLoki, &order.ClientBalanceLoki,
 		&order.FundingConfirmsWithinBlocks, &order.RequiredChannelConfirmations,
 		&order.ChannelExpiryBlocks, &order.Token, &order.AnnounceChannel, &order.CreatedAt,
-		&order.OrderState, &order.PaymentState, &order.PaymentInvoice, &order.FundingTxid, &order.FundingOutpoint,
+		&order.OrderState, &order.PaymentState, &order.PaymentInvoice, &order.PaymentPreimage, &order.FundingTxid, &order.FundingOutpoint,
 		&order.RefundOnchainAddress, &order.OrderTotalLoki, &order.FeeTotalLoki,
 	)
 	if err != nil {
@@ -63,12 +63,12 @@ func (s *PostgresOpeningStore) GetPaidLsps1Order(clientNodeId string) (*core.Lsp
 	// We want orders that are PAID but don't have a channel (FundingTxid is null/empty)
 	// Ordered by created_at ASC to process oldest first (FIFO)
 	row := s.pool.QueryRow(context.Background(),
-		`SELECT order_id, peer_id, lsp_balance_loki, client_balance_loki, 
-			funding_confirms_within_blocks, required_channel_confirmations, 
-			channel_expiry_blocks, token, announce_channel, created_at, 
-			order_state, payment_state, payment_invoice, funding_txid, funding_outpoint,
+		`SELECT order_id, peer_id, lsp_balance_loki, client_balance_loki,
+			funding_confirms_within_blocks, required_channel_confirmations,
+			channel_expiry_blocks, token, announce_channel, created_at,
+			order_state, payment_state, payment_invoice, payment_preimage, funding_txid, funding_outpoint,
 			COALESCE(refund_onchain_address, ''), COALESCE(order_total_loki, 0), COALESCE(fee_total_loki, 0)
-		 FROM lsps1.orders 
+		 FROM lsps1.orders
 		 WHERE peer_id=$1 AND order_state='PAID' AND (funding_txid IS NULL OR funding_txid = '')
 		 ORDER BY created_at ASC LIMIT 1`, clientNodeId)
 
@@ -77,7 +77,7 @@ func (s *PostgresOpeningStore) GetPaidLsps1Order(clientNodeId string) (*core.Lsp
 		&order.OrderId, &order.PeerId, &order.LspBalanceLoki, &order.ClientBalanceLoki,
 		&order.FundingConfirmsWithinBlocks, &order.RequiredChannelConfirmations,
 		&order.ChannelExpiryBlocks, &order.Token, &order.AnnounceChannel, &order.CreatedAt,
-		&order.OrderState, &order.PaymentState, &order.PaymentInvoice, &order.FundingTxid, &order.FundingOutpoint,
+		&order.OrderState, &order.PaymentState, &order.PaymentInvoice, &order.PaymentPreimage, &order.FundingTxid, &order.FundingOutpoint,
 		&order.RefundOnchainAddress, &order.OrderTotalLoki, &order.FeeTotalLoki,
 	)
 	if err != nil {
@@ -90,12 +90,12 @@ func (s *PostgresOpeningStore) GetPaidLsps1Order(clientNodeId string) (*core.Lsp
 // ordered by created_at ASC (FIFO).
 func (s *PostgresOpeningStore) GetPaidLsps1Orders(clientNodeId string) ([]*core.Lsps1Order, error) {
 	rows, err := s.pool.Query(context.Background(),
-		`SELECT order_id, peer_id, lsp_balance_loki, client_balance_loki, 
-			funding_confirms_within_blocks, required_channel_confirmations, 
-			channel_expiry_blocks, token, announce_channel, created_at, 
-			order_state, payment_state, payment_invoice, funding_txid, funding_outpoint,
+		`SELECT order_id, peer_id, lsp_balance_loki, client_balance_loki,
+			funding_confirms_within_blocks, required_channel_confirmations,
+			channel_expiry_blocks, token, announce_channel, created_at,
+			order_state, payment_state, payment_invoice, payment_preimage, funding_txid, funding_outpoint,
 			COALESCE(refund_onchain_address, ''), COALESCE(order_total_loki, 0), COALESCE(fee_total_loki, 0)
-		 FROM lsps1.orders 
+		 FROM lsps1.orders
 		 WHERE peer_id=$1 AND order_state='PAID' AND (funding_txid IS NULL OR funding_txid = '')
 		 ORDER BY created_at ASC`, clientNodeId)
 	if err != nil {
@@ -110,7 +110,7 @@ func (s *PostgresOpeningStore) GetPaidLsps1Orders(clientNodeId string) ([]*core.
 			&order.OrderId, &order.PeerId, &order.LspBalanceLoki, &order.ClientBalanceLoki,
 			&order.FundingConfirmsWithinBlocks, &order.RequiredChannelConfirmations,
 			&order.ChannelExpiryBlocks, &order.Token, &order.AnnounceChannel, &order.CreatedAt,
-			&order.OrderState, &order.PaymentState, &order.PaymentInvoice, &order.FundingTxid, &order.FundingOutpoint,
+			&order.OrderState, &order.PaymentState, &order.PaymentInvoice, &order.PaymentPreimage, &order.FundingTxid, &order.FundingOutpoint,
 			&order.RefundOnchainAddress, &order.OrderTotalLoki, &order.FeeTotalLoki,
 		)
 		if err != nil {
@@ -125,12 +125,12 @@ func (s *PostgresOpeningStore) GetPaidLsps1Orders(clientNodeId string) ([]*core.
 // Used for startup recovery to retry orders that were stuck when flspd was down.
 func (s *PostgresOpeningStore) GetAllPaidLsps1Orders() ([]*core.Lsps1Order, error) {
 	rows, err := s.pool.Query(context.Background(),
-		`SELECT order_id, peer_id, lsp_balance_loki, client_balance_loki, 
-			funding_confirms_within_blocks, required_channel_confirmations, 
-			channel_expiry_blocks, token, announce_channel, created_at, 
-			order_state, payment_state, payment_invoice, funding_txid, funding_outpoint,
+		`SELECT order_id, peer_id, lsp_balance_loki, client_balance_loki,
+			funding_confirms_within_blocks, required_channel_confirmations,
+			channel_expiry_blocks, token, announce_channel, created_at,
+			order_state, payment_state, payment_invoice, payment_preimage, funding_txid, funding_outpoint,
 			COALESCE(refund_onchain_address, ''), COALESCE(order_total_loki, 0), COALESCE(fee_total_loki, 0)
-		 FROM lsps1.orders 
+		 FROM lsps1.orders
 		 WHERE order_state='PAID' AND (funding_txid IS NULL OR funding_txid = '')
 		 ORDER BY created_at ASC`)
 	if err != nil {
@@ -145,7 +145,7 @@ func (s *PostgresOpeningStore) GetAllPaidLsps1Orders() ([]*core.Lsps1Order, erro
 			&order.OrderId, &order.PeerId, &order.LspBalanceLoki, &order.ClientBalanceLoki,
 			&order.FundingConfirmsWithinBlocks, &order.RequiredChannelConfirmations,
 			&order.ChannelExpiryBlocks, &order.Token, &order.AnnounceChannel, &order.CreatedAt,
-			&order.OrderState, &order.PaymentState, &order.PaymentInvoice, &order.FundingTxid, &order.FundingOutpoint,
+			&order.OrderState, &order.PaymentState, &order.PaymentInvoice, &order.PaymentPreimage, &order.FundingTxid, &order.FundingOutpoint,
 			&order.RefundOnchainAddress, &order.OrderTotalLoki, &order.FeeTotalLoki,
 		)
 		if err != nil {
@@ -163,7 +163,7 @@ func (s *PostgresOpeningStore) GetAllCreatedLsps1Orders() ([]*core.Lsps1Order, e
 		`SELECT order_id, peer_id, lsp_balance_loki, client_balance_loki,
 			funding_confirms_within_blocks, required_channel_confirmations,
 			channel_expiry_blocks, token, announce_channel, created_at,
-			order_state, payment_state, payment_invoice, funding_txid, funding_outpoint,
+			order_state, payment_state, payment_invoice, payment_preimage, funding_txid, funding_outpoint,
 			COALESCE(refund_onchain_address, ''), COALESCE(order_total_loki, 0), COALESCE(fee_total_loki, 0)
 		 FROM lsps1.orders
 		 WHERE order_state='CREATED'
@@ -180,7 +180,7 @@ func (s *PostgresOpeningStore) GetAllCreatedLsps1Orders() ([]*core.Lsps1Order, e
 			&order.OrderId, &order.PeerId, &order.LspBalanceLoki, &order.ClientBalanceLoki,
 			&order.FundingConfirmsWithinBlocks, &order.RequiredChannelConfirmations,
 			&order.ChannelExpiryBlocks, &order.Token, &order.AnnounceChannel, &order.CreatedAt,
-			&order.OrderState, &order.PaymentState, &order.PaymentInvoice, &order.FundingTxid, &order.FundingOutpoint,
+			&order.OrderState, &order.PaymentState, &order.PaymentInvoice, &order.PaymentPreimage, &order.FundingTxid, &order.FundingOutpoint,
 			&order.RefundOnchainAddress, &order.OrderTotalLoki, &order.FeeTotalLoki,
 		)
 		if err != nil {

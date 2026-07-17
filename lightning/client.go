@@ -101,6 +101,17 @@ type Client interface {
 	ListPeers() ([]*Peer, error)
 	SubscribeInvoices() (<-chan *InvoiceUpdate, <-chan error, error)
 	LookupInvoiceState(ctx context.Context, paymentRequest string) (InvoiceState, error)
+	// SettleInvoice releases a held (ACCEPTED) hold invoice's HTLCs by
+	// revealing preimage, the point of no return for a hold-invoice
+	// payment: call only once the LSP is actually committed (e.g. the
+	// funding tx for the channel it was paying for has been broadcast).
+	SettleInvoice(ctx context.Context, preimage []byte) error
+	// CancelInvoice releases a held (ACCEPTED) hold invoice's HTLCs back
+	// to the payer without settling -- the instant-refund path: the
+	// payer's HTLC fails back through the route immediately, no on-chain
+	// transaction required. Safe to call even if the invoice was never
+	// accepted (cancelling an OPEN or already-CANCELED invoice succeeds).
+	CancelInvoice(ctx context.Context, paymentHash []byte) error
 	WalletBalance(ctx context.Context) (*WalletBalanceResult, error)
 
 	GetBlockHeight() (uint32, error)

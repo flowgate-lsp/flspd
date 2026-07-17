@@ -139,6 +139,16 @@ func (m *MockLightningClient) LookupInvoiceState(ctx context.Context, paymentReq
 	return state, args.Error(1)
 }
 
+func (m *MockLightningClient) SettleInvoice(ctx context.Context, preimage []byte) error {
+	args := m.Called(ctx, preimage)
+	return args.Error(0)
+}
+
+func (m *MockLightningClient) CancelInvoice(ctx context.Context, paymentHash []byte) error {
+	args := m.Called(ctx, paymentHash)
+	return args.Error(0)
+}
+
 func (m *MockLightningClient) WalletBalance(ctx context.Context) (*lightning.WalletBalanceResult, error) {
 	args := m.Called(ctx)
 	res, _ := args.Get(0).(*lightning.WalletBalanceResult)

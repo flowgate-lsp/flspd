@@ -9,6 +9,7 @@ import (
 	"strconv"
 
 	"github.com/flokiorg/flnd/lnrpc"
+	"github.com/flokiorg/flnd/lnrpc/invoicesrpc"
 	"github.com/flowgate-lsp/flspd/core"
 	"github.com/flowgate-lsp/flspd/ports"
 )
@@ -21,6 +22,12 @@ import (
 // job.
 type LndClientWrapper interface {
 	AddInvoice(ctx context.Context, req *lnrpc.Invoice) (*lnrpc.AddInvoiceResponse, error)
+	// AddHoldInvoice is used instead of AddInvoice for new LSPS1 orders
+	// (T-hold-invoice): it lets settlement hold the payment until the
+	// channel open actually succeeds, so a failed order can be cancelled
+	// -- an instant, on-chain-fee-free refund -- instead of requiring the
+	// slow RefundOnchainAddress path.
+	AddHoldInvoice(ctx context.Context, req *invoicesrpc.AddHoldInvoiceRequest) (*invoicesrpc.AddHoldInvoiceResp, error)
 }
 
 // NotificationService interface for sending LSPS5 webhook notifications

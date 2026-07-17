@@ -14,6 +14,7 @@ import (
 
 	"github.com/flokiorg/flnd/lnrpc"
 	"github.com/flokiorg/flnd/lnrpc/chainrpc"
+	"github.com/flokiorg/flnd/lnrpc/invoicesrpc"
 	"github.com/flokiorg/flnd/lnrpc/routerrpc"
 	"github.com/flokiorg/go-flokicoin/chaincfg/chainhash"
 	"github.com/flokiorg/go-flokicoin/wire"
@@ -28,6 +29,7 @@ import (
 type LndClient struct {
 	client              lnrpc.LightningClient
 	routerClient        routerrpc.RouterClient
+	invoicesClient      invoicesrpc.InvoicesClient
 	chainNotifierClient chainrpc.ChainNotifierClient
 	conn                *grpc.ClientConn
 	listenerCtx         context.Context
@@ -106,10 +108,12 @@ func NewLndClient(conf *config.LndConfig) (*LndClient, error) {
 
 	client := lnrpc.NewLightningClient(conn)
 	routerClient := routerrpc.NewRouterClient(conn)
+	invoicesClient := invoicesrpc.NewInvoicesClient(conn)
 	chainNotifierClient := chainrpc.NewChainNotifierClient(conn)
 	return &LndClient{
 		client:              client,
 		routerClient:        routerClient,
+		invoicesClient:      invoicesClient,
 		chainNotifierClient: chainNotifierClient,
 		conn:                conn,
 		peersubs:            make(map[string]map[uint64]chan struct{}),
@@ -923,6 +927,24 @@ func (c *LndClient) SubscribeCustomMessages(ctx context.Context, req *lnrpc.Subs
 
 func (c *LndClient) AddInvoice(ctx context.Context, req *lnrpc.Invoice) (*lnrpc.AddInvoiceResponse, error) {
 	return c.client.AddInvoice(ctx, req)
+}
+
+// AddHoldInvoice creates a hold invoice tied to req.Hash: unlike AddInvoice,
+// LND never sees the preimage and cannot settle this invoice on its own --
+// the caller must hold onto the preimage and call SettleInvoice or
+// CancelInvoice once it knows whether to accept the payment.
+func (c *LndClient) AddHoldInvoice(ctx context.Context, req *invoicesrpc.AddHoldInvoiceRequest) (*invoicesrpc.AddHoldInvoiceResp, error) {
+	return c.invoicesClient.AddHoldInvoice(ctx, req)
+}
+
+func (c *LndClient) SettleInvoice(ctx context.Context, preimage []byte) error {
+	_, err := c.invoicesClient.SettleInvoice(ctx, &invoicesrpc.SettleInvoiceMsg{Preimage: preimage})
+	return err
+}
+
+func (c *LndClient) CancelInvoice(ctx context.Context, paymentHash []byte) error {
+	_, err := c.invoicesClient.CancelInvoice(ctx, &invoicesrpc.CancelInvoiceMsg{PaymentHash: paymentHash})
+	return err
 }
 
 // LookupInvoiceState decodes the payment request to obtain the payment hash,

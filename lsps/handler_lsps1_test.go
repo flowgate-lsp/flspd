@@ -1,11 +1,13 @@
 package lsps
 
 import (
+	"bytes"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"testing"
 
-	"github.com/flokiorg/flnd/lnrpc"
+	"github.com/flokiorg/flnd/lnrpc/invoicesrpc"
 	"github.com/flowgate-lsp/flspd/core"
 	"github.com/flowgate-lsp/flspd/platform/config"
 	"github.com/stretchr/testify/assert"
@@ -39,9 +41,9 @@ func TestTableHandleLsps1CreateOrder(t *testing.T) {
 			peerId: "02677063d89856f4d04be859e9a4d3393165b6f3cd78641bc3c4ef9ca2fde37f",
 			mockSetup: func(store *MockOpeningStore, lnd *MockLightningClient, nodes *MockNodesService, liquidity *MockLiquidityManager, notif *MockNotificationService) {
 				store.On("CountLsps1Orders", mock.Anything, string(Lsps1OrderStateCreated), mock.Anything).Return(0, nil)
-				lnd.On("AddInvoice", mock.Anything, mock.MatchedBy(func(inv *lnrpc.Invoice) bool {
-					return inv.Value >= 100 // Client balance + fee
-				})).Return(&lnrpc.AddInvoiceResponse{PaymentRequest: "lnbc1..."}, nil)
+				lnd.On("AddHoldInvoice", mock.Anything, mock.MatchedBy(func(req *invoicesrpc.AddHoldInvoiceRequest) bool {
+					return req.Value >= 100 // Client balance + fee
+				})).Return(&invoicesrpc.AddHoldInvoiceResp{PaymentRequest: "lnbc1..."}, nil)
 				store.On("RegisterLsps1Order", mock.MatchedBy(func(order *core.Lsps1Order) bool {
 					return order.ClientBalanceLoki == 100 && order.LspBalanceLoki == 0 &&
 						order.OrderState == string(Lsps1OrderStateCreated)
@@ -95,12 +97,26 @@ func TestTableHandleLsps1CreateOrder(t *testing.T) {
 			},
 			peerId: "02677063d89856f4d04be859e9a4d3393165b6f3cd78641bc3c4ef9ca2fde37f",
 			mockSetup: func(store *MockOpeningStore, lnd *MockLightningClient, nodes *MockNodesService, liquidity *MockLiquidityManager, notif *MockNotificationService) {
+				var capturedHash []byte
 				store.On("CountLsps1Orders", mock.Anything, string(Lsps1OrderStateCreated), mock.Anything).Return(0, nil)
-				lnd.On("AddInvoice", mock.Anything, mock.MatchedBy(func(inv *lnrpc.Invoice) bool {
-					return inv.Value >= 1000000 // At least client balance + fee
-				})).Return(&lnrpc.AddInvoiceResponse{PaymentRequest: "lnbc1..."}, nil)
+				lnd.On("AddHoldInvoice", mock.Anything, mock.MatchedBy(func(req *invoicesrpc.AddHoldInvoiceRequest) bool {
+					capturedHash = req.Hash
+					return req.Value >= 1000000 && len(req.Hash) == 32 // At least client balance + fee, real sha256 hash
+				})).Return(&invoicesrpc.AddHoldInvoiceResp{PaymentRequest: "lnbc1..."}, nil)
 				store.On("RegisterLsps1Order", mock.MatchedBy(func(order *core.Lsps1Order) bool {
-					return order.ClientBalanceLoki == 1000000 && order.LspBalanceLoki == 5000000 &&
+					// The order's stored preimage must actually back the hash
+					// handed to AddHoldInvoice -- otherwise the invoice would
+					// be unsettleable.
+					if order.PaymentPreimage == nil {
+						return false
+					}
+					preimage, err := hex.DecodeString(*order.PaymentPreimage)
+					if err != nil || len(preimage) != 32 {
+						return false
+					}
+					hash := sha256.Sum256(preimage)
+					return bytes.Equal(hash[:], capturedHash) &&
+						order.ClientBalanceLoki == 1000000 && order.LspBalanceLoki == 5000000 &&
 						order.OrderState == string(Lsps1OrderStateCreated) &&
 						order.PaymentState == string(Lsps1PaymentStateExpectPayment)
 				})).Return(nil)

@@ -48,13 +48,21 @@ type Lsps1Order struct {
 	OrderState                   string    `json:"state"`
 	PaymentState                 string    `json:"payment_state"`
 	PaymentInvoice               string    `json:"payment_invoice"`
-	FundingTxid                  *string   `json:"funding_txid"`
-	FundingOutpoint              *int      `json:"funding_outpoint"`
-	RefundOnchainAddress         string    `json:"refund_onchain_address"`
-	OrderTotalLoki               int64     `json:"amount"` // Mapped to 'amount' for frontend simplicity
-	FeeTotalLoki                 int64     `json:"fee"`    // Mapped to 'fee' for frontend simplicity
-	PeerAlias                    string    `json:"peer_alias"`
-	PeerColor                    string    `json:"peer_color"`
+	// PaymentPreimage is the LSP-generated hex-encoded preimage backing a
+	// hold invoice (PaymentInvoice's payment hash is sha256 of this).
+	// Never serialize this to any external response -- it's the secret
+	// that authorizes settling the invoice, so json:"-" keeps it out of
+	// any accidental json.Marshal(order) (e.g. an admin/dashboard
+	// listing). Nil for orders created before hold invoices, or for
+	// orders that still use the legacy AddInvoice flow.
+	PaymentPreimage      *string `json:"-"`
+	FundingTxid          *string `json:"funding_txid"`
+	FundingOutpoint      *int    `json:"funding_outpoint"`
+	RefundOnchainAddress string  `json:"refund_onchain_address"`
+	OrderTotalLoki       int64   `json:"amount"` // Mapped to 'amount' for frontend simplicity
+	FeeTotalLoki         int64   `json:"fee"`    // Mapped to 'fee' for frontend simplicity
+	PeerAlias            string  `json:"peer_alias"`
+	PeerColor            string  `json:"peer_color"`
 }
 
 type Lsps5Webhook struct {
