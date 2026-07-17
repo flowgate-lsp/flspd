@@ -142,7 +142,7 @@ func (s *channelOpenerServer) RegisterPayment(
 			MinMloki:             uint64(cfg.ChannelMinimumFeeMloki),
 			Proportional:         uint32(cfg.ChannelFeePermyriad * 100),
 			ValidUntil:           time.Now().UTC().Add(time.Duration(time.Hour * 24)).Format(common.TimeFormat),
-			MaxIdleTime:          uint32(cfg.MaxInactiveDuration / 600),
+			MaxIdleTime:          uint32(cfg.MaxInactiveDuration / 60), // seconds -> blocks (1 min/block)
 			MaxClientToSelfDelay: uint32(10000),
 		}
 	}

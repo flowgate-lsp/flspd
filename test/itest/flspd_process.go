@@ -151,7 +151,7 @@ func NewFlspdProcess(t *testing.T, d *Devnet, pg *PostgresContainer, opts FlspdP
 		MinHtlcMloki:              600,
 		BaseFeeMloki:              1000,
 		FeeRate:                   0.000001,
-		TimeLockDelta:             40,
+		TimeLockDelta:             800, // matches flnd's chain-wide default (chainreg.DefaultFlokicoinTimeLockDelta)
 		ChannelFeePermyriad:       40,
 		ChannelMinimumFeeMloki:    1000,
 		AdditionalChannelCapacity: 21000,

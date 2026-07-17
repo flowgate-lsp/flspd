@@ -223,7 +223,7 @@ func (i *Interceptor) Intercept(req core.InterceptRequest) core.InterceptResult 
 					MinFeeMloki:          uint64(cfg.ChannelMinimumFeeMloki),
 					Proportional:         uint32(cfg.ChannelFeePermyriad * 100),
 					ValidUntil:           time.Now().UTC().Add(validity).Format(common.TimeFormat),
-					MinLifetime:          uint32(cfg.MaxInactiveDuration / 600),
+					MinLifetime:          uint32(cfg.MaxInactiveDuration / 60), // seconds -> blocks (1 min/block)
 					MaxClientToSelfDelay: maxDelay,
 				}
 			}
@@ -774,7 +774,7 @@ func (i *Interceptor) resolvePayment(req core.InterceptRequest) (*interceptData,
 						MinFeeMloki:          uint64(cfg.ChannelMinimumFeeMloki),
 						Proportional:         uint32(cfg.ChannelFeePermyriad * 100),
 						ValidUntil:           time.Now().Add(validity).Format(common.TimeFormat),
-						MinLifetime:          uint32(cfg.MaxInactiveDuration / 600),
+						MinLifetime:          uint32(cfg.MaxInactiveDuration / 60), // seconds -> blocks (1 min/block)
 						MaxClientToSelfDelay: maxDelay,
 					}
 

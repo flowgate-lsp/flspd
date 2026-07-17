@@ -84,14 +84,14 @@ var profilePresets = map[string]profilePreset{
 	// CLTV delta, longer-lived channels expected, short-lived offers so
 	// stale fee quotes can't be exploited if market conditions move.
 	"conservative": {
-		targetConf: 6, minConfs: 6, timeLockDelta: 576,
+		targetConf: 6, minConfs: 6, timeLockDelta: 5760, // ~4 days at 1 min/block
 		maxInactiveDurationSecs: 7_776_000, // 90 days
 		lsps1OrderExpirySecs:    3600,      // 1 hour
 		jitValidUntilSecs:       3600,      // 1 hour
 	},
 	// balanced: matches this repo's own nodes.sample.yaml baseline.
 	"balanced": {
-		targetConf: 6, minConfs: 3, timeLockDelta: 400,
+		targetConf: 6, minConfs: 3, timeLockDelta: 4000, // ~2.8 days at 1 min/block
 		maxInactiveDurationSecs: 3_888_000, // 45 days
 		lsps1OrderExpirySecs:    86_400,    // 24 hours
 		jitValidUntilSecs:       86_400,    // 24 hours
@@ -100,7 +100,7 @@ var profilePresets = map[string]profilePreset{
 	// (minConfs: 0), a short CLTV delta, and longer-lived offers/channels
 	// (more tolerant of idle/slow-to-settle clients).
 	"aggressive": {
-		targetConf: 1, minConfs: 0, timeLockDelta: 144,
+		targetConf: 1, minConfs: 0, timeLockDelta: 1440, // 1 day at 1 min/block
 		maxInactiveDurationSecs: 1_296_000, // 15 days
 		lsps1OrderExpirySecs:    172_800,   // 48 hours
 		jitValidUntilSecs:       172_800,   // 48 hours
