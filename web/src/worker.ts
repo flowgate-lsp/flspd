@@ -13,7 +13,12 @@ export default {
     // Unconditionally proxy all /api requests
     if (url.pathname.startsWith('/api')) {
       shouldProxy = true;
-    } 
+    }
+    // /info is the backend's public status endpoint (no auth, no UI route
+    // of its own to protect) -- always proxy it.
+    else if (url.pathname === '/info') {
+      shouldProxy = true;
+    }
     // Proxy /dashboard ONLY for API calls (POST) or WebSockets (Upgrade)
     // This allows GET requests for /dashboard to serve the React UI from ASSETS
     else if (url.pathname.startsWith('/dashboard')) {

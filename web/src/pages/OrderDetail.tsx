@@ -1,9 +1,59 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { GlassCard } from '../components/GlassCard';
-import { ArrowLeft, Clock, Zap, Hash, ExternalLink, Copy, CheckCircle, AlertCircle, Loader2, Activity, CornerUpRight } from 'lucide-react';
+import { ArrowLeft, Clock, Zap, Hash, ExternalLink, Copy, CheckCircle, AlertCircle, Loader2, Activity, CornerUpRight, Info } from 'lucide-react';
 import { useFormatAmount, cn } from '../lib/utils';
+import { orderStatusTone, ORDER_STATUS_PILL_CLASS, type StatusTone } from '../lib/orderStatus';
 import { useAuth } from '../hooks/useAuth';
 import { DashboardAPI } from '../lib/api';
+
+// What each order state actually means for an operator right now. The tone
+// comes from the shared orderStatusTone (state + payment_state together --
+// see lib/orderStatus.ts for why FAILED alone isn't enough); this just adds
+// the plain-language explanation for whichever tone that resolves to.
+function getStatusMessage(order: any): { tone: StatusTone; title: string; body: string } {
+  const tone = orderStatusTone(order.state, order.payment_state);
+  switch (order.state) {
+    case 'CREATED':
+      return { tone, title: 'Awaiting payment', body: "The invoice hasn't been paid yet. Nothing is held or owed until it is." };
+    case 'PAID':
+      return { tone, title: 'Payment received, channel opening', body: 'The client has paid. flspd is opening the channel automatically.' };
+    case 'COMPLETED':
+      return { tone, title: 'Delivered successfully', body: 'The channel opened and confirmed. Inbound liquidity is live.' };
+    case 'FAILED':
+      if (tone !== 'error') {
+        return { tone, title: 'Resolved automatically', body: "The hold invoice didn't convert to a channel in time. It auto-cancelled and the client's payment failed back on its own — no action needed." };
+      }
+      return { tone, title: 'Needs review', body: 'This order failed after payment was already captured, and it was not automatically refunded. Worth a manual look.' };
+    case 'EXPIRED':
+      return { tone, title: 'Expired unpaid', body: 'The order expired before the client paid. Nothing was ever captured.' };
+    default:
+      return { tone, title: order.state, body: '' };
+  }
+}
+
+const TONE_BANNER_CLASS: Record<StatusTone, string> = {
+  good: 'border-secondary/30 bg-secondary/5',
+  active: 'border-primary/30 bg-primary/5',
+  warn: 'border-tertiary/30 bg-tertiary/5',
+  neutral: 'border-outline bg-white/[0.02]',
+  error: 'border-error/30 bg-error/5',
+};
+
+const TONE_ICON_CLASS: Record<StatusTone, string> = {
+  good: 'text-secondary bg-secondary/10 border-secondary/30',
+  active: 'text-primary bg-primary/10 border-primary/30',
+  warn: 'text-tertiary bg-tertiary/10 border-tertiary/30',
+  neutral: 'text-on-surface-variant bg-white/5 border-outline',
+  error: 'text-error bg-error/10 border-error/30',
+};
+
+const TONE_BLOB_CLASS: Record<StatusTone, string> = {
+  good: 'bg-secondary/5',
+  active: 'bg-primary/5',
+  warn: 'bg-tertiary/5',
+  neutral: 'bg-on-surface-variant/5',
+  error: 'bg-error/5',
+};
 
 interface OrderDetailProps {
   orderId: string;
@@ -87,17 +137,17 @@ export const OrderDetail: React.FC<OrderDetailProps> = ({ orderId, onBack }) => 
 
   const order = data.order;
   const timeline = data.timeline || [];
-
-  const stateColor = order.state === 'COMPLETED' ? 'text-secondary border-secondary/20 bg-secondary/5' :
-                     order.state === 'FAILED' ? 'text-error border-error/20 bg-error/5' : 
-                     'text-primary border-primary/20 bg-primary/5';
+  const status = getStatusMessage(order);
+  const paymentColor: Record<StatusTone, string> = {
+    good: 'text-secondary', active: 'text-primary', warn: 'text-tertiary', neutral: 'text-on-surface-variant', error: 'text-error',
+  };
 
   return (
     <div className="p-6 md:p-10 max-w-6xl mx-auto space-y-12 animate-in fade-in slide-in-from-bottom-2 duration-500">
       {/* Back + Header */}
       <div className="space-y-4">
         <button onClick={onBack} className="flex items-center gap-3 text-on-surface-variant hover:text-white text-[11px] font-black uppercase tracking-[0.2em] transition-all group italic">
-          <ArrowLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" /> Retruncate Matrix
+          <ArrowLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" /> Back to Orders
         </button>
         <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-8 pb-8">
           <div className="space-y-4">
@@ -113,20 +163,33 @@ export const OrderDetail: React.FC<OrderDetailProps> = ({ orderId, onBack }) => 
               </span>
             </div>
           </div>
-          
-          <div className={cn("px-6 py-3 rounded-2xl border text-xs font-black italic uppercase tracking-[0.2em] shadow-xl flex items-center gap-4 transition-all duration-700", stateColor)}>
-             <div className="w-2 h-2 rounded-full bg-current animate-pulse shadow-[0_0_10px_currentColor]" />
+
+          <div className={cn("px-6 py-3 rounded-2xl border text-xs font-black italic uppercase tracking-[0.2em] shadow-xl flex items-center gap-4 transition-all duration-700", ORDER_STATUS_PILL_CLASS[status.tone])}>
+             <div className={cn("w-2 h-2 rounded-full bg-current shadow-[0_0_10px_currentColor]", status.tone === 'active' && "animate-pulse")} />
              {order.state}
           </div>
         </div>
       </div>
 
+      {/* Status banner -- what this state actually means, not just the badge */}
+      {status.body && (
+        <div className={cn("flex items-start gap-4 rounded-2xl border p-5", TONE_BANNER_CLASS[status.tone])}>
+          <div className={cn("w-9 h-9 rounded-xl border flex items-center justify-center shrink-0", TONE_ICON_CLASS[status.tone])}>
+            {status.tone === 'good' ? <CheckCircle className="w-4 h-4" /> : status.tone === 'error' ? <AlertCircle className="w-4 h-4" /> : <Info className="w-4 h-4" />}
+          </div>
+          <div>
+            <p className="text-sm font-bold text-white">{status.title}</p>
+            <p className="text-[13px] text-on-surface-variant mt-1 leading-relaxed max-w-[62ch]">{status.body}</p>
+          </div>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-10 items-start">
         {/* Main Details Panel */}
         <GlassCard className="lg:col-span-2 p-10 space-y-12 shadow-2xl relative overflow-hidden group">
-          <div className="absolute top-0 right-0 w-64 h-64 bg-primary/5 blur-[120px] rounded-full opacity-30 group-hover:opacity-60 transition-opacity" />
-          
-          <div className="flex items-center gap-3 pb-4 border-b border-white/5">
+          <div className={cn("absolute top-0 right-0 w-64 h-64 blur-[120px] rounded-full opacity-30 group-hover:opacity-60 transition-opacity", TONE_BLOB_CLASS[status.tone])} />
+
+          <div className="flex items-center gap-3 pb-4 border-b border-outline-variant">
             <Activity className="w-4 h-4 text-primary" />
             <h2 className="text-[11px] font-semibold text-on-surface uppercase tracking-[0.25em]">Operational Parameters</h2>
           </div>
@@ -139,7 +202,7 @@ export const OrderDetail: React.FC<OrderDetailProps> = ({ orderId, onBack }) => 
             <DetailRow label="Inbound Window" value={`${order.funding_confirms_within_blocks} Blocks`} />
             <DetailRow label="Channel TTL" value={`${order.channel_expiry_blocks} Blocks`} />
             <DetailRow label="Public Announce" value={order.announce_channel ? 'ENABLED' : 'DISABLED'} color={order.announce_channel ? 'text-secondary' : 'text-on-surface'} />
-            <DetailRow label="Payment State" value={order.payment_state} color="text-tertiary" />
+            <DetailRow label="Payment State" value={order.payment_state} color={paymentColor[status.tone]} />
           </div>
 
           {/* Persistent Cryptographic Identifiers */}
@@ -186,14 +249,14 @@ export const OrderDetail: React.FC<OrderDetailProps> = ({ orderId, onBack }) => 
 
         {/* Temporal Sequence / Timeline */}
         <GlassCard className="lg:col-span-1 p-10 space-y-10 h-full flex flex-col shadow-2xl">
-          <div className="flex items-center justify-between pb-4 border-b border-white/5">
+          <div className="flex items-center justify-between pb-4 border-b border-outline-variant">
             <h2 className="text-[11px] font-semibold text-on-surface uppercase tracking-[0.25em]">Sequence</h2>
             <Clock className="w-4 h-4 text-on-surface-variant" />
           </div>
           
           <div className="space-y-0 relative flex-1">
             {/* Timeline Line */}
-            <div className="absolute left-[19px] top-4 bottom-4 w-[2px] bg-white/5 shadow-inner" />
+            <div className="absolute left-[19px] top-4 bottom-4 w-[2px] bg-outline-variant shadow-inner" />
             
             {timeline.map((event: any, i: number) => {
               const Icon = timelineIcons[event.event] || Clock;
@@ -219,7 +282,7 @@ export const OrderDetail: React.FC<OrderDetailProps> = ({ orderId, onBack }) => 
                     </p>
                     
                     {txMatch ? (
-                      <div className="bg-black/40 border border-white/5 p-2 rounded-lg mt-2 inline-flex items-center gap-2 group/txLink hover:bg-white/10 transition-all">
+                      <div className="bg-surface-container-low/70 border border-outline-variant p-2 rounded-lg mt-2 inline-flex items-center gap-2 group/txLink hover:bg-white/10 transition-all">
                         <span className="text-[9px] font-mono text-on-surface uppercase font-semibold tracking-tight">TX: </span>
                         <a 
                           href={`https://lokichain.info/tx/${txMatch[1]}`}
@@ -273,9 +336,9 @@ const CopyableField: React.FC<{
 }> = ({ label, value, copied, onCopy, explorerUrl }) => (
   <div className="group/field">
     {label && <p className="text-[10px] font-mono text-on-surface uppercase tracking-[0.15em] mb-2 font-semibold leading-none">{label}</p>}
-    <div className="flex items-center gap-3 p-4 rounded-2xl bg-black/40 border border-white/10 group-focus-within:border-primary/40 transition-all duration-500 hover:bg-white/[0.03]">
+    <div className="flex items-center gap-3 p-4 rounded-2xl bg-surface-container-low/70 border border-outline group-focus-within:border-primary/40 transition-all duration-500 hover:bg-white/[0.04]">
       <code className="text-[11px] font-mono text-on-background/80 truncate flex-1 font-bold group-hover/field:text-white transition-colors">{value}</code>
-      <div className="flex items-center gap-2 border-l border-white/10 pl-3">
+      <div className="flex items-center gap-2 border-l border-outline pl-3">
         <button
           onClick={() => onCopy(value, label)}
           className="p-2 text-on-surface-variant hover:text-white rounded-xl hover:bg-white/10 transition-all shrink-0 active:scale-90"

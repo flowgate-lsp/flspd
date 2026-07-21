@@ -37,8 +37,8 @@ export const JITChannels: React.FC = () => {
         </div>
         
         <div className="flex gap-4">
-          <GlassCard className="p-0 border-white/5 bg-surface-container-lowest/30 overflow-hidden">
-            <div className="px-5 py-3 flex items-center gap-4 group focus-within:bg-white/[0.02] transition-all">
+          <GlassCard className="p-0 border-outline-variant bg-surface-container-lowest/60 overflow-hidden">
+            <div className="px-5 py-3 flex items-center gap-4 group focus-within:bg-white/[0.03] transition-all">
                <Search className="w-4 h-4 text-on-surface-variant group-focus-within:text-secondary transition-colors" />
                <input 
                  type="text" 
@@ -55,11 +55,11 @@ export const JITChannels: React.FC = () => {
       {loading ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {[1, 2, 3, 4, 5, 6].map(i => (
-            <div key={i} className="h-64 bg-white/[0.02] animate-pulse rounded-3xl border border-white/5 shadow-xl" />
+            <div key={i} className="h-64 bg-surface-container-low/60 animate-pulse rounded-3xl border border-outline-variant shadow-xl" />
           ))}
         </div>
       ) : filteredChannels.length === 0 ? (
-        <div className="py-20 text-center rounded-2xl border-2 border-dashed border-white/5 bg-white/[0.01] flex flex-col items-center justify-center gap-4">
+        <div className="py-20 text-center rounded-2xl border-2 border-dashed border-outline-variant bg-surface-container-low/40 flex flex-col items-center justify-center gap-4">
           <div className="p-4 rounded-full bg-white/5 text-on-surface-variant/20">
             <Globe className="w-12 h-12 opacity-20 animate-spin-slow" />
           </div>
@@ -71,31 +71,31 @@ export const JITChannels: React.FC = () => {
             <GlassCard 
               key={i} 
               className={cn(
-                "p-6 border-white/5 transition-all duration-500 group relative overflow-hidden bg-black/40 hover:bg-black/60 flex flex-col border-l-[4px]",
-                ch.status === 'ACTIVE' ? "border-l-secondary" : "border-l-error"
+                "p-6 border-outline-variant transition-all duration-500 group relative overflow-hidden bg-surface-container-high/40 hover:bg-surface-container-high/70 flex flex-col border-l-[4px]",
+                ch.status === 'ACTIVE' ? "border-l-secondary" : "border-l-outline"
               )}
             >
               <div className="flex justify-between items-start mb-6">
                 <div className="relative">
-                  <div className="p-3 rounded-2xl bg-black/40 border border-white/5 group-hover:scale-105 transition-transform duration-500 text-primary">
+                  <div className="p-3 rounded-2xl bg-surface-container-high/60 border border-outline-variant group-hover:scale-105 transition-transform duration-500 text-primary">
                     <Shield className="w-5 h-5" />
                   </div>
-                  <div className="absolute -bottom-1 -right-1 p-1 rounded-full bg-surface-container border border-white/10">
+                  <div className="absolute -bottom-1 -right-1 p-1 rounded-full bg-surface-container border border-outline">
                     <Cpu className="w-2 h-2 text-on-surface-variant" />
                   </div>
                 </div>
                 
                 <div className={cn(
                   "flex items-center gap-2 px-3.5 py-1.5 rounded-sm border shadow-sm transition-all duration-500",
-                  ch.status === 'ACTIVE' ? "text-secondary border-secondary/20 bg-secondary/5" : "text-error border-error/20 bg-error/5"
+                  ch.status === 'ACTIVE' ? "text-secondary border-secondary/20 bg-secondary/5" : "text-on-surface-variant border-outline bg-white/[0.02]"
                 )}>
-                  <span className={cn("w-1.5 h-1.5 rounded-full shadow-[0_0_8px_currentColor]", ch.status === 'ACTIVE' ? "bg-secondary animate-pulse" : "bg-error")} />
+                  <span className={cn("w-1.5 h-1.5 rounded-full shadow-[0_0_8px_currentColor]", ch.status === 'ACTIVE' ? "bg-secondary animate-pulse" : "bg-on-surface-variant")} />
                   <span className="text-[9px] font-mono font-black uppercase tracking-[0.2em] leading-none">{ch.status}</span>
                 </div>
               </div>
 
               {/* Counterparty Hash Plate */}
-              <div className="mb-6 p-4 rounded-lg bg-black/60 border border-white/10 flex flex-col gap-3 relative cursor-text text-left">
+              <div className="mb-6 p-4 rounded-lg bg-surface-container-low/70 border border-outline flex flex-col gap-3 relative cursor-text text-left">
                 <div className="flex items-center justify-between w-full">
                    <div className="flex items-center gap-2 text-white/30">
                        <Shield className="w-3.5 h-3.5" />
@@ -127,7 +127,7 @@ export const JITChannels: React.FC = () => {
                     {format(ch.capacity)}
                   </p>
                 </div>
-                <div className="space-y-1.5 border-l border-white/5 pl-4">
+                <div className="space-y-1.5 border-l border-outline-variant pl-4">
                   <p className="text-[8px] font-mono text-on-surface-variant/50 uppercase tracking-[0.2em] font-black italic">Flow Logic</p>
                   <div className="flex items-center gap-2 text-[9px] font-black text-white uppercase italic tracking-widest leading-none mt-1">
                     <Activity className="w-3 h-3 text-secondary animate-pulse" />
@@ -136,7 +136,7 @@ export const JITChannels: React.FC = () => {
                 </div>
               </div>
 
-              <div className="pt-5 flex items-center justify-between border-t border-white/5 relative z-10 mt-auto">
+              <div className="pt-5 flex items-center justify-between border-t border-outline-variant relative z-10 mt-auto">
                 <div className="flex flex-col gap-1.5">
                   <p className="text-[8px] font-mono text-on-surface-variant/40 uppercase tracking-[0.2em] font-black italic flex items-center gap-1.5"><Lock className="w-2 h-2"/> Registry Source</p>
                   <p className="text-[9px] font-mono text-white/40 group-hover:text-white/70 transition-colors truncate max-w-[130px] font-bold">
@@ -148,7 +148,7 @@ export const JITChannels: React.FC = () => {
                       href={`https://lokichain.info/tx/${ch.txid}`}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="p-2 text-on-surface-variant hover:text-white bg-white/5 hover:bg-secondary/20 rounded-lg border border-white/5 transition-all shadow-xl active:scale-95"
+                      className="p-2 text-on-surface-variant hover:text-white bg-white/5 hover:bg-secondary/20 rounded-lg border border-outline-variant transition-all shadow-xl active:scale-95"
                       title="View Transaction"
                     >
                       <ExternalLink className="w-4 h-4" />

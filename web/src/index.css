@@ -1,22 +1,30 @@
 @import "tailwindcss";
 
 @theme {
-  --color-background: #0e0e10;
-  --color-surface: #161618;
-  --color-surface-variant: #1c1c1f;
-  --color-surface-container-low: #1a1a1c;
-  --color-surface-container-lowest: #0a0a0c;
-  --color-surface-container-high: #242427;
-  
+  /* Elevation scale: deliberately spread from ~3% to ~17% lightness with a
+     cool slate-blue tint, so cards read as a distinct step up from the page
+     rather than "more black". Ordered low -> high elevation. */
+  --color-background: #0a0b10;
+  --color-surface-container-lowest: #07080c;
+  --color-surface-container-low: #10121a;
+  --color-surface-container: #191c26;
+  --color-surface: #14161f;
+  --color-surface-variant: #1c202b;
+  --color-surface-container-high: #262a37;
+
+  /* Real border colors instead of near-invisible white/5-10 overlays. */
+  --color-outline: #383e50;
+  --color-outline-variant: #21242f;
+
   --color-primary: #00baff;
   --color-primary-dim: #0077a3;
   --color-secondary: #00fd87;
   --color-tertiary: #ffba00;
   --color-error: #ff3b30;
-  
-  --color-on-background: #ffffff;
-  --color-on-surface: #c8c5c8;
-  --color-on-surface-variant: #9a989a;
+
+  --color-on-background: #f4f5f7;
+  --color-on-surface: #ced2db;
+  --color-on-surface-variant: #9a9fae;
   --color-on-primary: #000000;
 }
 
@@ -62,17 +70,64 @@
 
 @layer components {
   .glass-panel {
-    @apply bg-surface-variant/40 backdrop-blur-xl border border-white/10 shadow-[0_20px_40px_rgba(0,186,255,0.08)] rounded-xl;
+    @apply bg-surface-variant/70 backdrop-blur-xl border border-outline shadow-[0_20px_40px_rgba(0,186,255,0.08)] rounded-xl;
   }
 
   .kinetic-glow {
     @apply relative after:absolute after:inset-0 after:rounded-[inherit] after:shadow-[0_0_15px_rgba(0,186,255,0.2)] after:opacity-0 hover:after:opacity-100 transition-all duration-300;
   }
 
+  /* Thin, low-contrast scrollbar for internal scroll regions (order
+     breakdown list, attention queue, etc.) -- present but not loud, since
+     the default browser scrollbar reads as a UI bug against this theme. */
+  .custom-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background-color: rgba(255, 255, 255, 0.15);
+    border-radius: 999px;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(255, 255, 255, 0.3);
+  }
+
   .btn-primary {
-    @apply bg-gradient-to-r from-primary to-primary-dim text-on-primary font-bold px-6 py-2.5 rounded-full 
+    @apply bg-gradient-to-r from-primary to-primary-dim text-on-primary font-bold px-6 py-2.5 rounded-full
            hover:shadow-[0_0_20px_rgba(0,186,255,0.3)] transition-all duration-300 active:scale-95;
   }
+
+  /* Stat tile: a clickable summary card used as both a KPI readout and a
+     filter control on list pages (Order Matrix, Peer Nodes, JIT Channels,
+     Analytics). The accent color is semantic -- which state a number
+     represents -- not decorative, so pick the modifier that matches what
+     the number means, not whichever looks nicest. */
+  .stat-tile {
+    @apply relative overflow-hidden rounded-xl border border-outline-variant bg-surface p-4 text-left
+           transition-all duration-200 hover:border-outline hover:-translate-y-0.5;
+  }
+  .stat-tile::before {
+    content: '';
+    @apply absolute left-0 top-0 bottom-0 w-[3px] opacity-70;
+  }
+  .stat-tile-primary::before { @apply bg-primary; }
+  .stat-tile-secondary::before { @apply bg-secondary; }
+  .stat-tile-tertiary::before { @apply bg-tertiary; }
+  .stat-tile-neutral::before { @apply bg-on-surface-variant; }
+  .stat-tile-primary.is-active { @apply border-primary bg-primary/10; }
+  .stat-tile-secondary.is-active { @apply border-secondary bg-secondary/10; }
+  .stat-tile-tertiary.is-active { @apply border-tertiary bg-tertiary/10; }
+  .stat-tile-neutral.is-active { @apply border-outline bg-surface-container-high; }
 }
 
 /* Custom scrollbar for The Kinetic Void */

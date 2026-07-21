@@ -9,12 +9,12 @@ const navItems = [
   { id: 'nodes', label: 'Nodes', icon: Activity },
   { id: 'jit', label: 'JIT', icon: Zap },
   { id: 'analytics', label: 'Radar', icon: BarChart3 },
-  { id: 'settings', label: 'Props', icon: Settings },
+  { id: 'settings', label: 'Settings', icon: Settings },
 ];
 
 export const BottomTabNav: React.FC = () => {
   return (
-    <nav className="fixed bottom-0 left-0 right-0 h-20 bg-surface-container-lowest/80 backdrop-blur-xl border-t border-white/5 flex items-center justify-around px-2 z-50 pb-safe">
+    <nav className="fixed bottom-0 left-0 right-0 h-20 bg-surface-container-lowest/95 backdrop-blur-xl border-t border-outline-variant flex items-center justify-around px-2 z-50 pb-safe">
       {navItems.map((item) => {
         const to = item.id === 'overview' ? '/' : `/${item.id}`
         return (

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { GlassCard } from '../components/GlassCard';
 import { Search, ExternalLink, RefreshCw, Loader2, AlertCircle, ChevronRight } from 'lucide-react';
 import { useFormatAmount, cn } from '../lib/utils';
+import { orderStatusPillClass, orderStatusDotClass } from '../lib/orderStatus';
 import { useDashboard } from '../hooks/useDashboard';
 import { useEvents } from '../hooks/useEvents';
 import { useNavigate } from '@tanstack/react-router';
@@ -14,6 +15,14 @@ const middleTrim = (str: string, layout: number = 6) => {
   return `${str.substring(0, layout)}...${str.substring(str.length - layout)}`;
 };
 
+const STAT_TILES: { key: string; label: string; tile: string }[] = [
+  { key: 'PAID', label: 'In Progress', tile: 'stat-tile-primary' },
+  { key: 'CREATED', label: 'Awaiting Payment', tile: 'stat-tile-tertiary' },
+  { key: 'COMPLETED', label: 'Completed', tile: 'stat-tile-secondary' },
+  { key: 'FAILED', label: 'Failed', tile: 'stat-tile-tertiary' },
+  { key: 'EXPIRED', label: 'Expired', tile: 'stat-tile-neutral' },
+];
+
 interface OrderMatrixProps {
   onViewOrder: (id: string) => void;
   initialSearch?: string;
@@ -23,6 +32,7 @@ export const OrderMatrix: React.FC<OrderMatrixProps> = ({ onViewOrder, initialSe
   const { orders, loading, error, refreshOrders } = useDashboard();
   const { format } = useFormatAmount();
   const [search, setSearch] = useState(initialSearch);
+  const [stateFilter, setStateFilter] = useState<string | null>(null);
   const navigate = useNavigate();
 
   React.useEffect(() => {
@@ -35,10 +45,16 @@ export const OrderMatrix: React.FC<OrderMatrixProps> = ({ onViewOrder, initialSe
     }
   });
 
-  const filteredOrders = orders.filter(order => 
-    order.order_id?.toLowerCase().includes(search.toLowerCase()) ||
+  const stateCounts = orders.reduce((acc: Record<string, number>, o: any) => {
+    acc[o.state] = (acc[o.state] || 0) + 1;
+    return acc;
+  }, {});
+
+  const filteredOrders = orders.filter(order =>
+    (!stateFilter || order.state === stateFilter) &&
+    (order.order_id?.toLowerCase().includes(search.toLowerCase()) ||
     order.peer_id?.toLowerCase().includes(search.toLowerCase()) ||
-    order.peer_alias?.toLowerCase().includes(search.toLowerCase())
+    order.peer_alias?.toLowerCase().includes(search.toLowerCase()))
   );
 
   if (loading && orders.length === 0) {
@@ -64,7 +80,7 @@ export const OrderMatrix: React.FC<OrderMatrixProps> = ({ onViewOrder, initialSe
         </div>
         <button 
           onClick={refreshOrders}
-          className="mt-4 px-8 py-3 rounded-2xl bg-white/5 border border-white/5 text-white text-[10px] font-black uppercase tracking-[0.2em] hover:bg-primary/20 hover:border-primary/20 transition-all duration-500 italic"
+          className="mt-4 px-8 py-3 rounded-2xl bg-surface-container-high border border-outline-variant text-white text-[10px] font-black uppercase tracking-[0.2em] hover:bg-primary/20 hover:border-primary/20 transition-all duration-500 italic"
         >
           Force Re-Sync
         </button>
@@ -82,39 +98,61 @@ export const OrderMatrix: React.FC<OrderMatrixProps> = ({ onViewOrder, initialSe
         <div className="flex gap-4 items-center">
            <button 
              onClick={refreshOrders}
-             className="px-5 py-3 rounded-2xl bg-white/5 border border-white/5 text-[10px] font-black uppercase text-on-surface-variant hover:text-white hover:bg-primary/10 transition-all flex items-center gap-3 italic tracking-widest"
+             className="px-5 py-3 rounded-2xl bg-surface-container-high border border-outline-variant text-[10px] font-black uppercase text-on-surface-variant hover:text-white hover:bg-primary/10 transition-all flex items-center gap-3 italic tracking-widest"
            >
              <RefreshCw className={cn("w-4 h-4", loading && "animate-spin")} /> Cache Sync
            </button>
         </div>
       </header>
 
+      {/* Status Overview -- doubles as a filter */}
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        {STAT_TILES.map((t) => (
+          <button
+            key={t.key}
+            onClick={() => setStateFilter(stateFilter === t.key ? null : t.key)}
+            className={cn("stat-tile", t.tile, stateFilter === t.key && "is-active")}
+          >
+            <div className="text-2xl font-black font-mono tabular-nums text-white leading-none">{stateCounts[t.key] || 0}</div>
+            <div className="text-[9px] font-mono uppercase tracking-[0.2em] font-black text-on-surface-variant mt-2">{t.label}</div>
+          </button>
+        ))}
+      </div>
+
       {/* Toolbar / Search */}
       <div className="flex flex-col md:flex-row items-stretch md:items-center gap-6">
-        <GlassCard className="flex-1 p-0 border-white/5 shadow-2xl bg-surface-container-lowest/30 overflow-hidden">
-          <div className="px-6 py-4 flex items-center gap-4 group focus-within:bg-white/[0.02] transition-all">
+        <GlassCard className="flex-1 p-0 border-outline-variant shadow-2xl bg-surface-container-lowest/60 overflow-hidden">
+          <div className="px-6 py-4 flex items-center gap-4 group focus-within:bg-white/[0.03] transition-all">
             <Search className="w-5 h-5 text-on-surface-variant group-focus-within:text-primary transition-colors" />
-            <input 
-              type="text" 
+            <input
+              type="text"
               value={search}
               onChange={(e) => {
                 const val = e.target.value;
                 setSearch(val);
                 navigate({ to: '/orders', search: { q: val }, replace: true });
               }}
-              placeholder="Search by Order ID or Peer Pubkey..." 
+              placeholder="Search by Order ID or Peer Pubkey..."
               className="bg-transparent border-none outline-none text-sm text-white w-full placeholder:text-on-surface-variant/30 font-mono tracking-tight"
             />
           </div>
         </GlassCard>
+        {stateFilter && (
+          <button
+            onClick={() => setStateFilter(null)}
+            className="px-5 py-3 rounded-2xl bg-surface-container-high border border-outline-variant text-[10px] font-black uppercase text-on-surface-variant hover:text-white transition-all italic tracking-widest whitespace-nowrap"
+          >
+            Clear Filter
+          </button>
+        )}
       </div>
 
       {/* Orders Table - Desktop */}
       <div className="hidden lg:block">
-        <GlassCard className="p-0 overflow-hidden border-white/5 shadow-2xl bg-surface-variant/20">
+        <GlassCard className="p-0 overflow-hidden border-outline-variant shadow-2xl bg-surface-variant/60">
           <table className="w-full text-left border-collapse">
             <thead>
-              <tr className="bg-white/[0.02]">
+              <tr className="bg-surface-container-high/40">
                 <th className="px-8 py-6 text-[10px] font-mono text-on-surface-variant uppercase tracking-[0.3em] font-black opacity-60">Protocol</th>
                 <th className="px-8 py-6 text-[10px] font-mono text-on-surface-variant uppercase tracking-[0.3em] font-black opacity-60">Order ID</th>
                 <th className="px-8 py-6 text-[10px] font-mono text-on-surface-variant uppercase tracking-[0.3em] font-black opacity-60">Node Integrity</th>
@@ -135,7 +173,7 @@ export const OrderMatrix: React.FC<OrderMatrixProps> = ({ onViewOrder, initialSe
                   <tr 
                     key={i} 
                     onClick={() => onViewOrder(order.order_id)}
-                    className="group hover:bg-white/[0.04] transition-all duration-500 cursor-pointer border-l-2 border-transparent hover:border-primary/40 active:bg-white/[0.08]"
+                    className="group hover:bg-white/[0.05] transition-all duration-500 cursor-pointer border-l-2 border-transparent hover:border-primary/40 active:bg-white/[0.08]"
                   >
                     <td className="px-8 py-6">
                       <span className="text-[9px] font-mono font-black italic text-primary border border-primary/30 bg-primary/10 px-2.5 py-1 rounded-lg tracking-widest">
@@ -179,10 +217,7 @@ export const OrderMatrix: React.FC<OrderMatrixProps> = ({ onViewOrder, initialSe
                     <td className="px-8 py-6">
                       <span className={cn(
                         "text-[9px] font-black font-mono uppercase tracking-[0.2em] px-3.5 py-1.5 rounded-xl border italic shadow-sm transition-all duration-500",
-                        order.state === 'COMPLETED' ? "text-secondary border-secondary/30 bg-secondary/5 group-hover:bg-secondary/10" :
-                        order.state === 'FAILED' ? "text-error border-error/30 bg-error/5 group-hover:bg-error/10" :
-                        order.state === 'PAID' ? "text-primary border-primary/30 bg-primary/5 group-hover:bg-primary/10" :
-                        "text-tertiary border-tertiary/30 bg-tertiary/5 group-hover:bg-tertiary/10"
+                        orderStatusPillClass(order.state, order.payment_state)
                       )}>
                         {order.state}
                       </span>
@@ -216,7 +251,7 @@ export const OrderMatrix: React.FC<OrderMatrixProps> = ({ onViewOrder, initialSe
       {/* Orders List - Mobile */}
       <div className="lg:hidden space-y-4">
         {filteredOrders.length === 0 ? (
-          <div className="p-16 text-center border-2 border-dashed border-white/5 rounded-3xl bg-white/[0.02]">
+          <div className="p-16 text-center border-2 border-dashed border-outline-variant rounded-3xl bg-surface-container-low/40">
             <p className="text-[10px] font-mono text-on-surface-variant uppercase tracking-[0.4em] italic font-black opacity-30">No matching records found</p>
           </div>
         ) : (
@@ -224,17 +259,12 @@ export const OrderMatrix: React.FC<OrderMatrixProps> = ({ onViewOrder, initialSe
             <GlassCard 
               key={i} 
               onClick={() => onViewOrder(order.order_id)}
-              className="p-0 border-white/5 cursor-pointer active:scale-[0.97] transition-all duration-300 bg-surface-variant/30 flex flex-col group overflow-hidden"
+              className="p-0 border-outline-variant cursor-pointer active:scale-[0.97] transition-all duration-300 bg-surface-variant/70 flex flex-col group overflow-hidden"
             >
               {/* Header: Status Strip */}
-              <div className="px-5 py-3.5 flex items-center justify-between bg-white/[0.02] border-b border-white/5">
+              <div className="px-5 py-3.5 flex items-center justify-between bg-surface-container-high/40 border-b border-outline-variant">
                  <div className="flex items-center gap-3">
-                    <span className={cn("w-1.5 h-1.5 rounded-full",
-                      order.state === 'COMPLETED' ? "bg-secondary shadow-[0_0_8px_rgba(0,253,135,0.6)]" : 
-                      order.state === 'FAILED' ? "bg-error shadow-[0_0_8px_rgba(255,50,50,0.6)]" : 
-                      order.state === 'PAID' ? "bg-primary shadow-[0_0_8px_rgba(0,186,255,0.6)]" : 
-                      "bg-tertiary shadow-[0_0_8px_rgba(182,77,255,0.6)]"
-                    )} />
+                    <span className={cn("w-1.5 h-1.5 rounded-full", orderStatusDotClass(order.state, order.payment_state))} />
                     <span className="text-[10px] font-mono font-black italic tracking-[0.2em] uppercase text-on-surface-variant group-hover:text-white transition-colors">{order.state}</span>
                  </div>
                  <span className="text-[9px] font-mono font-black italic text-primary border border-primary/20 bg-primary/5 px-2 py-0.5 rounded uppercase">LSPS1</span>
@@ -249,7 +279,7 @@ export const OrderMatrix: React.FC<OrderMatrixProps> = ({ onViewOrder, initialSe
                 </div>
                 
                 {/* Financial & Counterparty Grid */}
-                <div className="grid grid-cols-2 gap-4 bg-black/20 p-4 rounded-xl border border-white/5">
+                <div className="grid grid-cols-2 gap-4 bg-surface-container-low/60 p-4 rounded-xl border border-outline-variant">
                   <div className="flex flex-col gap-1">
                     <span className="text-[8px] font-mono text-on-surface-variant/40 uppercase tracking-[0.3em] font-black">Capacity</span>
                     <span className="text-xl font-black text-white italic tracking-tighter tabular-nums leading-none">
@@ -269,7 +299,7 @@ export const OrderMatrix: React.FC<OrderMatrixProps> = ({ onViewOrder, initialSe
               </div>
             
               {/* Footer: Telemetry */}
-              <div className="px-5 py-3 border-t border-white/5 bg-white/[0.01] flex justify-between items-center mt-auto">
+              <div className="px-5 py-3 border-t border-outline-variant bg-white/[0.02] flex justify-between items-center mt-auto">
                  <p className="text-[9px] font-mono text-on-surface-variant/40 uppercase font-black italic tracking-widest">
                    {new Date(order.created_at).toLocaleString(undefined, { hour: 'numeric', minute: 'numeric', month: 'short', day: 'numeric' })}
                  </p>

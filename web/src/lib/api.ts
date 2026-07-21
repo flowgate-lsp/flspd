@@ -1,9 +1,9 @@
 export class DashboardAPI {
   private baseUrl: string;
   private authUrl: string;
-  private getAuthHeader: (url: string, method: string) => Promise<string>;
+  private getAuthHeader: (url: string, method: string, body?: string) => Promise<string>;
 
-  constructor(baseUrl: string, getAuthHeader: (url: string, method: string) => Promise<string>, authUrl?: string) {
+  constructor(baseUrl: string, getAuthHeader: (url: string, method: string, body?: string) => Promise<string>, authUrl?: string) {
     this.baseUrl = baseUrl.replace(/\/$/, '');
     this.authUrl = (authUrl || baseUrl).replace(/\/$/, '');
     this.getAuthHeader = getAuthHeader;
@@ -12,7 +12,13 @@ export class DashboardAPI {
   async request(method: string, params: any = {}) {
     const url = `${this.baseUrl}/dashboard`;
     const authUrl = `${this.authUrl}/dashboard`;
-    const authHeader = await this.getAuthHeader(authUrl, 'POST');
+    const body = JSON.stringify({
+      jsonrpc: '2.0',
+      method,
+      params,
+      id: Math.random().toString(36).substring(7),
+    });
+    const authHeader = await this.getAuthHeader(authUrl, 'POST', body);
 
     const response = await fetch(url, {
       method: 'POST',
@@ -20,12 +26,7 @@ export class DashboardAPI {
         'Content-Type': 'application/json',
         'Authorization': authHeader,
       },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        method,
-        params,
-        id: Math.random().toString(36).substring(7),
-      }),
+      body,
     });
 
     if (!response.ok) {

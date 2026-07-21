@@ -64,8 +64,8 @@ export const PeerNodes: React.FC<PeerNodesProps> = ({ onViewPeerOrders }) => {
         </div>
         
         <div className="flex gap-4">
-          <GlassCard className="p-0 border-white/5 bg-surface-container-lowest/30 overflow-hidden">
-            <div className="px-5 py-3 flex items-center gap-4 group focus-within:bg-white/[0.02] transition-all">
+          <GlassCard className="p-0 border-outline-variant bg-surface-container-lowest/60 overflow-hidden">
+            <div className="px-5 py-3 flex items-center gap-4 group focus-within:bg-white/[0.03] transition-all">
                <Search className="w-4 h-4 text-on-surface-variant group-focus-within:text-primary transition-colors" />
                <input 
                  type="text" 
@@ -82,11 +82,11 @@ export const PeerNodes: React.FC<PeerNodesProps> = ({ onViewPeerOrders }) => {
       {loading ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {[1, 2, 3].map(i => (
-            <div key={i} className="h-64 bg-white/[0.02] animate-pulse rounded-3xl border border-white/5 shadow-xl" />
+            <div key={i} className="h-64 bg-surface-container-low/60 animate-pulse rounded-3xl border border-outline-variant shadow-xl" />
           ))}
         </div>
       ) : filteredPeers.length === 0 ? (
-        <div className="py-20 text-center rounded-2xl border-2 border-dashed border-white/5 bg-white/[0.01] flex flex-col items-center justify-center gap-4">
+        <div className="py-20 text-center rounded-2xl border-2 border-dashed border-outline-variant bg-surface-container-low/40 flex flex-col items-center justify-center gap-4">
           <div className="p-4 rounded-full bg-white/5 text-on-surface-variant/20">
             <Globe className="w-12 h-12 opacity-20" />
           </div>
@@ -131,7 +131,7 @@ const PeerCard: React.FC<PeerCardProps> = ({ peer, onViewOrders, format }) => {
   return (
     <GlassCard 
       onClick={() => onViewOrders?.(peer.pub_key)}
-      className="p-6 border-white/5 shadow-2xl bg-black/40 hover:bg-black/60 group transition-all duration-500 overflow-hidden relative cursor-pointer active:scale-[0.99] flex flex-col border-l-[4px]"
+      className="p-6 border-outline-variant shadow-2xl bg-surface-container-high/40 hover:bg-surface-container-high/70 group transition-all duration-500 overflow-hidden relative cursor-pointer active:scale-[0.99] flex flex-col border-l-[4px]"
       style={{ borderLeftColor: nodeColor }}
     >
       {/* Header: Alias + Status Indicator */}
@@ -145,7 +145,7 @@ const PeerCard: React.FC<PeerCardProps> = ({ peer, onViewOrders, format }) => {
             {peer.alias || "Unnamed Node"}
           </h3>
         </div>
-        <div className="px-2.5 py-1 rounded-sm border border-white/5 bg-white/5 text-[9px] font-mono text-on-surface-variant uppercase tracking-widest font-black">
+        <div className="px-2.5 py-1 rounded-sm border border-outline-variant bg-white/5 text-[9px] font-mono text-on-surface-variant uppercase tracking-widest font-black">
           {peer.active ? "Online" : "Offline"}
         </div>
       </div>
@@ -153,7 +153,7 @@ const PeerCard: React.FC<PeerCardProps> = ({ peer, onViewOrders, format }) => {
       {/* The Hash Plate (Identity block) */}
       <div 
         onClick={(e) => e.stopPropagation()}
-        className="mb-6 p-4 rounded-lg bg-black/60 border border-white/10 flex flex-col gap-3 relative cursor-text text-left"
+        className="mb-6 p-4 rounded-lg bg-surface-container-low/70 border border-outline flex flex-col gap-3 relative cursor-text text-left"
       >
         <div className="flex items-center justify-between w-full">
            <div className="flex items-center gap-2 text-white/30">
@@ -186,11 +186,11 @@ const PeerCard: React.FC<PeerCardProps> = ({ peer, onViewOrders, format }) => {
           <span className="text-[9px] font-mono text-white/30 uppercase tracking-widest font-black flex items-center gap-1.5"><ArrowUpRight className="w-3 h-3 text-secondary"/> Sent</span>
           <div className="text-sm font-medium text-white tracking-tight tabular-nums">{format(peer.out_loki)}</div>
         </div>
-        <div className="space-y-1.5 border-l border-white/5 pl-3">
+        <div className="space-y-1.5 border-l border-outline-variant pl-3">
           <span className="text-[9px] font-mono text-white/30 uppercase tracking-widest font-black flex items-center gap-1.5"><ArrowDownLeft className="w-3 h-3 text-primary"/> Recv</span>
           <div className="text-sm font-medium text-white tracking-tight tabular-nums">{format(peer.in_loki)}</div>
         </div>
-        <div className="space-y-1.5 border-l border-white/5 pl-3">
+        <div className="space-y-1.5 border-l border-outline-variant pl-3">
           <span className="text-[9px] font-mono text-white/30 uppercase tracking-widest font-black flex items-center gap-1.5"><Activity className="w-3 h-3 text-tertiary"/> Orders</span>
           <div className="text-sm font-medium text-white tracking-tight tabular-nums">{peer.order_count}</div>
         </div>

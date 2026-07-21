@@ -54,10 +54,10 @@ export const CurrencyConverterModal: React.FC<CurrencyConverterModalProps> = ({
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.9, y: 20 }}
             transition={{ type: "spring", damping: 25, stiffness: 300 }}
-            className="w-full max-w-xl p-0 overflow-hidden shadow-[0_32px_64px_rgba(0,0,0,0.5)] border-white/10"
+            className="w-full max-w-xl p-0 overflow-hidden shadow-[0_32px_64px_rgba(0,0,0,0.5)] border-outline bg-surface-variant/95"
           >
             {/* Modal Header */}
-            <div className="p-6 md:p-8 bg-white/5 border-b border-white/5 flex items-center justify-between">
+            <div className="p-6 md:p-8 bg-surface-container-high/40 border-b border-outline-variant flex items-center justify-between">
                 <div className="flex items-center gap-4">
                     <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center text-primary">
                         <ArrowRightLeft className="w-6 h-6" />
@@ -91,7 +91,7 @@ export const CurrencyConverterModal: React.FC<CurrencyConverterModalProps> = ({
                           autoFocus
                           value={formatInput(inputValue)}
                           onChange={(e) => setInputValue(e.target.value.replace(/,/g, ''))}
-                          className="w-full bg-black/60 border border-white/10 rounded-2xl p-6 text-2xl md:text-3xl text-white font-mono focus:outline-none focus:border-primary/40 focus:ring-4 focus:ring-primary/5 transition-all selection:bg-primary/30"
+                          className="w-full bg-surface-container-low/80 border border-outline rounded-2xl p-6 text-2xl md:text-3xl text-white font-mono focus:outline-none focus:border-primary/40 focus:ring-4 focus:ring-primary/5 transition-all selection:bg-primary/30"
                         />
                         <div className="absolute right-6 top-1/2 -translate-y-1/2 flex gap-2">
                              <button 
@@ -108,7 +108,7 @@ export const CurrencyConverterModal: React.FC<CurrencyConverterModalProps> = ({
                 <div className="space-y-4">
                     <div className="flex items-center justify-between px-1">
                         <label className="text-[10px] font-black text-on-surface-variant uppercase tracking-widest">Financial Representation</label>
-                        <div className="flex gap-1 p-1 bg-black/40 rounded-xl border border-white/5">
+                        <div className="flex gap-1 p-1 bg-surface-container-low/60 rounded-xl border border-outline-variant">
                             {['AUTO', 'FLC', 'LOKI'].map((u) => (
                                 <button
                                     key={u}
@@ -139,9 +139,9 @@ export const CurrencyConverterModal: React.FC<CurrencyConverterModalProps> = ({
 
                 {/* Actions */}
                 <div className="flex flex-col md:flex-row gap-4 pt-4">
-                  <button 
-                    onClick={onClose} 
-                    className="flex-1 px-8 py-4 rounded-2xl bg-white/5 border border-white/10 text-white text-xs font-black uppercase tracking-widest hover:bg-white/10 transition-all active:scale-95"
+                  <button
+                    onClick={onClose}
+                    className="flex-1 px-8 py-4 rounded-2xl bg-surface-container-high border border-outline text-white text-xs font-black uppercase tracking-widest hover:bg-white/10 transition-all active:scale-95"
                   >
                     Cancel
                   </button>

@@ -34,7 +34,7 @@ export const ResponsiveLayout: React.FC<ResponsiveLayoutProps> = ({
       ) : (
         <>
           {/* Mobile Header */}
-          <header className="h-16 fixed top-0 left-0 right-0 z-40 bg-background/50 backdrop-blur-xl border-b border-white/5 flex items-center justify-between px-6">
+          <header className="h-16 fixed top-0 left-0 right-0 z-40 bg-surface-container-lowest/90 backdrop-blur-xl border-b border-outline-variant flex items-center justify-between px-6">
             <div className="flex items-center gap-2">
               <div className="w-6 h-6 rounded bg-primary/20 flex items-center justify-center">
                 <Activity className="w-3.5 h-3.5 text-primary" />

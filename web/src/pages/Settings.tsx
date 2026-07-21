@@ -68,17 +68,17 @@ const FinancialInput: React.FC<{
     </div>
 
     <div className="relative overflow-hidden group/input">
-        <div className="w-full bg-surface-container-lowest/80 border border-white/5 rounded-2xl p-4 flex flex-col gap-2 group-focus-within/input:border-primary/40 group-focus-within/input:ring-4 group-focus-within/input:ring-primary/5 transition-all duration-500">
+        <div className="w-full bg-surface-container-lowest/80 border border-outline-variant rounded-2xl p-4 flex flex-col gap-2 group-focus-within/input:border-primary/40 group-focus-within/input:ring-4 group-focus-within/input:ring-primary/5 transition-all duration-500">
             <div className="flex items-baseline justify-between gap-4">
                 <span className="text-xl md:text-2xl font-mono text-white tracking-tighter truncate selection:bg-primary/30">
                     {formatInput(value)}
                 </span>
-                <span className="text-[9px] font-black text-on-surface-variant uppercase tracking-widest bg-white/5 px-2 py-0.5 rounded-md border border-white/5 shrink-0">
+                <span className="text-[9px] font-black text-on-surface-variant uppercase tracking-widest bg-white/5 px-2 py-0.5 rounded-md border border-outline-variant shrink-0">
                     {source}
                 </span>
             </div>
 
-            <div className="flex items-center gap-2.5 pt-2 border-t border-white/5">
+            <div className="flex items-center gap-2.5 pt-2 border-t border-outline-variant">
                 <div className="w-1.5 h-1.5 rounded-full bg-secondary shadow-[0_0_8px_rgba(0,253,135,0.4)]" />
                 <span className="text-[11px] font-mono text-secondary font-bold tracking-tight">
                     {formatAmount(value, 'AUTO', source)}
@@ -122,7 +122,7 @@ const Input: React.FC<{
           onChange={(e) => onChange(e.target.value)}
           placeholder={placeholder}
           className={cn(
-            "w-full bg-surface-container-lowest/80 border border-white/5 rounded-2xl py-4 pr-4 text-sm text-white font-mono placeholder:text-white/10 focus:outline-none focus:border-primary/40 focus:ring-4 focus:ring-primary/5 transition-all duration-500",
+            "w-full bg-surface-container-lowest/80 border border-outline-variant rounded-2xl py-4 pr-4 text-sm text-white font-mono placeholder:text-white/10 focus:outline-none focus:border-primary/40 focus:ring-4 focus:ring-primary/5 transition-all duration-500",
             Icon ? "pl-11" : "pl-4"
           )}
         />
@@ -148,7 +148,7 @@ const Switch: React.FC<{ checked: boolean; onChange: (v: boolean) => void }> = (
     onClick={() => onChange(!checked)}
     className={cn(
         "w-14 h-7 rounded-full transition-all duration-500 relative p-1",
-        checked ? "bg-primary shadow-[0_0_20px_rgba(0,186,255,0.3)]" : "bg-white/5 border border-white/10"
+        checked ? "bg-primary shadow-[0_0_20px_rgba(0,186,255,0.3)]" : "bg-white/5 border border-outline"
     )}
   >
     <div className={cn(
@@ -256,7 +256,7 @@ export const Settings: React.FC = () => {
   return (
     <div className="p-4 md:p-10 max-w-6xl mx-auto space-y-8 md:space-y-12 animate-in fade-in duration-1000 pb-40">
       {/* Header Section */}
-      <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-8 bg-surface-variant/20 p-6 md:p-8 rounded-[2rem] border border-white/5 backdrop-blur-md relative overflow-hidden group">
+      <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-8 bg-surface-variant/20 p-6 md:p-8 rounded-[2rem] border border-outline-variant backdrop-blur-md relative overflow-hidden group">
         <div className="absolute -right-20 -top-20 w-64 h-64 bg-primary/5 blur-[100px] rounded-full" />
 
         <div className="space-y-3 relative z-10">
@@ -276,7 +276,7 @@ export const Settings: React.FC = () => {
         <div className="flex gap-4 w-full md:w-auto relative z-10">
           <button
             onClick={refreshConfig}
-            className="group/refresh p-4 rounded-2xl bg-white/5 border border-white/10 text-white hover:bg-white/10 transition-all active:scale-95 flex items-center justify-center"
+            className="group/refresh p-4 rounded-2xl bg-white/5 border border-outline text-white hover:bg-white/10 transition-all active:scale-95 flex items-center justify-center"
             title="Reload configuration"
           >
             <RefreshCw className={cn("w-5 h-5 transition-transform duration-700 group-hover/refresh:rotate-180", loading && "animate-spin")} />
@@ -321,7 +321,7 @@ export const Settings: React.FC = () => {
 
       {/* Navigation & Controls */}
       <div className="flex flex-col lg:flex-row gap-6 items-start lg:items-center justify-between">
-          <div className="flex overflow-x-auto p-1.5 bg-surface-container-lowest/60 rounded-[1.5rem] border border-white/5 w-full md:w-fit backdrop-blur-sm">
+          <div className="flex overflow-x-auto p-1.5 bg-surface-container-lowest/60 rounded-[1.5rem] border border-outline-variant w-full md:w-fit backdrop-blur-sm">
             {tabs.map((tab) => (
               <button
                 key={tab.id}
@@ -342,7 +342,7 @@ export const Settings: React.FC = () => {
             ))}
           </div>
 
-          <div className="flex items-center gap-4 bg-surface-container-lowest/60 p-2 rounded-[1.5rem] border border-white/5 backdrop-blur-sm">
+          <div className="flex items-center gap-4 bg-surface-container-lowest/60 p-2 rounded-[1.5rem] border border-outline-variant backdrop-blur-sm">
              <span className="text-[9px] font-black text-on-surface-variant uppercase tracking-widest ml-4 hidden md:inline">Display Unit</span>
              <div className="flex gap-1">
                 {(['AUTO', 'FLC', 'LOKI'] as DisplayUnit[]).map((u) => (
@@ -413,7 +413,7 @@ export const Settings: React.FC = () => {
                           "text-left p-5 rounded-2xl border transition-all duration-300 space-y-2",
                           formData?.profile === p.id
                             ? "bg-primary/10 border-primary/40 ring-4 ring-primary/5"
-                            : "bg-surface-container-lowest/60 border-white/5 hover:border-white/20"
+                            : "bg-surface-container-lowest/60 border-outline-variant hover:border-outline"
                         )}
                       >
                         <p className="text-sm font-black text-white uppercase tracking-tight">{p.label}</p>
@@ -422,7 +422,7 @@ export const Settings: React.FC = () => {
                     ))}
                   </div>
                   {formData?.profile && (
-                    <div className="mt-6 p-5 bg-black/30 rounded-2xl border border-white/5 grid grid-cols-2 md:grid-cols-3 gap-4">
+                    <div className="mt-6 p-5 bg-surface-container-low/60 rounded-2xl border border-outline-variant grid grid-cols-2 md:grid-cols-3 gap-4">
                       {[
                         ['Target Conf', formData?.targetConf],
                         ['Min Conf', formData?.minConfs],
@@ -436,7 +436,7 @@ export const Settings: React.FC = () => {
                           <p className="text-sm font-mono text-secondary font-bold">{value ?? '—'}</p>
                         </div>
                       ))}
-                      <p className="col-span-2 md:col-span-3 text-[9px] font-mono text-on-surface-variant/60 uppercase tracking-wider pt-2 border-t border-white/5">
+                      <p className="col-span-2 md:col-span-3 text-[9px] font-mono text-on-surface-variant/60 uppercase tracking-wider pt-2 border-t border-outline-variant">
                         Read-only expansion of the selected profile's effective values, as currently loaded. Save and reload to preview a newly selected profile.
                       </p>
                     </div>
@@ -490,7 +490,7 @@ export const Settings: React.FC = () => {
                       </thead>
                       <tbody>
                         {feeExampleSizes.map((size) => (
-                          <tr key={size} className="border-t border-white/5">
+                          <tr key={size} className="border-t border-outline-variant">
                             <td className="py-2 text-white">{size.toLocaleString()}</td>
                             <td className="py-2 text-right text-secondary font-bold">
                               {computeOpeningFeeLoki(size, openingFee.rate_percent ?? 0, openingFee.min_loki ?? 0).toLocaleString()}
@@ -547,14 +547,14 @@ export const Settings: React.FC = () => {
                 <GlassCard>
                   <SectionHeader title="Products" subtitle="Which protocols this LSP offers" icon={Zap} />
                   <div className="space-y-6">
-                    <div className="flex items-center justify-between p-5 bg-surface-container-lowest/60 rounded-2xl border border-white/5">
+                    <div className="flex items-center justify-between p-5 bg-surface-container-lowest/60 rounded-2xl border border-outline-variant">
                       <div>
                         <p className="text-sm font-black text-white uppercase tracking-tight">LSPS2 / JIT Channels</p>
                         <p className="text-[10px] font-mono text-on-surface-variant mt-1">On-demand channel creation for incoming HTLCs.</p>
                       </div>
                       <Switch checked={!!formData?.jitEnabled} onChange={(v) => handleInputChange('jitEnabled', v)} />
                     </div>
-                    <div className="flex items-center justify-between p-5 bg-surface-container-lowest/60 rounded-2xl border border-white/5">
+                    <div className="flex items-center justify-between p-5 bg-surface-container-lowest/60 rounded-2xl border border-outline-variant">
                       <div>
                         <p className="text-sm font-black text-white uppercase tracking-tight">LSPS1 Zero Channel Reserve</p>
                         <p className="text-[10px] font-mono text-on-surface-variant mt-1">Offer channels without requiring a client-side reserve.</p>
@@ -612,7 +612,7 @@ export const Settings: React.FC = () => {
                     <Input label="Max Expiry (Blocks)" icon={Scale} explanation="Maximum allowed channel lifespan in blocks." type="number" value={formData?.lsps1MaxChannelExpiryBlocks} onChange={(v) => handleInputChange('lsps1MaxChannelExpiryBlocks', parseInt(v))} onInfo={(l, e) => setInfoModal({ label: l, explanation: e })} />
                     <Input label="Order TTL (Seconds)" icon={Activity} explanation="Time before a pending order is cancelled." type="number" value={formData?.lsps1OrderExpirySeconds} onChange={(v) => handleInputChange('lsps1OrderExpirySeconds', parseInt(v))} onInfo={(l, e) => setInfoModal({ label: l, explanation: e })} />
 
-                    <div className="lg:col-span-3 pt-6 border-t border-white/5" />
+                    <div className="lg:col-span-3 pt-6 border-t border-outline-variant" />
 
                     <FinancialInput field="lsps1MinInitialClientBalanceLoki" label="Min Client Stake" explanation="Minimum balance client must fund initially." value={formData?.lsps1MinInitialClientBalanceLoki} source="LOKI" onEdit={(f, s, v, l, e) => setEditingField({ field: f, source: s, value: v, label: l, explanation: e })} onInfo={(l, e) => setInfoModal({ label: l, explanation: e })} />
                     <FinancialInput field="lsps1MaxInitialClientBalanceLoki" label="Max Client Stake" explanation="Maximum balance allowed for client stake." value={formData?.lsps1MaxInitialClientBalanceLoki} source="LOKI" onEdit={(f, s, v, l, e) => setEditingField({ field: f, source: s, value: v, label: l, explanation: e })} onInfo={(l, e) => setInfoModal({ label: l, explanation: e })} />

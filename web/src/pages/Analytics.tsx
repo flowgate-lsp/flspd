@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { GlassCard } from '../components/GlassCard';
 import { 
   BarChart, 
@@ -23,6 +23,8 @@ export const Analytics: React.FC = () => {
   const { format } = useFormatAmount();
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const legendRef = useRef<HTMLDivElement>(null);
+  const [legendOverflowing, setLegendOverflowing] = useState(false);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -38,6 +40,27 @@ export const Analytics: React.FC = () => {
     fetchData();
   }, [api]);
 
+  const totalOrders = data?.order_distribution?.reduce((acc: number, curr: any) => acc + curr.value, 0) || 0;
+  const filteredDistribution = data?.order_distribution?.filter((d: any) => d.value > 0) || [];
+
+  // Drives the bottom scroll-fade hint on the breakdown list -- only shown
+  // once there's actually more to scroll to, not as permanent decoration.
+  useEffect(() => {
+    const el = legendRef.current;
+    if (!el) {
+      setLegendOverflowing(false);
+      return;
+    }
+    const evaluate = () => setLegendOverflowing(el.scrollHeight - el.scrollTop - el.clientHeight > 4);
+    evaluate();
+    el.addEventListener('scroll', evaluate);
+    window.addEventListener('resize', evaluate);
+    return () => {
+      el.removeEventListener('scroll', evaluate);
+      window.removeEventListener('resize', evaluate);
+    };
+  }, [filteredDistribution.length]);
+
   if (loading || !data) {
     return (
       <div className="h-[60vh] flex items-center justify-center">
@@ -49,17 +72,14 @@ export const Analytics: React.FC = () => {
     );
   }
 
-  const { 
-    total_revenue, 
-    success_rate, 
-    avg_order_size, 
-    active_peers, 
-    revenue_history, 
-    order_distribution 
+  const {
+    total_revenue,
+    success_rate,
+    avg_order_size,
+    active_peers,
+    revenue_history,
+    order_distribution
   } = data;
-
-  const totalOrders = order_distribution?.reduce((acc: number, curr: any) => acc + curr.value, 0) || 0;
-  const filteredDistribution = order_distribution?.filter((d: any) => d.value > 0) || [];
 
   return (
     <div className="p-3 md:p-10 max-w-7xl mx-auto space-y-12 animate-in fade-in slide-in-from-bottom-2 duration-500">
@@ -79,11 +99,11 @@ export const Analytics: React.FC = () => {
           </p>
         </div>
         <div className="flex items-center gap-6 text-[10px] font-mono text-on-surface-variant uppercase tracking-[0.2em] font-black">
-          <div className="flex items-center gap-2 bg-white/5 px-3 py-1.5 rounded-lg border border-white/5">
+          <div className="flex items-center gap-2 bg-white/5 px-3 py-1.5 rounded-lg border border-outline-variant">
             <span className="w-2 h-2 rounded-full bg-secondary shadow-[0_0_10px_rgba(0,253,135,0.6)] animate-pulse" />
             Live Sync
           </div>
-          <span className="hidden md:inline text-white/5">|</span>
+          <span className="hidden md:inline text-white/10">|</span>
           <div className="hidden md:flex items-center gap-2 text-white/40">
              <div className="p-1 rounded bg-white/5">
                 <Users className="w-3 h-3 text-primary" />
@@ -131,7 +151,7 @@ export const Analytics: React.FC = () => {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-10 items-start">
         {/* Main Revenue Chart */}
-        <GlassCard className="lg:col-span-2 p-5 md:p-8 flex flex-col h-[350px] md:h-[520px] bg-black/40 border-white/5">
+        <GlassCard className="lg:col-span-2 p-5 md:p-8 flex flex-col h-[350px] md:h-[520px] bg-surface-container-high/40 border-outline-variant">
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-8 sm:mb-10 pb-5 gap-4">
             <div className="flex items-center gap-4">
               <div className="p-2 rounded-lg bg-primary/5">
@@ -165,7 +185,7 @@ export const Analytics: React.FC = () => {
                     <stop offset="95%" stopColor="#00FD87" stopOpacity={0}/>
                   </linearGradient>
                 </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#ffffff05" vertical={false} />
+                <CartesianGrid strokeDasharray="3 3" stroke="#ffffff0f" vertical={false} />
                 <XAxis 
                   dataKey="date" 
                   stroke="#94a3b820" 
@@ -223,7 +243,7 @@ export const Analytics: React.FC = () => {
         </GlassCard>
 
         {/* Order Composition (Pie) */}
-        <GlassCard className="lg:col-span-1 p-5 md:p-8 flex flex-col h-auto md:h-[520px] bg-black/40 border-white/5">
+        <GlassCard className="lg:col-span-1 p-5 md:p-8 flex flex-col h-auto md:h-[520px] bg-surface-container-high/40 border-outline-variant">
           <div className="flex items-center gap-4 mb-8 md:mb-10 pb-5">
             <div className="p-2 rounded-lg bg-secondary/5">
               <PieIcon className="w-4 h-4 text-secondary" />
@@ -231,12 +251,12 @@ export const Analytics: React.FC = () => {
             <h3 className="text-xs font-black text-white uppercase tracking-[0.2em]">Order Distribution</h3>
           </div>
           
-          <div className="flex-1 w-full relative flex flex-col items-center">
+          <div className="flex-1 w-full min-h-0 relative flex flex-col items-center">
             {(!order_distribution || order_distribution.length === 0) ? (
               <NoData label="No orders distributed in this sector" />
             ) : (
               <>
-                <div className="w-full h-[280px] relative">
+                <div className="w-full h-[200px] md:h-[240px] shrink-0 relative">
                   {/* Center Label */}
                   <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-center pointer-events-none z-0">
                       <p className="text-[8px] font-mono text-on-surface-variant uppercase tracking-[0.4em] font-black opacity-40 mb-1">Total Signals</p>
@@ -251,8 +271,8 @@ export const Analytics: React.FC = () => {
                         data={filteredDistribution.length > 0 ? filteredDistribution : [{ name: 'EMPTY', value: 1, color: '#ffffff05' }]}
                         cx="50%"
                         cy="50%"
-                        innerRadius={65}
-                        outerRadius={95}
+                        innerRadius={60}
+                        outerRadius={88}
                         paddingAngle={filteredDistribution.length > 1 ? 6 : 0}
                         dataKey="value"
                         nameKey="name"
@@ -260,16 +280,16 @@ export const Analytics: React.FC = () => {
                         animationDuration={1500}
                       >
                         {(filteredDistribution.length > 0 ? filteredDistribution : [{ name: 'EMPTY', value: 1, color: '#ffffff05' }]).map((entry: any, index: number) => (
-                           <Cell 
-                             key={`cell-${index}`} 
-                             fill={entry.color} 
+                           <Cell
+                             key={`cell-${index}`}
+                             fill={entry.color}
                              stroke={entry.color}
                              strokeOpacity={0.2}
                              strokeWidth={1}
                            />
                         ))}
                       </Pie>
-                      <Tooltip 
+                      <Tooltip
                         content={<CustomTooltip format={format} />}
                         cursor={{ stroke: '#ffffff10', strokeWidth: 1 }}
                       />
@@ -277,23 +297,31 @@ export const Analytics: React.FC = () => {
                   </ResponsiveContainer>
                 </div>
 
-                {/* Breakdown List */}
-                <div className="w-full mt-6 space-y-2.5 overflow-y-auto pr-2 custom-scrollbar">
-                  {filteredDistribution?.map((item: any) => {
-                    const percentage = totalOrders > 0 ? Math.round((item.value / totalOrders) * 100) : 0;
-                    return (
-                        <div key={item.name} className="flex items-center justify-between group py-1.5 border-b border-white/[0.02] last:border-0 hover:bg-white/[0.02] px-2 rounded-lg transition-colors">
-                          <div className="flex items-center gap-3">
-                            <div className="w-2 h-2 rounded-full shadow-[0_0_8px_rgba(255,255,255,0.1)]" style={{ backgroundColor: item.color }} />
-                            <span className="text-[10px] font-mono text-on-surface-variant group-hover:text-white transition-colors uppercase font-black tracking-widest">{item.name}</span>
+                {/* Breakdown List -- bounded to the remaining card height so it
+                    actually scrolls in place instead of silently overflowing
+                    past the card edge. Fade hints only render once there's
+                    real overflow to scroll to. */}
+                <div className="relative w-full flex-1 min-h-0 mt-6">
+                  <div ref={legendRef} className="h-full w-full overflow-y-auto pr-2 custom-scrollbar space-y-2.5">
+                    {filteredDistribution?.map((item: any) => {
+                      const percentage = totalOrders > 0 ? Math.round((item.value / totalOrders) * 100) : 0;
+                      return (
+                          <div key={item.name} className="flex items-center justify-between group py-1.5 border-b border-outline-variant last:border-0 hover:bg-white/[0.03] px-2 rounded-lg transition-colors">
+                            <div className="flex items-center gap-3">
+                              <div className="w-2 h-2 rounded-full shadow-[0_0_8px_rgba(255,255,255,0.1)]" style={{ backgroundColor: item.color }} />
+                              <span className="text-[10px] font-mono text-on-surface-variant group-hover:text-white transition-colors uppercase font-black tracking-widest">{item.name}</span>
+                            </div>
+                            <div className="flex items-center gap-4">
+                              <span className="text-[10px] font-mono text-white/40 font-bold italic">{percentage}%</span>
+                              <span className="text-[11px] font-mono text-white font-black italic min-w-[30px] text-right tabular-nums">{item.value}</span>
+                            </div>
                           </div>
-                          <div className="flex items-center gap-4">
-                            <span className="text-[10px] font-mono text-white/40 font-bold italic">{percentage}%</span>
-                            <span className="text-[11px] font-mono text-white font-black italic min-w-[30px] text-right tabular-nums">{item.value}</span>
-                          </div>
-                        </div>
-                    );
-                  })}
+                      );
+                    })}
+                  </div>
+                  {legendOverflowing && (
+                    <div className="pointer-events-none absolute bottom-0 left-0 right-0 h-9 bg-gradient-to-t from-surface-container-high/90 via-surface-container-high/50 to-transparent rounded-b-xl" />
+                  )}
                 </div>
               </>
             )}
@@ -301,7 +329,7 @@ export const Analytics: React.FC = () => {
         </GlassCard>
 
         {/* Daily Throughput */}
-        <GlassCard className="lg:col-span-3 p-8 space-y-10 bg-black/40 border-white/5">
+        <GlassCard className="lg:col-span-3 p-8 space-y-10 bg-surface-container-high/40 border-outline-variant">
             <div className="flex items-center justify-between pb-5">
                <div className="flex items-center gap-4">
                  <div className="p-2 rounded-lg bg-tertiary/5">
@@ -317,7 +345,7 @@ export const Analytics: React.FC = () => {
               ) : (
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={revenue_history?.slice(-7) || []}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#ffffff05" vertical={false} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#ffffff0f" vertical={false} />
                   <XAxis 
                     dataKey="day" 
                     stroke="#94a3b830" 
@@ -336,7 +364,10 @@ export const Analytics: React.FC = () => {
                     fontFamily="monospace"
                   />
                   <Tooltip content={<CustomTooltip format={format} />} cursor={{ fill: '#ffffff05' }} />
-                  <Bar dataKey="revenue" fill="#B026FF" radius={[6, 6, 0, 0]} barSize={48} />
+                  {/* Same metric as the Revenue line above -- same color (primary),
+                      not the unrelated purple this used to be, so "revenue" reads
+                      as one consistent color across both charts on this page. */}
+                  <Bar dataKey="revenue" fill="#00BAFF" radius={[6, 6, 0, 0]} barSize={48} />
                   </BarChart>
                 </ResponsiveContainer>
               )}
@@ -363,7 +394,7 @@ const SummaryCard: React.FC<{
   const suffix = parts.slice(1).join(' ');
 
   return (
-    <div className="p-6 rounded-2xl bg-black/40 border border-white/5 hover:border-white/20 transition-all duration-500 hover:bg-black/60 group relative overflow-hidden flex flex-col justify-between">
+    <div className="p-6 rounded-2xl bg-surface-container-high/40 border border-outline-variant hover:border-outline transition-all duration-500 hover:bg-surface-container-high/70 group relative overflow-hidden flex flex-col justify-between">
       <div className="flex justify-between items-start mb-6">
         <div className="flex items-center gap-2.5">
             <div className={cn("w-1.5 h-1.5 rounded-full shadow-[0_0_8px_currentColor]", color.replace("text-", "bg-"))} />
@@ -384,7 +415,7 @@ const SummaryCard: React.FC<{
           <div className="flex items-center gap-1.5 pt-2">
             <span className={cn(
               "text-[9px] font-black font-mono px-2 py-0.5 rounded border tracking-widest uppercase", 
-              trend.startsWith('+') || trend === "Optimal Flow" ? "text-secondary border-secondary/20 bg-secondary/5" : "text-white/40 border-white/10 bg-white/5"
+              trend.startsWith('+') || trend === "Optimal Flow" ? "text-secondary border-secondary/20 bg-secondary/5" : "text-white/40 border-outline bg-white/5"
             )}>
               {trend}
             </span>
@@ -409,8 +440,8 @@ const NoData: React.FC<{ label: string }> = ({ label }) => (
 const CustomTooltip = ({ active, payload, label, format }: any) => {
   if (active && payload && payload.length) {
     return (
-      <div className="relative z-50 bg-[#0f172a]/95 border border-white/10 p-5 rounded-2xl shadow-[0_25px_50px_rgba(0,0,0,0.5)] backdrop-blur-2xl ring-1 ring-white/10">
-        <p className="text-[10px] font-mono font-black text-primary uppercase tracking-[0.3em] mb-4 border-b border-white/10 pb-2">
+      <div className="relative z-50 bg-surface-container-high/95 border border-outline p-5 rounded-2xl shadow-[0_25px_50px_rgba(0,0,0,0.5)] backdrop-blur-2xl ring-1 ring-white/10">
+        <p className="text-[10px] font-mono font-black text-primary uppercase tracking-[0.3em] mb-4 border-b border-outline pb-2">
           {label} Snapshot
         </p>
         <div className="space-y-2.5">
