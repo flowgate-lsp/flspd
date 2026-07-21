@@ -1,6 +1,13 @@
-# FLSPD Nodes Configuration
+# FLSPD Nodes Configuration -- production/wumbo-scale template.
 # This file contains the configuration for the LSP nodes.
 # It is a YAML list of node configurations.
+#
+# This variant targets a public deploy/docker-compose.prod.yml deployment:
+# a real, internet-reachable host and wumbo-scale channel/payment limits.
+# For the local dev stack (`just docker up`) see nodes.dev.sample.yaml
+# instead -- the two differ in host, channel_size ceiling, and
+# jitMaxPaymentSizeMloki; everything else (fee model, secret handling) is
+# identical.
 
 - # --- Identity & Connection ---
   # Name of the LSP. If empty, the node's alias will be taken instead.
@@ -25,17 +32,24 @@
   tokens:
     - "REPLACE_WITH_TOKEN"
 
-  # The network location of the lightning node, e.g. `12.34.56.78:9012` or `localhost:10011`.
-  host: "127.0.0.1:5521"
+  # The network location of the lightning node, reachable by LN clients,
+  # e.g. `lsp.example.com:9735` or a public IP.
+  host: "REPLACE_WITH_PUBLIC_HOST:5521"
 
   # Configuration for connecting to the LND node.
   flnd:
-    # Address to the grpc api.
+    # Address to the grpc api. "flnd" resolves via the compose network
+    # (see deploy/docker-compose.prod.yml) -- not the same thing as `host`
+    # above, which is what LN clients dial.
     address: "flnd:10005"
-    
+
     # Disable TLS verification (useful for testing/internal networks).
+    # docker-compose.prod.yml publishes flnd's grpc port (10005) on the
+    # host, so leave this false unless that port is firewalled off from
+    # the public internet -- an admin macaroon over an unencrypted,
+    # internet-reachable channel is a real credential-theft risk.
     disableTls: false
-    
+
     # TLS certificate for the grpc api. Provide it inline (hex-encoded PEM —
     # don't commit a real one), or by reference: from_file can point
     # directly at flnd's own tls.cert (raw bytes are hex-encoded
@@ -59,7 +73,9 @@
   # timeLockDelta, maxInactiveDuration, lsps1OrderExpirySeconds,
   # jitValidUntilSeconds). Every one of those remains individually
   # overridable — set it directly below the profile line to override just
-  # that one field, e.g. `timeLockDelta: 800`.
+  # that one field, e.g. `timeLockDelta: 800`. `aggressive` trades safety
+  # margin for UX (0-conf JIT) and may suit a production LSP competing on
+  # speed; `balanced` is the safer default shown here.
   profile: balanced
 
   # The maximum time to hold a htlc after sending a notification when the peer is offline.
@@ -77,10 +93,12 @@
   # is the headroom added on top of the incoming payment for a JIT open.
   # Replaces minChannelCapacityLoki, additionalChannelCapacity,
   # jitMinChannelBalanceLoki, and lsps1{Min,Max}ChannelBalanceLoki.
+  # max_loki here is wumbo scale (1,000,000 FLC) -- size to your own
+  # liquidity, this is a ceiling, not a target.
   channel_size:
     min_loki: 20_000
-    max_loki: 500_000_000
-    padding_loki: 21_000
+    max_loki: 100_000_000_000_000
+    padding_loki: 100_000
 
   # Advertised routing fee (ppm + a flat per-forward fee in loki). Not
   # enforced by flspd — the channel's actual routing fee is configured on
@@ -100,8 +118,9 @@
   # Minimum payment size in milliloki allowed for JIT channels.
   minPaymentSizeMloki: 1_000
 
-  # Maximum payment size in milliloki allowed for JIT channels.
-  jitMaxPaymentSizeMloki: 300_000_000_000
+  # Maximum payment size in milliloki allowed for JIT channels. Wumbo
+  # scale (1,000,000 FLC) to match channel_size.max_loki above.
+  jitMaxPaymentSizeMloki: 100_000_000_000_000_000
 
   # Maximum client CLTV delay for JIT channels (optional, default 10000).
   jitMaxClientToSelfDelay: 10_000

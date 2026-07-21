@@ -115,9 +115,10 @@ jobs:
       # Build-only, no push: this just proves the production Dockerfile
       # still builds against the changed go.mod/go.sum/Dockerfile. It
       # covers deploy/Dockerfile (repo-root context, since it COPYs the
-      # full source tree) only -- deploy/Dockerfile.dev needs sibling
+      # full source tree) only -- deploy/Dockerfile.dev isn't validated
+      # here because the dev stack's flnd service builds against sibling
       # flokiorg checkouts (see deploy/docker-compose.dev.yml) that don't
-      # exist on a plain CI runner, so it isn't validated here.
+      # exist on a plain CI runner.
       - name: Build image
         uses: docker/build-push-action@v5
         with:

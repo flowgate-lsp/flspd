@@ -9,7 +9,8 @@ lspd_revenue_cli
 nodes.json
 *.log
 data/
+deploy/nodes.yaml
+deploy/nodes.prod.yaml
 node_modules/
 web/node_modules/
-.agents/
-skills-lock.json
+tmp/

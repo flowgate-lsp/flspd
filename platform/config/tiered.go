@@ -89,7 +89,7 @@ var profilePresets = map[string]profilePreset{
 		lsps1OrderExpirySecs:    3600,      // 1 hour
 		jitValidUntilSecs:       3600,      // 1 hour
 	},
-	// balanced: matches this repo's own nodes.sample.yaml baseline.
+	// balanced: matches this repo's own nodes.dev.sample.yaml/nodes.prod.sample.yaml baseline.
 	"balanced": {
 		targetConf: 6, minConfs: 3, timeLockDelta: 4000, // ~2.8 days at 1 min/block
 		maxInactiveDurationSecs: 3_888_000, // 45 days

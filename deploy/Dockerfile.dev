@@ -1,54 +1,23 @@
-# Build Stage
-FROM golang:alpine AS builder
+# syntax=docker/dockerfile:1.4
+FROM golang:1.26.1-alpine AS dev
 
-# Install build dependencies
-RUN apk add --no-cache git make build-base
+RUN apk add --no-cache git
 
-# Copy flnd dependency to /flokiorg/flnd so that ../../flokiorg/flnd resolves correctly from /app
-COPY flokiorg/flnd /flokiorg/flnd
+ENV CGO_ENABLED=0
 
 WORKDIR /app
 
-# Copy go.mod and go.sum first to leverage layer caching
-COPY flowgate/flspd/nostr-lsps5 ./nostr-lsps5
-COPY flowgate/flspd/go.mod flowgate/flspd/go.sum ./
-RUN go mod download
+RUN go install github.com/air-verse/air@latest
 
-# Copy source code
-COPY flowgate/flspd .
+# Copy go.mod/go.sum first to leverage layer caching.
+COPY go.mod go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
 
-# Build Arguments
-ARG TAG=unknown
-ARG COMMIT=unknown
+# Baseline copy so the image is runnable even without the dev bind mount;
+# deploy/docker-compose.dev.yml overlays the live working tree on top of
+# this at runtime, which is what air actually watches/rebuilds.
+COPY . .
 
-# Build flspd
-# -ldflags explanation:
-# -w -s: strip debug information for smaller binary
-# -X ...: inject version information into build variables
-RUN go build -ldflags "-w -s -X github.com/flowgate-lsp/flspd/build.tag=${TAG} -X github.com/flowgate-lsp/flspd/build.revision=${COMMIT}" -o /bin/flspd ./cmd/flspd
+EXPOSE 9090 8080
 
-# Build flspd_revenue_cli
-RUN go build -ldflags "-w -s -X github.com/flowgate-lsp/flspd/build.tag=${TAG} -X github.com/flowgate-lsp/flspd/build.revision=${COMMIT}" -o /bin/flspd_revenue_cli ./cmd/flspd_revenue_cli
-
-# Runtime Stage
-FROM alpine:latest
-
-# Install runtime dependencies
-# ca-certificates: for HTTPS connections
-# tzdata: for time zone support
-# bash: for convenience (optional, can be removed for minimalism)
-# netcat-openbsd: for healthchecks
-RUN apk add --no-cache ca-certificates tzdata bash netcat-openbsd
-
-WORKDIR /app
-
-# Copy binaries from builder
-COPY --from=builder /bin/flspd /bin/flspd
-COPY --from=builder /bin/flspd_revenue_cli /bin/flspd_revenue_cli
-
-# Expose gRPC port (default in sample.env is often random, but standardizing on 8080 or similar is good practice)
-# The user can map this in docker-compose
-EXPOSE 8080
-
-# Environment variables should be provided via docker-compose or run command
-ENTRYPOINT ["/bin/flspd"]
+ENTRYPOINT ["air", "-c", ".air.toml"]

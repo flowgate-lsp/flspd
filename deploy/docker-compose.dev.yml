@@ -1,8 +1,59 @@
+# flnd here runs against real mainnet via neutrino (see
+# data/flnd/flnd.conf.sample) with a persistent wallet under data/flnd --
+# unlike test/devnet's disposable regtest harness, this one holds real
+# funds. `just clean [all]` deliberately never touches data/; don't add a
+# `rm -rf data` (or similar) anywhere in this stack's tooling.
 services:
+  flnd:
+    build:
+      context: ../../flokiorg/flnd
+      dockerfile: dev.Dockerfile
+      additional_contexts:
+        # flnd, walletd, and flokicoin-neutrino evolve in lockstep on this
+        # fork; this builds flnd against whatever's on disk in these sibling
+        # checkouts instead of their go.mod/go.sum-pinned versions (see
+        # flokiorg/flnd/dev.Dockerfile).
+        walletd: ../../flokiorg/walletd
+        flokicoin-neutrino: ../../flokiorg/flokicoin-neutrino
+    container_name: flspd-dev-flnd
+    restart: unless-stopped
+    volumes:
+      - ./data/flnd:/root/.flnd
+    environment:
+      # Set in your local .env to this host's real public IP (not the
+      # `flnd` compose service name -- that only resolves inside the
+      # compose network) so flnd announces a routable address to the
+      # wider P2P network. Left unset, flnd just doesn't announce one --
+      # LSPS1 clients can still connect directly via the pubkey@host the
+      # dashboard shows (from nodes.yaml's `host`), which is unrelated to
+      # this.
+      - EXTERNAL_IP=${EXTERNAL_IP:-}
+    # dev.Dockerfile's ENTRYPOINT is fixed to ["flnd"], which can't
+    # conditionally take --externalip -- override it with a shell so
+    # --externalip is only passed when EXTERNAL_IP is actually set. `$$`
+    # escapes past docker-compose's own interpolation so the shell inside
+    # the container evaluates ${EXTERNAL_IP:+...} at runtime, not compose.
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        exec flnd --configfile=/root/.flnd/flnd.conf
+        $${EXTERNAL_IP:+--externalip=$$EXTERNAL_IP:5521}
+    healthcheck:
+      test: ["CMD", "ls", "/root/.flnd/tls.cert"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    ports:
+      - "${FLND_RPC_PORT:-10006}:10005"
+      - "${FLND_P2P_PORT:-5521}:5521"
+    networks:
+      - flspd-dev
+
   flspd:
     build:
-      context: ../../
-      dockerfile: flowgate/flspd/deploy/Dockerfile.dev
+      context: .
+      dockerfile: deploy/Dockerfile.dev
       args:
         TAG: "v1.0.0"
         COMMIT: "dockerCode"
@@ -30,10 +81,15 @@ services:
       - LOG_MAX_AGE_DAYS=${LOG_MAX_AGE_DAYS:-30}
       - LOG_COMPRESS=${LOG_COMPRESS:-true}
     volumes:
-      - ./data/nodes.yaml:/flspd/nodes.yaml
+      - .:/app
+      - ./deploy/nodes.yaml:/flspd/nodes.yaml
       - ./data/logs:/var/log/flspd
+      - flspd-go-mod-cache:/go/pkg/mod
+      - flspd-go-build-cache:/root/.cache/go-build
     depends_on:
       postgres:
+        condition: service_healthy
+      flnd:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "nc", "-z", "localhost", "9090"]
@@ -43,6 +99,12 @@ services:
       start_period: 30s
     networks:
       - flspd-dev
+      # Lets other product stacks (e.g. lokihub-dev) reach flspd by
+      # container name for integration testing, without exposing flnd or
+      # postgres. Created via `just docker network` (also run automatically
+      # by `just docker up`); the other stack joins the same external
+      # network name.
+      - flowgate-integration
 
   postgres:
     image: postgres:15-alpine
@@ -76,11 +138,46 @@ services:
       - /app/node_modules
     environment:
       - VITE_API_BASE_URL=http://localhost:9090
+      - VITE_ALLOWED_HOSTS=${VITE_ALLOWED_HOSTS:-}
+      # Server-side only (not VITE_-prefixed -- see web/vite.config.ts):
+      # tells Vite's dev-server proxy where to actually forward /dashboard
+      # and /info. Deliberately NOT exposed to client code -- the client
+      # must sign its NIP-98 auth against window.location.origin instead
+      # (its default), since Caddy (deploy/Caddyfile.dev) adds its own
+      # X-Forwarded-Host that the backend's auth check already trusts over
+      # this internal address.
+      - DASHBOARD_PROXY_TARGET=http://flspd:8080
     depends_on:
       - flspd
+    networks:
+      - flspd-dev
+
+  # Fronts the frontend dev server so devs can reach it through their own
+  # external reverse-proxy hostname (e.g. a personal home-lab domain) without
+  # Vite's Host-header allowlist rejecting the request -- see Caddyfile.dev.
+  # Point your external proxy at this port instead of the frontend's 5183.
+  caddy:
+    image: caddy:2-alpine
+    container_name: flspd-caddy
+    restart: unless-stopped
+    ports:
+      - "5180:80"
+      - "${CADDY_HTTPS_PORT:-5443}:443"
+    volumes:
+      - ./deploy/Caddyfile.dev:/etc/caddy/Caddyfile:ro
+      - flspd-caddy-data:/data
+    depends_on:
+      - frontend
     networks:
       - flspd-dev
 
 networks:
   flspd-dev:
     driver: bridge
+  flowgate-integration:
+    external: true
+
+volumes:
+  flspd-go-mod-cache:
+  flspd-go-build-cache:
+  flspd-caddy-data:

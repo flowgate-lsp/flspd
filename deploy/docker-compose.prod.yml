@@ -91,6 +91,13 @@ services:
       - "traefik.http.middlewares.dash-strip.stripprefix.prefixes=/dashboard"
       - "traefik.http.routers.flspd-dash.middlewares=dash-strip"
 
+      # Public, unauthenticated status endpoint the frontend polls to decide
+      # whether to show the login form (reuses the same dashboard-container
+      # service/port; no strip-prefix needed since /info has none to strip).
+      - "traefik.http.routers.flspd-info.rule=Host(`flspapi.flowgate.to`) && Path(`/info`)"
+      - "traefik.http.routers.flspd-info.entrypoints=web"
+      - "traefik.http.routers.flspd-info.service=flspd-dash"
+
 
   postgres:
     image: postgres:15-alpine

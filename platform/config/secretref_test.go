@@ -11,26 +11,32 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// TestNodesSampleYaml_ParsesAndIsSecretFree parses the repo's committed
-// nodes.sample.yaml the same way flspd's own loader does (cmd/flspd/run.go)
-// and checks it uses from_env/from_file refs, not inline secret material,
-// for the three fields SecretRef exists to protect — this is what makes
-// the sample file safe to commit verbatim (T5-1/T5-4's stated goal).
+// TestNodesSampleYaml_ParsesAndIsSecretFree parses each of the repo's
+// committed nodes.*.sample.yaml files the same way flspd's own loader does
+// (cmd/flspd/run.go) and checks each uses from_env/from_file refs, not
+// inline secret material, for the three fields SecretRef exists to
+// protect — this is what makes the sample files safe to commit verbatim
+// (T5-1/T5-4's stated goal), and guards against a repeat of SEC-1 (a real
+// secret once committed to data/nodes.prod.yaml).
 func TestNodesSampleYaml_ParsesAndIsSecretFree(t *testing.T) {
-	data, err := os.ReadFile("../../configs/examples/nodes.sample.yaml")
-	require.NoError(t, err)
+	for _, name := range []string{"nodes.dev.sample.yaml", "nodes.prod.sample.yaml"} {
+		t.Run(name, func(t *testing.T) {
+			data, err := os.ReadFile("../../deploy/" + name)
+			require.NoError(t, err)
 
-	var configs []*NodeConfig
-	require.NoError(t, yaml.Unmarshal(data, &configs))
-	require.Len(t, configs, 1)
+			var configs []*NodeConfig
+			require.NoError(t, yaml.Unmarshal(data, &configs))
+			require.Len(t, configs, 1)
 
-	cfg := configs[0]
-	assert.False(t, cfg.FlspdPrivateKey.isInline(), "sample flspdPrivateKey must be a reference (from_env/from_file), not an inline value, to stay safe to commit")
-	require.NotNil(t, cfg.Lnd)
-	assert.False(t, cfg.Lnd.Cert.isInline(), "sample flnd.cert must be a reference, not inline")
-	assert.False(t, cfg.Lnd.Macaroon.isInline(), "sample flnd.macaroon must be a reference, not inline")
+			cfg := configs[0]
+			assert.False(t, cfg.FlspdPrivateKey.isInline(), "sample flspdPrivateKey must be a reference (from_env/from_file), not an inline value, to stay safe to commit")
+			require.NotNil(t, cfg.Lnd)
+			assert.False(t, cfg.Lnd.Cert.isInline(), "sample flnd.cert must be a reference, not inline")
+			assert.False(t, cfg.Lnd.Macaroon.isInline(), "sample flnd.macaroon must be a reference, not inline")
 
-	assert.NoError(t, cfg.Validate(), "the committed sample must be a fully valid config, tiered blocks included, not just syntactically parseable YAML")
+			assert.NoError(t, cfg.Validate(), "the committed sample must be a fully valid config, tiered blocks included, not just syntactically parseable YAML")
+		})
+	}
 }
 
 func unmarshalSecretRef(t *testing.T, doc string) SecretRef {

@@ -9,13 +9,21 @@ It is designed to work with an [flnd](https://github.com/flokiorg/flnd) (Flokico
 The easiest way to run `flspd` is using the provided Docker setup.
 
 1.  **Configure Environment**:
-    Copy `configs/examples/compose.env.sample` to `.env` and update the `NODES` and `DATABASE_URL` settings.
+    Copy `deploy/compose.env.sample` to `.env` and update the `NODES` and `DATABASE_URL` settings.
     ```bash
-    cp configs/examples/compose.env.sample .env
+    cp deploy/compose.env.sample .env
     # Edit .env with your favorite editor
     ```
 
-2.  **Run with Docker Compose**:
+2.  **Configure Nodes**:
+    Copy `deploy/nodes.prod.sample.yaml` to `deploy/nodes.prod.yaml`, fill in your node details, and point `NODES_CONFIG_PATH` in `.env` at it.
+    ```bash
+    cp deploy/nodes.prod.sample.yaml deploy/nodes.prod.yaml
+    # Edit deploy/nodes.prod.yaml, then set NODES_CONFIG_PATH=./deploy/nodes.prod.yaml in .env
+    ```
+    (`deploy/nodes.dev.sample.yaml` is the equivalent for the local dev stack — see `just docker up`.)
+
+3.  **Run with Docker Compose**:
     ```bash
     docker compose -f deploy/docker-compose.prod.yml --project-directory . up -d
     ```
