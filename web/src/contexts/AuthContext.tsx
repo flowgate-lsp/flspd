@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { nip19, finalizeEvent, getPublicKey } from 'nostr-tools';
+import { sha256Hex } from '../lib/nip98';
 
 export interface NostrUser {
   pubkey: string;
@@ -11,7 +12,7 @@ interface AuthContextType {
   loading: boolean;
   login: (nsec: string) => Promise<void>;
   logout: () => void;
-  getAuthHeader: (url: string, method: string) => Promise<string>;
+  getAuthHeader: (url: string, method: string, body?: string) => Promise<string>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -49,12 +50,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const testUrl = `${window.location.origin}/dashboard`;
       const authUrl = `${apiOrigin}/dashboard`;
 
+      const body = JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'get_summary',
+        params: {},
+        id: 'login-check',
+      });
+      const payloadHash = sha256Hex(body);
+
       const event = {
         kind: 27235,
         created_at: Math.floor(Date.now() / 1000),
         tags: [
           ['u', authUrl],
           ['m', 'POST'],
+          ['payload', payloadHash],
         ],
         content: '',
       };
@@ -67,12 +77,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           'Content-Type': 'application/json',
           'Authorization': `Nostr ${encodedEvent}`,
         },
-        body: JSON.stringify({
-          jsonrpc: '2.0',
-          method: 'get_summary',
-          params: {},
-          id: 'login-check',
-        }),
+        body,
       });
 
       if (!resp.ok) {
@@ -94,19 +99,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setUser(null);
   };
 
-  const getAuthHeader = async (url: string, method: string) => {
+  const getAuthHeader = async (url: string, method: string, body?: string) => {
     const u = user;
     if (!u || !u.nsec) return '';
-    
+
     try {
       const { data: privkey } = nip19.decode(u.nsec);
+      const tags = [
+        ['u', url],
+        ['m', method],
+      ];
+      if (body) {
+        tags.push(['payload', sha256Hex(body)]);
+      }
       const event = {
         kind: 27235,
         created_at: Math.floor(Date.now() / 1000),
-        tags: [
-          ['u', url],
-          ['m', method],
-        ],
+        tags,
         content: '',
       };
 
