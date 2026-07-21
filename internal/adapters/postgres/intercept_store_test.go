@@ -107,6 +107,10 @@ func TestInterceptStore_GetLsps2Order_RoundTrip(t *testing.T) {
 		ParamsMaxClientToSelfDelay: 4320,
 		ParamsPromise:              "cafef00d",
 		Token:                      "order-token-xyz",
+		CreatedAt:                  time.Now(),
+		ExpiresAt:                  time.Now().Add(time.Hour),
+		ReservedAmountLoki:         25_000,
+		State:                      core.Lsps2RegistrationActive,
 	}
 	require.NoError(t, openingStore.RegisterLsps2Buy(reg))
 
@@ -187,4 +191,53 @@ func TestInterceptStore_GetPaidLsps1Order_NotFoundReturnsNilNil(t *testing.T) {
 	order, err := interceptStore.GetPaidLsps1Order("no-such-peer-has-orders")
 	assert.NoError(t, err)
 	assert.Nil(t, order)
+}
+
+// TestInterceptStore_GetPaidLsps1Order_ExcludesHoldPaymentState is the
+// regression test for H-1 on the actual live production call path (unlike
+// PostgresOpeningStore's copy in lsps1_settlement_store.go, which isn't
+// wired to any caller today): the interceptor's JIT fallback used to treat
+// a HOLD (accepted-but-not-settled) hold-invoice order as fully paid and
+// safe to open a channel for, racing settlement_service's own
+// openChannelForHeldOrder into a duplicate open for a payment that was
+// never actually captured.
+func TestInterceptStore_GetPaidLsps1Order_ExcludesHoldPaymentState(t *testing.T) {
+	interceptStore := NewPostgresInterceptStore(testPool)
+	peer := "peer-intercept-hold-exclusion"
+
+	insertHeldOrder(t, "intercept-hold-exclusion", peer, time.Now())
+
+	order, err := interceptStore.GetPaidLsps1Order(peer)
+	require.NoError(t, err)
+	assert.Nil(t, order, "a HOLD-payment-state order must not be surfaced as JIT-safe")
+}
+
+// TestInterceptStore_GetPaidLsps1Order_ReturnsPreimage is the regression
+// test for H-8: this query previously never selected payment_preimage,
+// silently returning PaymentPreimage=nil even for hold-invoice orders that
+// have one stored, unlike the 7 other Lsps1Order read sites updated
+// alongside it in the same commit.
+func TestInterceptStore_GetPaidLsps1Order_ReturnsPreimage(t *testing.T) {
+	interceptStore := NewPostgresInterceptStore(testPool)
+	openingStore := NewPostgresOpeningStore(testPool)
+	peer := "peer-intercept-preimage"
+
+	insertPaidOrder(t, "intercept-preimage-order", peer, time.Now(), nil)
+	preimage := "deadbeef"
+	_, err := testPool.Exec(context.Background(),
+		`UPDATE lsps1.orders SET payment_preimage=$2 WHERE order_id=$1`,
+		"intercept-preimage-order", preimage)
+	require.NoError(t, err)
+	// Sanity: confirm the fixture actually has a preimage stored via the
+	// already-covered opening-store read path before asserting on the
+	// intercept-store one.
+	sanity, err := openingStore.GetLsps1Order("intercept-preimage-order")
+	require.NoError(t, err)
+	require.NotNil(t, sanity.PaymentPreimage)
+
+	order, err := interceptStore.GetPaidLsps1Order(peer)
+	require.NoError(t, err)
+	require.NotNil(t, order)
+	require.NotNil(t, order.PaymentPreimage, "GetPaidLsps1Order must return the stored preimage")
+	assert.Equal(t, preimage, *order.PaymentPreimage)
 }

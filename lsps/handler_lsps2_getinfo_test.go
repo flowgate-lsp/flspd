@@ -35,7 +35,7 @@ func TestLsps2GetInfo_AggregatesMenuAcrossAllNodesAndTokens(t *testing.T) {
 		{MinFeeMloki: 2000, Proportional: 200, ValidUntil: "2099-01-01T00:00:00.000Z"},
 	}, nil)
 
-	server := NewHandlers(Config{}, new(MockLndClient), mockNS, mockOS, new(MockLiquidityManager), new(MockNotificationService))
+	server := NewHandlers(Config{}, new(MockLndClient), mockNS, mockOS, new(MockLiquidityManager), new(MockNotificationService), nil)
 	req := &JsonRpcRequest{Id: json.RawMessage(`"id"`)}
 
 	resp := server.lsps2GetInfo(req)
@@ -58,7 +58,7 @@ func TestLsps2GetInfo_FiltersByRequestedToken(t *testing.T) {
 		{MinFeeMloki: 1000, Proportional: 100, ValidUntil: "2099-01-01T00:00:00.000Z"},
 	}, nil)
 
-	server := NewHandlers(Config{}, new(MockLndClient), mockNS, mockOS, new(MockLiquidityManager), new(MockNotificationService))
+	server := NewHandlers(Config{}, new(MockLndClient), mockNS, mockOS, new(MockLiquidityManager), new(MockNotificationService), nil)
 	params, err := json.Marshal(Lsps2GetInfoLegacyParams{Token: "token-a"})
 	require.NoError(t, err)
 	req := &JsonRpcRequest{Id: json.RawMessage(`"id"`), Params: params}
@@ -88,7 +88,7 @@ func TestLsps2GetInfo_FeeParamsErrorIsSkippedNotFatal(t *testing.T) {
 		{MinFeeMloki: 2000, Proportional: 200, ValidUntil: "2099-01-01T00:00:00.000Z"},
 	}, nil)
 
-	server := NewHandlers(Config{}, new(MockLndClient), mockNS, mockOS, new(MockLiquidityManager), new(MockNotificationService))
+	server := NewHandlers(Config{}, new(MockLndClient), mockNS, mockOS, new(MockLiquidityManager), new(MockNotificationService), nil)
 	req := &JsonRpcRequest{Id: json.RawMessage(`"id"`)}
 
 	resp := server.lsps2GetInfo(req)
@@ -106,7 +106,7 @@ func TestLsps2GetInfo_EmptyParamsIsTolerated(t *testing.T) {
 	mockOS := new(MockOpeningService)
 	mockNS.On("GetNodes").Return([]*core.Node{})
 
-	server := NewHandlers(Config{}, new(MockLndClient), mockNS, mockOS, new(MockLiquidityManager), new(MockNotificationService))
+	server := NewHandlers(Config{}, new(MockLndClient), mockNS, mockOS, new(MockLiquidityManager), new(MockNotificationService), nil)
 	req := &JsonRpcRequest{Id: json.RawMessage(`"id"`), Params: nil}
 
 	resp := server.lsps2GetInfo(req)

@@ -9,6 +9,7 @@ import (
 	"github.com/flowgate-lsp/flspd/lightning"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 )
 
 // MockStore for InterceptStore interface
@@ -57,11 +58,48 @@ func (m *MockStore) RegisterPayment(token, orderId string, params *core.OpeningF
 }
 
 func (m *MockStore) SetFundingTx(paymentHash []byte, channelPoint *wire.OutPoint) error {
-	return nil
+	args := m.Called(paymentHash, channelPoint)
+	return args.Error(0)
 }
 
 func (m *MockStore) GetPaidLsps1Order(clientNodeId string) (*core.Lsps1Order, error) {
 	return nil, nil // Not testing LSPS1 here
+}
+
+// ClaimLsps2Registration/ReleaseLsps2Registration/ConsumeLsps2Registration/
+// GetStuckLsps2Registrations: Phase 7 (F-15/T7-2). Routed through
+// m.Called() like every other method here -- tests that never exercise
+// the LSPS2 claim/consume path (isLsps2Registration stays false) never
+// trigger these, so they don't need an .On(...) expectation registered.
+func (m *MockStore) ClaimLsps2Registration(scid uint64) (bool, error) {
+	args := m.Called(scid)
+	return args.Bool(0), args.Error(1)
+}
+
+func (m *MockStore) ReleaseLsps2Registration(scid uint64) error {
+	args := m.Called(scid)
+	return args.Error(0)
+}
+
+func (m *MockStore) ConsumeLsps2Registration(scid uint64, channelPoint *wire.OutPoint, paymentSizeMloki, feeMloki uint64) (bool, error) {
+	args := m.Called(scid, channelPoint, paymentSizeMloki, feeMloki)
+	return args.Bool(0), args.Error(1)
+}
+
+func (m *MockStore) GetStuckLsps2Registrations() ([]*core.Lsps2BuyRegistration, error) {
+	args := m.Called()
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]*core.Lsps2BuyRegistration), args.Error(1)
+}
+
+func (m *MockStore) GetClaimedLsps2ChannelPoints() (map[string]bool, error) {
+	args := m.Called()
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(map[string]bool), args.Error(1)
 }
 
 // TestResolvePayment_JIT_Success tests the happy path where sender pays Gross Amount
@@ -108,7 +146,7 @@ func TestResolvePayment_JIT_Success(t *testing.T) {
 		mock.Anything,   // secret
 		int64(20000000), // Incoming (Gross)
 		int64(19920318), // Outgoing (Net)
-		"",
+		lsps2JitTag,
 	).Return(nil)
 
 	// Call
@@ -124,6 +162,9 @@ func TestResolvePayment_JIT_Success(t *testing.T) {
 	assert.NotNil(t, result)
 	assert.Equal(t, int64(19920318), result.outgoingAmountMloki)
 	assert.True(t, result.isJit)
+	assert.True(t, result.isLsps2Registration)
+	require.NotNil(t, result.tag)
+	assert.Equal(t, lsps2JitTag, *result.tag)
 }
 
 // TestResolvePayment_JIT_Underpayment tests rejection when sender pays Net Amount

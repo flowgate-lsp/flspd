@@ -62,7 +62,9 @@ func TestOpenChannel_Success_NonJitUsesConfiguredRoutingFee(t *testing.T) {
 			req.RoutingPolicy.BaseMloki == cfg.BaseFeeMloki
 	})).Return(expectedOutpoint, nil)
 
-	i := newTestInterceptor(cfg, client, nil, nil)
+	store := new(MockStore)
+	store.On("SetFundingTx", mock.Anything, expectedOutpoint).Return(nil)
+	i := newTestInterceptor(cfg, client, nil, store)
 
 	// outgoing < incoming (19_800_000, not 20_000_000) to represent a
 	// realistic routing fee taken out before forwarding.
@@ -85,7 +87,9 @@ func TestOpenChannel_JitUsesZeroRoutingFeeAndZeroConf(t *testing.T) {
 			req.MinConfs != nil && *req.MinConfs == 0
 	})).Return(expectedOutpoint, nil)
 
-	i := newTestInterceptor(cfg, client, nil, nil)
+	store := new(MockStore)
+	store.On("SetFundingTx", mock.Anything, expectedOutpoint).Return(nil)
+	i := newTestInterceptor(cfg, client, nil, store)
 
 	_, err := i.openChannel([]byte{1}, []byte{2}, 20_000_000, 20_000_000, nil, true)
 	require.NoError(t, err)
@@ -151,7 +155,9 @@ func TestOpenChannel_FeeEstimatorErrorFallsBackToTargetConf(t *testing.T) {
 	})).Return(expectedOutpoint, nil)
 
 	failingFee := &fakeFeeEstimator{err: assert.AnError}
-	i := newTestInterceptor(cfg, client, failingFee, nil)
+	store := new(MockStore)
+	store.On("SetFundingTx", mock.Anything, expectedOutpoint).Return(nil)
+	i := newTestInterceptor(cfg, client, failingFee, store)
 
 	_, err := i.openChannel([]byte{1}, []byte{2}, 20_000_000, 20_000_000, nil, false)
 	require.NoError(t, err, "a fee-estimator failure must fall back to configured TargetConf, not abort the open")
@@ -165,9 +171,7 @@ func TestOpenChannel_CallsSetFundingTxOnSuccess(t *testing.T) {
 	client.On("OpenChannel", mock.Anything).Return(expectedOutpoint, nil)
 
 	store := new(MockStore)
-	// MockStore.SetFundingTx is a plain stub (always nil), so this mainly
-	// documents that a successful open reaches the funding-tx persistence
-	// step at all, without erroring out before it.
+	store.On("SetFundingTx", mock.Anything, expectedOutpoint).Return(nil)
 	i := newTestInterceptor(cfg, client, nil, store)
 
 	outpoint, err := i.openChannel([]byte{1}, []byte{2}, 20_000_000, 20_000_000, nil, false)
@@ -202,7 +206,9 @@ func TestOpenChannel_CapacityLeavesRoomForChannelReserve(t *testing.T) {
 		return true
 	})).Return(expectedOutpoint, nil)
 
-	i := newTestInterceptor(cfg, client, nil, nil)
+	store := new(MockStore)
+	store.On("SetFundingTx", mock.Anything, expectedOutpoint).Return(nil)
+	i := newTestInterceptor(cfg, client, nil, store)
 
 	_, err := i.openChannel([]byte{1}, []byte{2}, incomingAmountMloki, outgoingAmountMloki, nil, true)
 	require.NoError(t, err)

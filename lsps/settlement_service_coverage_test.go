@@ -141,7 +141,7 @@ func TestMatrixProcessSettledInvoice(t *testing.T) {
 
 						// Completion Updates
 						if tt.expectCompletion {
-							mockStore.On("UpdateLsps1OrderFunding", tt.order.OrderId, mock.Anything, mock.Anything).Return(nil)
+							mockStore.On("UpdateLsps1OrderFunding", tt.order.OrderId, mock.Anything, mock.Anything).Return(true, nil)
 							mockStore.On("UpdateLsps1OrderState", tt.order.OrderId, tt.expectedEndState, string(Lsps1OrderStatePaid), string(Lsps1OrderStatePaid)).Return(true, nil)
 						}
 					}

@@ -138,23 +138,26 @@ func (s *openingService) ValidateOpeningFeeParams(params *core.OpeningFeeParams,
 	return true
 }
 
-func (s *openingService) IsCurrentChainFeeCheaper(token string, params *core.OpeningFeeParams) bool {
-	settings, err := s.store.GetFeeParamsSettings(token)
-	if err != nil {
-		log.Error().
-			Err(err).
+func (s *openingService) IsCurrentChainFeeCheaper(currentFeeratePerVByte *float64, referenceFeeratePerVByte float64) bool {
+	if currentFeeratePerVByte == nil {
+		// The chain-fee estimator itself failed (see openChannel's own
+		// fallback-to-TargetConf path for the same case) -- with no real
+		// number to compare, the conservative answer is "no, don't honor
+		// the expired quote," not "sure, assume it's fine."
+		log.Warn().
 			Str("component", string(logging.LogComponentOpeningService)).
-			Msg("IsCurrentChainFeeCheaper: Failed to get fee params settings")
+			Msg("IsCurrentChainFeeCheaper: current feerate unknown (estimator failed), treating as not cheaper")
 		return false
 	}
 
-	for _, setting := range settings {
-		if setting.Params.MinFeeMloki <= params.MinFeeMloki {
-			return true
-		}
-	}
-
-	return false
+	cheaper := *currentFeeratePerVByte <= referenceFeeratePerVByte
+	log.Debug().
+		Str("component", string(logging.LogComponentOpeningService)).
+		Float64("current_feerate_per_vbyte", *currentFeeratePerVByte).
+		Float64("reference_feerate_per_vbyte", referenceFeeratePerVByte).
+		Bool("cheaper", cheaper).
+		Msg("IsCurrentChainFeeCheaper: compared against live chain feerate")
+	return cheaper
 }
 
 func createPromise(lspPrivateKey *btcec.PrivateKey, params *core.OpeningFeeParams) (*string, error) {
@@ -222,26 +225,6 @@ func verifyPromise(lspPublicKey *btcec.PublicKey, params *core.OpeningFeeParams)
 	return nil
 }
 
-func (s *openingService) RegisterLsps2Buy(reg *core.Lsps2BuyRegistration) error {
-	log.Trace().
-		Str("component", string(logging.LogComponentOpeningService)).
-		Str("action", string(logging.LogActionRequest)).
-		Uint64("scid", reg.Scid).
-		Str("peer_id", reg.PeerId).
-		Msg("RegisterLsps2Buy: Registering buy")
-	return s.store.RegisterLsps2Buy(reg)
-}
-
-func (s *openingService) RegisterLsps1Order(order *core.Lsps1Order) error {
-	log.Trace().
-		Str("component", string(logging.LogComponentOpeningService)).
-		Str("action", string(logging.LogActionRequest)).
-		Str("order_id", order.OrderId).
-		Str("peer_id", order.PeerId).
-		Msg("RegisterLsps1Order: Registering order")
-	return s.store.RegisterLsps1Order(order)
-}
-
 func (s *openingService) GetLsps1Order(orderId string) (*core.Lsps1Order, error) {
 	log.Trace().
 		Str("component", string(logging.LogComponentOpeningService)).
@@ -282,6 +265,10 @@ func (s *openingService) RemoveLsps5Webhook(clientNodeId, appName string) error 
 
 func (s *openingService) CountLsps1Orders(clientNodeId string, state string, excludeExpiredBefore *time.Time) (int, error) {
 	return s.store.CountLsps1Orders(clientNodeId, state, excludeExpiredBefore)
+}
+
+func (s *openingService) CountLsps2PendingRegistrations(peerId string) (int, error) {
+	return s.store.CountLsps2PendingRegistrations(peerId)
 }
 
 func (s *openingService) CountLsps5Webhooks(clientNodeId string) (int, error) {

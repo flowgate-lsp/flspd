@@ -6,12 +6,14 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/flokiorg/flnd/lnrpc/invoicesrpc"
 	"github.com/flowgate-lsp/flspd/core"
 	"github.com/flowgate-lsp/flspd/platform/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 )
 
 // TestTableHandleLsps1CreateOrder tests create order scenarios using a table-driven approach
@@ -44,10 +46,10 @@ func TestTableHandleLsps1CreateOrder(t *testing.T) {
 				lnd.On("AddHoldInvoice", mock.Anything, mock.MatchedBy(func(req *invoicesrpc.AddHoldInvoiceRequest) bool {
 					return req.Value >= 100 // Client balance + fee
 				})).Return(&invoicesrpc.AddHoldInvoiceResp{PaymentRequest: "lnbc1..."}, nil)
-				store.On("RegisterLsps1Order", mock.MatchedBy(func(order *core.Lsps1Order) bool {
+				liquidity.On("ReserveLsps1Order", mock.Anything, mock.MatchedBy(func(order *core.Lsps1Order) bool {
 					return order.ClientBalanceLoki == 100 && order.LspBalanceLoki == 0 &&
 						order.OrderState == string(Lsps1OrderStateCreated)
-				})).Return(nil)
+				})).Return(true, nil)
 				store.On("GetFeeParamsMenu", mock.Anything, mock.Anything).Return([]*core.OpeningFeeParams{}, nil)
 
 				minClient := uint64(0)
@@ -77,7 +79,7 @@ func TestTableHandleLsps1CreateOrder(t *testing.T) {
 					AdditionalChannelCapacity:            21000, // 100 + 21000 > 20000
 				})}}, nil)
 				nodes.On("GetMinChannelCapacity").Return(uint64(20000))
-				liquidity.On("CheckOnChainLiquidity", mock.Anything, mock.Anything).Return(nil)
+				mockSufficientLiquidity(liquidity)
 				notif.On("NotifyOrderStateChanged", mock.Anything, mock.Anything, "CREATED", "", "").Return(true, nil)
 			},
 			config:             lspsConfig{Lsps1MaxPendingOrders: 5},
@@ -103,7 +105,7 @@ func TestTableHandleLsps1CreateOrder(t *testing.T) {
 					capturedHash = req.Hash
 					return req.Value >= 1000000 && len(req.Hash) == 32 // At least client balance + fee, real sha256 hash
 				})).Return(&invoicesrpc.AddHoldInvoiceResp{PaymentRequest: "lnbc1..."}, nil)
-				store.On("RegisterLsps1Order", mock.MatchedBy(func(order *core.Lsps1Order) bool {
+				liquidity.On("ReserveLsps1Order", mock.Anything, mock.MatchedBy(func(order *core.Lsps1Order) bool {
 					// The order's stored preimage must actually back the hash
 					// handed to AddHoldInvoice -- otherwise the invoice would
 					// be unsettleable.
@@ -119,7 +121,7 @@ func TestTableHandleLsps1CreateOrder(t *testing.T) {
 						order.ClientBalanceLoki == 1000000 && order.LspBalanceLoki == 5000000 &&
 						order.OrderState == string(Lsps1OrderStateCreated) &&
 						order.PaymentState == string(Lsps1PaymentStateExpectPayment)
-				})).Return(nil)
+				})).Return(true, nil)
 				store.On("GetFeeParamsMenu", mock.Anything, mock.Anything).Return([]*core.OpeningFeeParams{}, nil)
 
 				minClient := uint64(0)
@@ -149,7 +151,7 @@ func TestTableHandleLsps1CreateOrder(t *testing.T) {
 					Lsps1MaxChannelBalanceLoki:           &maxChan,
 				})}}, nil)
 				nodes.On("GetMinChannelCapacity").Return(uint64(20000))
-				liquidity.On("CheckOnChainLiquidity", mock.Anything, mock.Anything).Return(nil)
+				mockSufficientLiquidity(liquidity)
 				notif.On("NotifyOrderStateChanged", mock.Anything, mock.Anything, "CREATED", "", "").Return(true, nil)
 			},
 			config:             lspsConfig{Lsps1MaxPendingOrders: 5},
@@ -239,10 +241,11 @@ func TestTableHandleLsps1CreateOrder(t *testing.T) {
 			},
 			peerId: "02677063d89856f4d04be859e9a4d3393165b6f3cd78641bc3c4ef9ca2fde37f",
 			mockSetup: func(store *MockOpeningStore, lnd *MockLightningClient, nodes *MockNodesService, liquidity *MockLiquidityManager, notif *MockNotificationService) {
-				store.On("GetFeeParamsMenu", mock.Anything, mock.Anything).Return([]*core.OpeningFeeParams{}, nil)
-				store.On("CountLsps1Orders", mock.Anything, string(Lsps1OrderStateCreated), mock.Anything).Return(5, nil) // Already 5
-				store.On("GetFeeParamsMenu", mock.Anything, mock.Anything).Return([]*core.OpeningFeeParams{}, nil)
-				store.On("CountLsps1Orders", mock.Anything, string(Lsps1OrderStateCreated), mock.Anything).Return(5, nil) // Already 5
+				// Phase 7 (F-17/T7-7): the standing-cap check now runs
+				// right after the balance-bounds validation -- well before
+				// fee computation, capacity/floor validation, or any
+				// liquidity check -- so none of those are reached once a
+				// peer is already at their pending-order limit.
 				minClient := uint64(0)
 				maxClient := uint64(100_000_000)
 				minLsp := uint64(0)
@@ -269,8 +272,7 @@ func TestTableHandleLsps1CreateOrder(t *testing.T) {
 					Lsps1MinChannelBalanceLoki:           &minChan,
 					Lsps1MaxChannelBalanceLoki:           &maxChan,
 				})}}, nil)
-				nodes.On("GetMinChannelCapacity").Return(uint64(20000))
-				liquidity.On("CheckOnChainLiquidity", mock.Anything, mock.Anything).Return(nil)
+				store.On("CountLsps1Orders", mock.Anything, string(Lsps1OrderStateCreated), mock.Anything).Return(5, nil) // Already 5
 			},
 			config:               lspsConfig{Lsps1MaxPendingOrders: 5},
 			expectedError:        -32603,
@@ -335,6 +337,100 @@ func TestTableHandleLsps1CreateOrder(t *testing.T) {
 			mockLiquidity.AssertExpectations(t)
 		})
 	}
+}
+
+// TestHandleLsps1CreateOrder_RegisterOrderFails_CancelsOrphanedHoldInvoice
+// is the regression test for H-7: AddHoldInvoice succeeds at LND, but the
+// subsequent RegisterLsps1Order DB write fails. Without a compensating
+// cancel, the invoice would be orphaned at LND with its preimage never
+// persisted anywhere in flspd -- unrecoverable until LND's own
+// hold-invoice-expiry watcher eventually releases it.
+func TestHandleLsps1CreateOrder_RegisterOrderFails_CancelsOrphanedHoldInvoice(t *testing.T) {
+	mockStore := new(MockOpeningStore)
+	mockLnd := new(MockLightningClient)
+	mockNodes := new(MockNodesService)
+	mockLiquidity := new(MockLiquidityManager)
+	mockNotif := new(MockNotificationService)
+
+	var capturedHash []byte
+	mockStore.On("CountLsps1Orders", mock.Anything, string(Lsps1OrderStateCreated), mock.Anything).Return(0, nil)
+	mockLnd.On("AddHoldInvoice", mock.Anything, mock.MatchedBy(func(req *invoicesrpc.AddHoldInvoiceRequest) bool {
+		capturedHash = req.Hash
+		return req.Value >= 1000000 && len(req.Hash) == 32
+	})).Return(&invoicesrpc.AddHoldInvoiceResp{PaymentRequest: "lnbc1..."}, nil)
+	mockLiquidity.On("ReserveLsps1Order", mock.Anything, mock.Anything).Return(false, assert.AnError)
+	mockStore.On("GetFeeParamsMenu", mock.Anything, mock.Anything).Return([]*core.OpeningFeeParams{}, nil)
+	mockLnd.On("CancelInvoice", mock.Anything, mock.MatchedBy(func(hash []byte) bool {
+		return bytes.Equal(hash, capturedHash)
+	})).Return(nil)
+
+	minClient := uint64(0)
+	maxClient := uint64(100_000_000)
+	minLsp := uint64(0)
+	maxLsp := uint64(100_000_000)
+	minChan := uint64(20000)
+	maxChan := uint64(100_000_000)
+	minReqConf := uint16(0)
+	minFundingConf := uint16(1)
+	supportsZeroReserve := true
+	maxExpiry := uint32(201600)
+	orderExpiry := uint32(86400)
+
+	mockNodes.On("GetNodes").Return([]*core.Node{{NodeConfig: config.NewNodeConfigRef(&config.NodeConfig{
+		FeeRate:                              0.000001,
+		Lsps1MinRequiredChannelConfirmations: &minReqConf,
+		Lsps1MinFundingConfirmsWithinBlocks:  &minFundingConf,
+		Lsps1SupportsZeroChannelReserve:      &supportsZeroReserve,
+		Lsps1MaxChannelExpiryBlocks:          &maxExpiry,
+		Lsps1OrderExpirySeconds:              &orderExpiry,
+		Lsps1MinInitialClientBalanceLoki:     &minClient,
+		Lsps1MaxInitialClientBalanceLoki:     &maxClient,
+		Lsps1MinInitialLspBalanceLoki:        &minLsp,
+		Lsps1MaxInitialLspBalanceLoki:        &maxLsp,
+		Lsps1MinChannelBalanceLoki:           &minChan,
+		Lsps1MaxChannelBalanceLoki:           &maxChan,
+	})}}, nil)
+	mockNodes.On("GetMinChannelCapacity").Return(uint64(20000))
+	mockSufficientLiquidity(mockLiquidity)
+
+	server := &Handlers{
+		config:              Config{Lsps1MaxPendingOrders: 5},
+		lndClient:           mockLnd,
+		nodesService:        mockNodes,
+		openingService:      mockStore,
+		liquidityManager:    mockLiquidity,
+		notificationService: mockNotif,
+	}
+
+	req := Lsps1CreateOrderRequest{
+		ClientBalanceLoki:            "1000000",
+		LspBalanceLoki:               "5000000",
+		FundingConfirmsWithinBlocks:  1,
+		RequiredChannelConfirmations: 0,
+		ChannelExpiryBlocks:          201600,
+		Token:                        "",
+		AnnounceChannel:              false,
+	}
+	paramsBytes, _ := json.Marshal(req)
+	jsonReq := &JsonRpcRequest{
+		Id:     json.RawMessage(`"test-id"`),
+		Method: "lsps1.create_order",
+		Params: paramsBytes,
+	}
+	peerBytes, _ := hex.DecodeString("02677063d89856f4d04be859e9a4d3393165b6f3cd78641bc3c4ef9ca2fde37f")
+
+	resp := server.handleLsps1CreateOrder(jsonReq, peerBytes)
+
+	require.NotNil(t, resp.Error, "expected an error response since RegisterLsps1Order failed")
+	assert.Equal(t, -32603, resp.Error.Code)
+
+	// S-7: CancelInvoice now fires in its own goroutine (doesn't block the
+	// response above), so give it a moment before asserting on the mock.
+	time.Sleep(50 * time.Millisecond)
+
+	mockLnd.AssertExpectations(t)
+	mockStore.AssertExpectations(t)
+	mockNotif.AssertNotCalled(t, "NotifyOrderStateChanged", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything)
 }
 
 // Helpers/Mocks specifically for these tests if not common

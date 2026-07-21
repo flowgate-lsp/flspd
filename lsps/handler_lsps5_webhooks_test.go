@@ -12,7 +12,7 @@ import (
 )
 
 func newLsps5TestServer(cfg Config, mockOS *MockOpeningService, mockNotif *MockNotificationService) *Handlers {
-	return NewHandlers(cfg, new(MockLndClient), new(MockNodesService), mockOS, new(MockLiquidityManager), mockNotif)
+	return NewHandlers(cfg, new(MockLndClient), new(MockNodesService), mockOS, new(MockLiquidityManager), mockNotif, nil)
 }
 
 var testPeerBytes, _ = hex.DecodeString("03aabbccddeeff00112233445566778899aabbccddeeff0011223344556677")

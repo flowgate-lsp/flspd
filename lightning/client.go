@@ -8,8 +8,16 @@ import (
 )
 
 type GetInfoResult struct {
-	Alias  string
-	Pubkey string
+	Alias               string
+	Pubkey              string
+	Version             string
+	BlockHeight         uint32
+	SyncedToChain       bool
+	SyncedToGraph       bool
+	NumActiveChannels   uint32
+	NumPendingChannels  uint32
+	NumInactiveChannels uint32
+	NumPeers            uint32
 }
 
 type Peer struct {
@@ -70,6 +78,10 @@ type Channel struct {
 	ChannelPoint  *wire.OutPoint
 	PeerId        []byte
 	PendingHtlcs  []HTLC
+	Active        bool
+	Capacity      int64
+	LocalBalance  int64
+	RemoteBalance int64
 }
 
 type Client interface {
@@ -100,7 +112,23 @@ type Client interface {
 	ListChannels() ([]*Channel, error)
 	ListPeers() ([]*Peer, error)
 	SubscribeInvoices() (<-chan *InvoiceUpdate, <-chan error, error)
+	// SubscribeSingleInvoice streams state transitions for one invoice,
+	// identified by its payment hash (H-12): unlike SubscribeInvoices
+	// (which only ever delivers "newly added" and "settled" -- confirmed
+	// live against real flnd 2026-07-17, see settlement_service.go's
+	// heldInvoiceSafetyNetPollInterval doc comment), this per-invoice
+	// stream does deliver ACCEPTED, giving near-instant hold-invoice
+	// detection instead of relying on a poll. Takes ctx explicitly (unlike
+	// SubscribeInvoices, which hardcodes context.Background()) so the
+	// stream can be torn down on shutdown via context cancellation.
+	SubscribeSingleInvoice(ctx context.Context, paymentHash []byte) (<-chan *InvoiceUpdate, <-chan error, error)
 	LookupInvoiceState(ctx context.Context, paymentRequest string) (InvoiceState, error)
+	// LookupInvoiceStateByHash is LookupInvoiceState's cheaper sibling
+	// (H-11): callers that already have the payment hash (e.g. derived
+	// locally from a hold invoice's stored preimage) can skip the
+	// DecodePayReq round-trip LookupInvoiceState needs to derive it from a
+	// bolt11 string.
+	LookupInvoiceStateByHash(ctx context.Context, paymentHash []byte) (InvoiceState, error)
 	// SettleInvoice releases a held (ACCEPTED) hold invoice's HTLCs by
 	// revealing preimage, the point of no return for a hold-invoice
 	// payment: call only once the LSP is actually committed (e.g. the

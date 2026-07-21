@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -20,6 +21,7 @@ import (
 	"github.com/flowgate-lsp/flspd/platform/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 )
 
 // MockLightningClient for testing
@@ -112,6 +114,11 @@ func (m *MockLightningClient) SubscribeInvoices() (<-chan *lightning.InvoiceUpda
 	return args.Get(0).(<-chan *lightning.InvoiceUpdate), args.Get(1).(<-chan error), args.Error(2)
 }
 
+func (m *MockLightningClient) SubscribeSingleInvoice(ctx context.Context, paymentHash []byte) (<-chan *lightning.InvoiceUpdate, <-chan error, error) {
+	args := m.Called(ctx, paymentHash)
+	return args.Get(0).(<-chan *lightning.InvoiceUpdate), args.Get(1).(<-chan error), args.Error(2)
+}
+
 func (m *MockLightningClient) SendCustomMessage(ctx context.Context, msg *lnrpc.SendCustomMessageRequest) (*lnrpc.SendCustomMessageResponse, error) {
 	args := m.Called(ctx, msg)
 	if args.Get(0) == nil {
@@ -138,6 +145,11 @@ func (m *MockLightningClient) GetNodeInfo(pubkey string) (*lightning.NodeInfo, e
 
 func (m *MockLightningClient) LookupInvoiceState(ctx context.Context, paymentRequest string) (lightning.InvoiceState, error) {
 	args := m.Called(ctx, paymentRequest)
+	return args.Get(0).(lightning.InvoiceState), args.Error(1)
+}
+
+func (m *MockLightningClient) LookupInvoiceStateByHash(ctx context.Context, paymentHash []byte) (lightning.InvoiceState, error) {
+	args := m.Called(ctx, paymentHash)
 	return args.Get(0).(lightning.InvoiceState), args.Error(1)
 }
 
@@ -233,6 +245,11 @@ func (m *MockOpeningStore) CountLsps1Orders(clientNodeId string, state string, e
 	return args.Int(0), args.Error(1)
 }
 
+func (m *MockOpeningStore) CountLsps2PendingRegistrations(peerId string) (int, error) {
+	args := m.Called(peerId)
+	return args.Int(0), args.Error(1)
+}
+
 func (m *MockOpeningStore) CountLsps5Webhooks(clientNodeId string) (int, error) {
 	args := m.Called(clientNodeId)
 	return args.Int(0), args.Error(1)
@@ -266,9 +283,9 @@ func (m *MockOpeningStore) GetAllCreatedLsps1Orders() ([]*core.Lsps1Order, error
 	return args.Get(0).([]*core.Lsps1Order), args.Error(1)
 }
 
-func (m *MockOpeningStore) UpdateLsps1OrderFunding(orderId string, fundingTxid string, fundingOutpoint int) error {
+func (m *MockOpeningStore) UpdateLsps1OrderFunding(orderId string, fundingTxid string, fundingOutpoint int) (bool, error) {
 	args := m.Called(orderId, fundingTxid, fundingOutpoint)
-	return args.Error(0)
+	return args.Bool(0), args.Error(1)
 }
 
 func (m *MockOpeningStore) GetFeeParamsMenu(token string, privateKey *btcec.PrivateKey) ([]*core.OpeningFeeParams, error) {
@@ -284,8 +301,8 @@ func (m *MockOpeningStore) ValidateOpeningFeeParams(params *core.OpeningFeeParam
 	return args.Bool(0)
 }
 
-func (m *MockOpeningStore) IsCurrentChainFeeCheaper(token string, params *core.OpeningFeeParams) bool {
-	args := m.Called(token, params)
+func (m *MockOpeningStore) IsCurrentChainFeeCheaper(currentFeeratePerVByte *float64, referenceFeeratePerVByte float64) bool {
+	args := m.Called(currentFeeratePerVByte, referenceFeeratePerVByte)
 	return args.Bool(0)
 }
 
@@ -297,6 +314,21 @@ func (m *MockOpeningStore) GetReservedLiquidity() (uint64, error) {
 func (m *MockOpeningStore) ExpireStaleOrders() (int64, error) {
 	args := m.Called()
 	return args.Get(0).(int64), args.Error(1)
+}
+
+func (m *MockOpeningStore) ExpireStaleLsps2Registrations() (int64, error) {
+	args := m.Called()
+	return args.Get(0).(int64), args.Error(1)
+}
+
+func (m *MockOpeningStore) ReserveLsps1Order(order *core.Lsps1Order, availableWalletBalanceLoki uint64) (bool, error) {
+	args := m.Called(order, availableWalletBalanceLoki)
+	return args.Bool(0), args.Error(1)
+}
+
+func (m *MockOpeningStore) ReserveLsps2Buy(reg *core.Lsps2BuyRegistration, availableWalletBalanceLoki uint64) (bool, error) {
+	args := m.Called(reg, availableWalletBalanceLoki)
+	return args.Bool(0), args.Error(1)
 }
 
 func (m *MockLightningClient) WalletBalance(ctx context.Context) (*lightning.WalletBalanceResult, error) {
@@ -497,7 +529,7 @@ func TestProcessSettledInvoice_TriggerChannelOpen(t *testing.T) {
 	})).Return(chanPoint, nil)
 
 	// Store updates
-	mockStore.On("UpdateLsps1OrderFunding", "test-order-123", chanPoint.Hash.String(), 0).Return(nil)
+	mockStore.On("UpdateLsps1OrderFunding", "test-order-123", chanPoint.Hash.String(), 0).Return(true, nil)
 	mockStore.On("UpdateLsps1OrderState", "test-order-123", "COMPLETED", "PAID", "PAID").Return(true, nil)
 
 	mockNotification := new(MockNotificationService)
@@ -628,7 +660,7 @@ func TestLsps1SettlementService_StartupRecovery(t *testing.T) {
 		Index: 0,
 	}
 	mockClient.On("OpenChannel", mock.Anything).Return(chanPoint, nil)
-	mockStore.On("UpdateLsps1OrderFunding", "stale-order-001", chanPoint.Hash.String(), 0).Return(nil)
+	mockStore.On("UpdateLsps1OrderFunding", "stale-order-001", chanPoint.Hash.String(), 0).Return(true, nil)
 	mockStore.On("UpdateLsps1OrderState", "stale-order-001", "COMPLETED", "PAID", "PAID").Return(true, nil)
 	mockNotification.On("NotifyOrderStateChanged", peerPubkey, "stale-order-001", "COMPLETED", chanPoint.String(), "").Return(true, nil)
 
@@ -717,7 +749,7 @@ func TestF1_ConcurrentSettlementAndRecoveryOpenExactlyOneChannel(t *testing.T) {
 
 	chanPoint := &wire.OutPoint{Hash: chainhash.Hash{0xf1}, Index: 0}
 	mockClient.On("OpenChannel", mock.Anything).Return(chanPoint, nil)
-	mockStore.On("UpdateLsps1OrderFunding", orderId, mock.Anything, mock.Anything).Return(nil)
+	mockStore.On("UpdateLsps1OrderFunding", orderId, mock.Anything, mock.Anything).Return(true, nil)
 
 	historyStore := new(MockHistoryStore)
 	conf := &config.NodeConfig{FeeRate: 0.000001, BaseFeeMloki: 1000, TimeLockDelta: 40}
@@ -892,7 +924,7 @@ func TestOpenChannelForHeldOrder_Success(t *testing.T) {
 	})).Return(chanPoint, nil)
 	mockClient.On("SettleInvoice", mock.Anything, preimageBytes).Return(nil)
 
-	mockStore.On("UpdateLsps1OrderFunding", "held-order-2", chanPoint.Hash.String(), 0).Return(nil)
+	mockStore.On("UpdateLsps1OrderFunding", "held-order-2", chanPoint.Hash.String(), 0).Return(true, nil)
 	mockStore.On("UpdateLsps1OrderState", "held-order-2", "COMPLETED", "PAID", "PAID").Return(true, nil)
 	mockNotification.On("NotifyOrderStateChanged", peerPubkey, "held-order-2", "COMPLETED", chanPoint.String(), "").Return(true, nil)
 
@@ -989,8 +1021,9 @@ func TestSettleHeldOrderInvoice_RetriesThenSucceeds(t *testing.T) {
 
 	svc := NewLsps1SettlementService(mockClient, mockStore, historyStore, config.NewNodeConfigRef(conf), feeEstimator, chain.FeeStrategyEconomy, nil)
 
-	svc.settleHeldOrderInvoice(order)
+	result := svc.settleHeldOrderInvoice(order)
 
+	assert.True(t, result, "must report success once SettleInvoice eventually succeeds, not just retry silently")
 	mockClient.AssertExpectations(t)
 	mockClient.AssertNumberOfCalls(t, "SettleInvoice", 2)
 }
@@ -1033,7 +1066,7 @@ func TestRecoverStuckOrders_HeldOrder_UsesOpenChannelForHeldOrder(t *testing.T) 
 	chanPoint := &wire.OutPoint{Hash: chainhash.Hash{0xcc}}
 	mockClient.On("OpenChannel", mock.Anything).Return(chanPoint, nil)
 	mockClient.On("SettleInvoice", mock.Anything, preimageBytes).Return(nil)
-	mockStore.On("UpdateLsps1OrderFunding", "held-recovery-1", chanPoint.Hash.String(), 0).Return(nil)
+	mockStore.On("UpdateLsps1OrderFunding", "held-recovery-1", chanPoint.Hash.String(), 0).Return(true, nil)
 	mockStore.On("UpdateLsps1OrderState", "held-recovery-1", "COMPLETED", "PAID", "PAID").Return(true, nil)
 	mockNotification.On("NotifyOrderStateChanged", peerPubkey, "held-recovery-1", "COMPLETED", chanPoint.String(), "").Return(true, nil)
 
@@ -1106,7 +1139,7 @@ func TestOpenChannelForHeldOrder_ReconciledChannel_SettlesInvoice(t *testing.T) 
 	// claimedChannelPoints: no order has claimed this channel point yet.
 	mockStore.On("ListLsps1Orders", 500, 0).Return([]*core.Lsps1Order{}, nil)
 
-	mockStore.On("UpdateLsps1OrderFunding", "held-order-5", orphanPoint.Hash.String(), 0).Return(nil)
+	mockStore.On("UpdateLsps1OrderFunding", "held-order-5", orphanPoint.Hash.String(), 0).Return(true, nil)
 	mockStore.On("UpdateLsps1OrderState", "held-order-5", "COMPLETED", "PAID", "PAID").Return(true, nil)
 	mockNotification.On("NotifyOrderStateChanged", peerPubkey, "held-order-5", "COMPLETED", orphanPoint.String(), "").Return(true, nil)
 
@@ -1124,6 +1157,298 @@ func TestOpenChannelForHeldOrder_ReconciledChannel_SettlesInvoice(t *testing.T) 
 	mockStore.AssertExpectations(t)
 	mockNotification.AssertExpectations(t)
 	mockClient.AssertNotCalled(t, "CancelInvoice", mock.Anything, mock.Anything)
+}
+
+// TestOpenChannelForHeldOrder_SettleInvoiceFailsPermanently_DoesNotMarkCompleted
+// is the regression test for H-2: OpenChannel succeeds (a real on-chain
+// funding tx is broadcast, real fees spent), but SettleInvoice fails all its
+// retries. The order must NOT be marked COMPLETED -- the client's HTLC was
+// never actually captured -- and must NOT be cancelled either, since the
+// channel is already open and irreversible at that point. Funding must
+// still be recorded, so a later recovery pass can find and retry it (H-3/H-4).
+func TestOpenChannelForHeldOrder_SettleInvoiceFailsPermanently_DoesNotMarkCompleted(t *testing.T) {
+	mockClient := new(MockLightningClient)
+	mockStore := new(MockOpeningStore)
+	historyStore := new(MockHistoryStore)
+	feeEstimator := new(MockFeeEstimator)
+	mockNotification := new(MockNotificationService)
+	conf := &config.NodeConfig{
+		FeeRate:       0.000001,
+		BaseFeeMloki:  1000,
+		TimeLockDelta: 4000,
+	}
+
+	preimageHex, preimageBytes, _ := testHeldOrderPreimage()
+	peerPubkey := "02677063d89856f4d04be859e9a4d3393165b6f3cd78641bc3c4ef9ca2fde37f"
+	peerIdBytes, _ := hex.DecodeString(peerPubkey)
+
+	order := &core.Lsps1Order{
+		OrderId:           "held-order-settle-fails",
+		PeerId:            peerPubkey,
+		OrderState:        "PAID",
+		PaymentState:      "HOLD",
+		PaymentPreimage:   &preimageHex,
+		ClientBalanceLoki: 1000000,
+		LspBalanceLoki:    5000000,
+	}
+
+	mockClient.On("IsConnected", peerIdBytes).Return(true, nil)
+	feeEst := &chain.FeeEstimation{LokiPerVByte: func() *float64 { f := 1.0; return &f }()}
+	feeEstimator.On("EstimateFeeRate", mock.Anything, chain.FeeStrategyEconomy).Return(feeEst, nil)
+
+	chanPoint := &wire.OutPoint{Hash: chainhash.Hash{0xee}}
+	mockClient.On("OpenChannel", mock.Anything).Return(chanPoint, nil)
+	// SettleInvoice fails every one of settleHeldOrderInvoice's 5 attempts.
+	mockClient.On("SettleInvoice", mock.Anything, preimageBytes).Return(assert.AnError)
+
+	mockStore.On("UpdateLsps1OrderFunding", "held-order-settle-fails", chanPoint.Hash.String(), 0).Return(true, nil)
+
+	svc := NewLsps1SettlementService(mockClient, mockStore, historyStore, config.NewNodeConfigRef(conf), feeEstimator, chain.FeeStrategyEconomy, mockNotification)
+
+	svc.openChannelForHeldOrder(order)
+
+	time.Sleep(50 * time.Millisecond)
+
+	mockClient.AssertExpectations(t)
+	mockStore.AssertExpectations(t)
+	mockStore.AssertNotCalled(t, "UpdateLsps1OrderState", mock.Anything, mock.Anything, mock.Anything, mock.Anything)
+	mockClient.AssertNotCalled(t, "CancelInvoice", mock.Anything, mock.Anything)
+	mockNotification.AssertNotCalled(t, "NotifyOrderStateChanged", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything)
+}
+
+// TestOpenChannelForHeldOrder_FundingClaimFails_DoesNotSettleOrComplete is
+// the regression test for S-6: OpenChannel succeeds (a real channel is
+// broadcast), but the funding claim itself doesn't succeed (a transient DB
+// error, or -- per S-5 -- another order already claimed this exact channel
+// point). recordHeldOrderFundingAndSettle must not proceed to
+// settle/complete in that case: SettleInvoice must never be called, and
+// the order must be left as-is (order_state=PAID/payment_state=HOLD, no
+// FundingTxid recorded) for a later recoverStuckOrders pass to retry via
+// the existing orphaned-channel recovery path.
+func TestOpenChannelForHeldOrder_FundingClaimFails_DoesNotSettleOrComplete(t *testing.T) {
+	mockClient := new(MockLightningClient)
+	mockStore := new(MockOpeningStore)
+	historyStore := new(MockHistoryStore)
+	feeEstimator := new(MockFeeEstimator)
+	mockNotification := new(MockNotificationService)
+	conf := &config.NodeConfig{
+		FeeRate:       0.000001,
+		BaseFeeMloki:  1000,
+		TimeLockDelta: 4000,
+	}
+
+	preimageHex, _, _ := testHeldOrderPreimage()
+	peerPubkey := "02677063d89856f4d04be859e9a4d3393165b6f3cd78641bc3c4ef9ca2fde37f"
+	peerIdBytes, _ := hex.DecodeString(peerPubkey)
+
+	order := &core.Lsps1Order{
+		OrderId:           "held-order-funding-claim-fails",
+		PeerId:            peerPubkey,
+		OrderState:        "PAID",
+		PaymentState:      "HOLD",
+		PaymentPreimage:   &preimageHex,
+		ClientBalanceLoki: 1000000,
+		LspBalanceLoki:    5000000,
+	}
+
+	mockClient.On("IsConnected", peerIdBytes).Return(true, nil)
+	feeEst := &chain.FeeEstimation{LokiPerVByte: func() *float64 { f := 1.0; return &f }()}
+	feeEstimator.On("EstimateFeeRate", mock.Anything, chain.FeeStrategyEconomy).Return(feeEst, nil)
+
+	chanPoint := &wire.OutPoint{Hash: chainhash.Hash{0xff}}
+	mockClient.On("OpenChannel", mock.Anything).Return(chanPoint, nil)
+	// Someone else already claimed this exact channel point (S-5).
+	mockStore.On("UpdateLsps1OrderFunding", "held-order-funding-claim-fails", chanPoint.Hash.String(), 0).Return(false, nil)
+
+	svc := NewLsps1SettlementService(mockClient, mockStore, historyStore, config.NewNodeConfigRef(conf), feeEstimator, chain.FeeStrategyEconomy, mockNotification)
+
+	svc.openChannelForHeldOrder(order)
+
+	time.Sleep(50 * time.Millisecond)
+
+	mockClient.AssertExpectations(t)
+	mockStore.AssertExpectations(t)
+	mockClient.AssertNotCalled(t, "SettleInvoice", mock.Anything, mock.Anything)
+	mockStore.AssertNotCalled(t, "UpdateLsps1OrderState", mock.Anything, mock.Anything, mock.Anything, mock.Anything)
+	mockNotification.AssertNotCalled(t, "NotifyOrderStateChanged", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything)
+}
+
+// TestOpenChannelForOrder_FundingClaimFails_DoesNotMarkCompleted is
+// S-6's legacy-flow counterpart: OpenChannel succeeds, but
+// UpdateLsps1OrderFunding fails outright (a transient DB error). The order
+// must not be marked COMPLETED with no funding_txid ever persisted --
+// UpdateLsps1OrderState must never be called.
+func TestOpenChannelForOrder_FundingClaimFails_DoesNotMarkCompleted(t *testing.T) {
+	mockClient := new(MockLightningClient)
+	mockStore := new(MockOpeningStore)
+	historyStore := new(MockHistoryStore)
+	feeEstimator := new(MockFeeEstimator)
+	mockNotification := new(MockNotificationService)
+	conf := &config.NodeConfig{
+		FeeRate:       0.000001,
+		BaseFeeMloki:  1000,
+		TimeLockDelta: 4000,
+	}
+
+	peerPubkey := "02677063d89856f4d04be859e9a4d3393165b6f3cd78641bc3c4ef9ca2fde37f"
+	peerIdBytes, _ := hex.DecodeString(peerPubkey)
+
+	order := &core.Lsps1Order{
+		OrderId:           "legacy-order-funding-write-fails",
+		PeerId:            peerPubkey,
+		OrderState:        "PAID",
+		PaymentState:      "PAID",
+		ClientBalanceLoki: 1000000,
+		LspBalanceLoki:    5000000,
+	}
+
+	mockClient.On("IsConnected", peerIdBytes).Return(true, nil)
+	feeEst := &chain.FeeEstimation{LokiPerVByte: func() *float64 { f := 1.0; return &f }()}
+	feeEstimator.On("EstimateFeeRate", mock.Anything, chain.FeeStrategyEconomy).Return(feeEst, nil)
+
+	chanPoint := &wire.OutPoint{Hash: chainhash.Hash{0x11}}
+	mockClient.On("OpenChannel", mock.Anything).Return(chanPoint, nil)
+	mockStore.On("UpdateLsps1OrderFunding", "legacy-order-funding-write-fails", chanPoint.Hash.String(), 0).Return(false, assert.AnError)
+
+	svc := NewLsps1SettlementService(mockClient, mockStore, historyStore, config.NewNodeConfigRef(conf), feeEstimator, chain.FeeStrategyEconomy, mockNotification)
+
+	svc.openChannelForOrder(order)
+
+	time.Sleep(50 * time.Millisecond)
+
+	mockClient.AssertExpectations(t)
+	mockStore.AssertExpectations(t)
+	mockStore.AssertNotCalled(t, "UpdateLsps1OrderState", mock.Anything, mock.Anything, mock.Anything, mock.Anything)
+	mockNotification.AssertNotCalled(t, "NotifyOrderStateChanged", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything)
+}
+
+// TestRecoverStuckOrders_HeldOrderWithFunding_RoutesToHoldAwareRecovery is
+// the regression test for H-3/H-4: a HOLD order that crashed AFTER funding
+// was recorded (the channel-open half of an earlier openChannelForHeldOrder
+// attempt succeeded) must still go through the hold-aware recovery path
+// (which verifies the channel and retries settlement) rather than the
+// settlement-unaware reconcileFundedOrder, which would mark it COMPLETED
+// purely because a channel exists -- without ever checking or retrying
+// SettleInvoice. If routing were wrong (FundingTxid checked before
+// PaymentState, the pre-fix behavior), GetChannel/SettleInvoice below would
+// never be called and UpdateLsps1OrderState would fire with the legacy
+// (non-preimage-aware) COMPLETED write instead.
+func TestRecoverStuckOrders_HeldOrderWithFunding_RoutesToHoldAwareRecovery(t *testing.T) {
+	mockClient := new(MockLightningClient)
+	mockStore := new(MockOpeningStore)
+	historyStore := new(MockHistoryStore)
+	feeEstimator := new(MockFeeEstimator)
+	mockNotification := new(MockNotificationService)
+	conf := &config.NodeConfig{}
+
+	preimageHex, preimageBytes, _ := testHeldOrderPreimage()
+	peerPubkey := "02677063d89856f4d04be859e9a4d3393165b6f3cd78641bc3c4ef9ca2fde37f"
+	peerIdBytes, _ := hex.DecodeString(peerPubkey)
+
+	txid := "aabbccdd"
+	outpoint := 0
+	heldOrder := &core.Lsps1Order{
+		OrderId:         "held-recovery-funded",
+		PeerId:          peerPubkey,
+		OrderState:      "PAID",
+		PaymentState:    "HOLD",
+		PaymentPreimage: &preimageHex,
+		FundingTxid:     &txid,
+		FundingOutpoint: &outpoint,
+	}
+
+	mockStore.On("GetAllPaidLsps1Orders").Return([]*core.Lsps1Order{heldOrder}, nil)
+	mockStore.On("GetAllCreatedLsps1Orders").Return([]*core.Lsps1Order{}, nil)
+
+	channelPoint, err := lightning.NewOutPointFromString(fmt.Sprintf("%s:%d", txid, outpoint))
+	require.NoError(t, err)
+	mockClient.On("GetChannel", peerIdBytes, *channelPoint).Return(&lightning.GetChannelResult{}, nil)
+	mockClient.On("SettleInvoice", mock.Anything, preimageBytes).Return(nil)
+	mockStore.On("UpdateLsps1OrderState", "held-recovery-funded", "COMPLETED", "PAID", "PAID").Return(true, nil)
+	mockNotification.On("NotifyOrderStateChanged", peerPubkey, "held-recovery-funded", "COMPLETED", fmt.Sprintf("%s:%d", txid, outpoint), "").Return(true, nil)
+
+	svc := NewLsps1SettlementService(mockClient, mockStore, historyStore, config.NewNodeConfigRef(conf), feeEstimator, chain.FeeStrategyEconomy, mockNotification)
+
+	svc.recoverStuckOrders()
+
+	time.Sleep(50 * time.Millisecond)
+
+	mockClient.AssertExpectations(t)
+	mockStore.AssertExpectations(t)
+	mockNotification.AssertExpectations(t)
+	mockClient.AssertNotCalled(t, "OpenChannel", mock.Anything)
+}
+
+// TestReconcileFundedHeldOrder_ChannelNotActive_DoesNotSettle proves the
+// channel-verification gate: if the recorded funding outpoint doesn't
+// correspond to an active channel in LND (e.g. force-closed before recovery
+// ran), settlement must not be attempted and the order must be left as-is
+// for manual review -- mirroring reconcileFundedOrder's own conservatism
+// for the legacy flow.
+func TestReconcileFundedHeldOrder_ChannelNotActive_DoesNotSettle(t *testing.T) {
+	mockClient := new(MockLightningClient)
+	mockStore := new(MockOpeningStore)
+	historyStore := new(MockHistoryStore)
+	feeEstimator := new(MockFeeEstimator)
+	mockNotification := new(MockNotificationService)
+	conf := &config.NodeConfig{}
+
+	preimageHex, _, _ := testHeldOrderPreimage()
+	peerPubkey := "02677063d89856f4d04be859e9a4d3393165b6f3cd78641bc3c4ef9ca2fde37f"
+	peerIdBytes, _ := hex.DecodeString(peerPubkey)
+
+	txid := "aabbccdd"
+	outpoint := 0
+	order := &core.Lsps1Order{
+		OrderId:         "held-recovery-force-closed",
+		PeerId:          peerPubkey,
+		OrderState:      "PAID",
+		PaymentState:    "HOLD",
+		PaymentPreimage: &preimageHex,
+		FundingTxid:     &txid,
+		FundingOutpoint: &outpoint,
+	}
+
+	channelPoint, err := lightning.NewOutPointFromString(fmt.Sprintf("%s:%d", txid, outpoint))
+	require.NoError(t, err)
+	mockClient.On("GetChannel", peerIdBytes, *channelPoint).Return(nil, assert.AnError)
+
+	svc := NewLsps1SettlementService(mockClient, mockStore, historyStore, config.NewNodeConfigRef(conf), feeEstimator, chain.FeeStrategyEconomy, mockNotification)
+
+	svc.reconcileFundedHeldOrder(order)
+
+	mockClient.AssertExpectations(t)
+	mockClient.AssertNotCalled(t, "SettleInvoice", mock.Anything, mock.Anything)
+	mockStore.AssertNotCalled(t, "UpdateLsps1OrderState", mock.Anything, mock.Anything, mock.Anything, mock.Anything)
+}
+
+// TestVerifyChannelActive_NilFunding_ReturnsFalseNoPanic is the regression
+// test for S-8: verifyChannelActive is documented as a shared, reusable
+// helper, but previously dereferenced order.FundingTxid/FundingOutpoint
+// with no nil-check of its own -- both current callers happen to always
+// guard it first, so this never fires in practice, but a future caller
+// (or a reordering of an existing one, the exact class of mistake H-4 was)
+// would panic instead of failing loudly.
+func TestVerifyChannelActive_NilFunding_ReturnsFalseNoPanic(t *testing.T) {
+	mockClient := new(MockLightningClient)
+	mockStore := new(MockOpeningStore)
+	historyStore := new(MockHistoryStore)
+	feeEstimator := new(MockFeeEstimator)
+	conf := &config.NodeConfig{}
+
+	order := &core.Lsps1Order{
+		OrderId: "order-no-funding-recorded",
+		PeerId:  "02677063d89856f4d04be859e9a4d3393165b6f3cd78641bc3c4ef9ca2fde37f",
+		// FundingTxid/FundingOutpoint deliberately left nil.
+	}
+
+	svc := NewLsps1SettlementService(mockClient, mockStore, historyStore, config.NewNodeConfigRef(conf), feeEstimator, chain.FeeStrategyEconomy, nil)
+
+	assert.NotPanics(t, func() {
+		result := svc.verifyChannelActive(order)
+		assert.False(t, result)
+	})
+	mockClient.AssertNotCalled(t, "GetChannel", mock.Anything, mock.Anything)
 }
 
 // TestRecoverSettledCreatedOrders_AcceptedInvoice_RoutesToHeldOrderPath
@@ -1157,7 +1482,10 @@ func TestRecoverSettledCreatedOrders_AcceptedInvoice_RoutesToHeldOrderPath(t *te
 
 	mockStore.On("GetAllPaidLsps1Orders").Return([]*core.Lsps1Order{}, nil)
 	mockStore.On("GetAllCreatedLsps1Orders").Return([]*core.Lsps1Order{createdOrder}, nil)
-	mockClient.On("LookupInvoiceState", mock.Anything, invoice).Return(lightning.InvoiceStateAccepted, nil)
+	// H-11: a hold-invoice order (has PaymentPreimage) looks up its state
+	// by hash, derived locally, instead of LookupInvoiceState's
+	// DecodePayReq round-trip.
+	mockClient.On("LookupInvoiceStateByHash", mock.Anything, hash[:]).Return(lightning.InvoiceStateAccepted, nil)
 
 	mockStore.On("UpdateLsps1OrderState", "held-recovery-2", "PAID", "HOLD", "CREATED").Return(true, nil)
 	mockNotification.On("NotifyOrderStateChanged", peerPubkey, "held-recovery-2", "PAID", "", "").Return(true, nil)
@@ -1189,4 +1517,113 @@ func TestRecoverSettledCreatedOrders_AcceptedInvoice_RoutesToHeldOrderPath(t *te
 	mockClient.AssertCalled(t, "CancelInvoice", mock.Anything, hash[:])
 	mockStore.AssertCalled(t, "UpdateLsps1OrderState", "held-recovery-2", "FAILED", "REFUNDED", "PAID")
 	mockNotification.AssertExpectations(t)
+}
+
+// TestOpenChannelForOrder_OpenChannelFails_ConcurrentWriterWins_NoSpuriousNotification
+// is the regression test for a review finding: openChannelForOrder (touched
+// by this diff for the H-13 buildOpenChannelRequest extraction) used to
+// discard the CAS `updated` bool on its FAILED-path UpdateLsps1OrderState
+// call -- the same pattern fixed in cancelHeldOrder/reconcileFundedOrder/
+// reconcileUnclaimedChannel for H-5, but missed in this function. If a
+// concurrent writer already moved the order out of PAID (e.g. it actually
+// completed via a racing path) by the time this FAILED write runs, the CAS
+// silently no-ops, but the old code still fired a FAILED notification for
+// an order the DB shows as something else entirely.
+func TestOpenChannelForOrder_OpenChannelFails_ConcurrentWriterWins_NoSpuriousNotification(t *testing.T) {
+	mockClient := new(MockLightningClient)
+	mockStore := new(MockOpeningStore)
+	historyStore := new(MockHistoryStore)
+	feeEstimator := new(MockFeeEstimator)
+	mockNotification := new(MockNotificationService)
+	conf := &config.NodeConfig{
+		FeeRate:       0.000001,
+		BaseFeeMloki:  1000,
+		TimeLockDelta: 4000,
+	}
+
+	peerPubkey := "02677063d89856f4d04be859e9a4d3393165b6f3cd78641bc3c4ef9ca2fde37f"
+	peerIdBytes, _ := hex.DecodeString(peerPubkey)
+
+	order := &core.Lsps1Order{
+		OrderId:           "concurrent-failed-order",
+		PeerId:            peerPubkey,
+		OrderState:        "PAID",
+		PaymentState:      "PAID",
+		ClientBalanceLoki: 1000000,
+		LspBalanceLoki:    5000000,
+	}
+
+	mockClient.On("IsConnected", peerIdBytes).Return(true, nil)
+	feeEst := &chain.FeeEstimation{LokiPerVByte: func() *float64 { f := 1.0; return &f }()}
+	feeEstimator.On("EstimateFeeRate", mock.Anything, chain.FeeStrategyEconomy).Return(feeEst, nil)
+
+	mockClient.On("OpenChannel", mock.Anything).Return(nil, assert.AnError)
+	// reconcileUnclaimedChannel: no existing channel to this peer, so
+	// there's nothing to reconcile -- falls through to the FAILED write.
+	mockClient.On("ListChannels").Return([]*lightning.Channel{}, nil)
+
+	// Simulate a concurrent writer having already moved the order out of
+	// PAID (e.g. a racing recovery path completed it): the CAS no-ops.
+	mockStore.On("UpdateLsps1OrderState", "concurrent-failed-order", "FAILED", "PAID", "PAID").Return(false, nil)
+
+	svc := NewLsps1SettlementService(mockClient, mockStore, historyStore, config.NewNodeConfigRef(conf), feeEstimator, chain.FeeStrategyEconomy, mockNotification)
+
+	svc.openChannelForOrder(order)
+
+	time.Sleep(50 * time.Millisecond)
+
+	mockClient.AssertExpectations(t)
+	mockStore.AssertExpectations(t)
+	mockNotification.AssertNotCalled(t, "NotifyOrderStateChanged", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything)
+}
+
+// TestOpenChannelForOrder_Success_ConcurrentWriterWins_NoSpuriousNotification
+// is the COMPLETED-path counterpart: OpenChannel succeeds, but the
+// COMPLETED CAS no-ops because a concurrent writer already transitioned
+// the order. Must not fire a COMPLETED notification for a transition that
+// didn't actually happen at the DB level.
+func TestOpenChannelForOrder_Success_ConcurrentWriterWins_NoSpuriousNotification(t *testing.T) {
+	mockClient := new(MockLightningClient)
+	mockStore := new(MockOpeningStore)
+	historyStore := new(MockHistoryStore)
+	feeEstimator := new(MockFeeEstimator)
+	mockNotification := new(MockNotificationService)
+	conf := &config.NodeConfig{
+		FeeRate:       0.000001,
+		BaseFeeMloki:  1000,
+		TimeLockDelta: 4000,
+	}
+
+	peerPubkey := "02677063d89856f4d04be859e9a4d3393165b6f3cd78641bc3c4ef9ca2fde37f"
+	peerIdBytes, _ := hex.DecodeString(peerPubkey)
+
+	order := &core.Lsps1Order{
+		OrderId:           "concurrent-completed-order",
+		PeerId:            peerPubkey,
+		OrderState:        "PAID",
+		PaymentState:      "PAID",
+		ClientBalanceLoki: 1000000,
+		LspBalanceLoki:    5000000,
+	}
+
+	mockClient.On("IsConnected", peerIdBytes).Return(true, nil)
+	feeEst := &chain.FeeEstimation{LokiPerVByte: func() *float64 { f := 1.0; return &f }()}
+	feeEstimator.On("EstimateFeeRate", mock.Anything, chain.FeeStrategyEconomy).Return(feeEst, nil)
+
+	chanPoint := &wire.OutPoint{Hash: chainhash.Hash{0xab}}
+	mockClient.On("OpenChannel", mock.Anything).Return(chanPoint, nil)
+	mockStore.On("UpdateLsps1OrderFunding", "concurrent-completed-order", chanPoint.Hash.String(), 0).Return(true, nil)
+	// Simulate a concurrent writer having already moved the order out of
+	// PAID: the COMPLETED CAS no-ops.
+	mockStore.On("UpdateLsps1OrderState", "concurrent-completed-order", "COMPLETED", "PAID", "PAID").Return(false, nil)
+
+	svc := NewLsps1SettlementService(mockClient, mockStore, historyStore, config.NewNodeConfigRef(conf), feeEstimator, chain.FeeStrategyEconomy, mockNotification)
+
+	svc.openChannelForOrder(order)
+
+	time.Sleep(50 * time.Millisecond)
+
+	mockClient.AssertExpectations(t)
+	mockStore.AssertExpectations(t)
+	mockNotification.AssertNotCalled(t, "NotifyOrderStateChanged", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything)
 }

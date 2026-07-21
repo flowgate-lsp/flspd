@@ -102,8 +102,9 @@ func (m *MockOpeningStore) UpdateLsps1OrderState(orderId string, newState string
 	return args.Bool(0), args.Error(1)
 }
 
-func (m *MockOpeningStore) UpdateLsps1OrderFunding(orderId string, fundingTxid string, fundingOutpoint int) error {
-	return m.Called(orderId, fundingTxid, fundingOutpoint).Error(0)
+func (m *MockOpeningStore) UpdateLsps1OrderFunding(orderId string, fundingTxid string, fundingOutpoint int) (bool, error) {
+	args := m.Called(orderId, fundingTxid, fundingOutpoint)
+	return args.Bool(0), args.Error(1)
 }
 
 func (m *MockOpeningStore) RegisterLsps5Webhook(webhook *core.Lsps5Webhook) error {
@@ -124,6 +125,11 @@ func (m *MockOpeningStore) CountLsps1Orders(clientNodeId string, state string, e
 	return args.Int(0), args.Error(1)
 }
 
+func (m *MockOpeningStore) CountLsps2PendingRegistrations(peerId string) (int, error) {
+	args := m.Called(peerId)
+	return args.Int(0), args.Error(1)
+}
+
 func (m *MockOpeningStore) CountLsps5Webhooks(clientNodeId string) (int, error) {
 	args := m.Called(clientNodeId)
 	return args.Int(0), args.Error(1)
@@ -137,6 +143,21 @@ func (m *MockOpeningStore) GetReservedLiquidity() (uint64, error) {
 func (m *MockOpeningStore) ExpireStaleOrders() (int64, error) {
 	args := m.Called()
 	return args.Get(0).(int64), args.Error(1)
+}
+
+func (m *MockOpeningStore) ExpireStaleLsps2Registrations() (int64, error) {
+	args := m.Called()
+	return args.Get(0).(int64), args.Error(1)
+}
+
+func (m *MockOpeningStore) ReserveLsps1Order(order *core.Lsps1Order, availableWalletBalanceLoki uint64) (bool, error) {
+	args := m.Called(order, availableWalletBalanceLoki)
+	return args.Bool(0), args.Error(1)
+}
+
+func (m *MockOpeningStore) ReserveLsps2Buy(reg *core.Lsps2BuyRegistration, availableWalletBalanceLoki uint64) (bool, error) {
+	args := m.Called(reg, availableWalletBalanceLoki)
+	return args.Bool(0), args.Error(1)
 }
 
 func (m *MockOpeningStore) ListLsps1Orders(limit, offset int) ([]*core.Lsps1Order, error) {
@@ -162,16 +183,8 @@ func (m *MockOpeningService) ValidateOpeningFeeParams(params *core.OpeningFeePar
 	return m.Called(params, publicKey).Bool(0)
 }
 
-func (m *MockOpeningService) IsCurrentChainFeeCheaper(token string, params *core.OpeningFeeParams) bool {
-	return m.Called(token, params).Bool(0)
-}
-
-func (m *MockOpeningService) RegisterLsps2Buy(reg *core.Lsps2BuyRegistration) error {
-	return m.Called(reg).Error(0)
-}
-
-func (m *MockOpeningService) RegisterLsps1Order(order *core.Lsps1Order) error {
-	return m.Called(order).Error(0)
+func (m *MockOpeningService) IsCurrentChainFeeCheaper(currentFeeratePerVByte *float64, referenceFeeratePerVByte float64) bool {
+	return m.Called(currentFeeratePerVByte, referenceFeeratePerVByte).Bool(0)
 }
 
 func (m *MockOpeningService) GetLsps1Order(orderId string) (*core.Lsps1Order, error) {
@@ -194,6 +207,11 @@ func (m *MockOpeningService) RemoveLsps5Webhook(clientNodeId, appName string) er
 
 func (m *MockOpeningService) CountLsps1Orders(clientNodeId string, state string, excludeExpiredBefore *time.Time) (int, error) {
 	return m.Called(clientNodeId, state, excludeExpiredBefore).Int(0), m.Called(clientNodeId, state, excludeExpiredBefore).Error(1)
+}
+
+func (m *MockOpeningService) CountLsps2PendingRegistrations(peerId string) (int, error) {
+	args := m.Called(peerId)
+	return args.Int(0), args.Error(1)
 }
 
 func (m *MockOpeningService) CountLsps5Webhooks(clientNodeId string) (int, error) {
@@ -343,6 +361,16 @@ func (m *MockLightningClient) LookupInvoiceState(ctx context.Context, paymentReq
 	return args.Get(0).(lightning.InvoiceState), args.Error(1)
 }
 
+func (m *MockLightningClient) LookupInvoiceStateByHash(ctx context.Context, paymentHash []byte) (lightning.InvoiceState, error) {
+	args := m.Called(ctx, paymentHash)
+	return args.Get(0).(lightning.InvoiceState), args.Error(1)
+}
+
+func (m *MockLightningClient) SubscribeSingleInvoice(ctx context.Context, paymentHash []byte) (<-chan *lightning.InvoiceUpdate, <-chan error, error) {
+	args := m.Called(ctx, paymentHash)
+	return args.Get(0).(<-chan *lightning.InvoiceUpdate), args.Get(1).(<-chan error), args.Error(2)
+}
+
 func (m *MockLightningClient) SettleInvoice(ctx context.Context, preimage []byte) error {
 	args := m.Called(ctx, preimage)
 	return args.Error(0)
@@ -388,8 +416,21 @@ func TestDashboardService_RPC(t *testing.T) {
 		// list_orders' own (defaultListLimit, 0) expectation below, since
 		// summaryListLimit != defaultListLimit.
 		mockStore.On("ListLsps1Orders", 1000, 0).Return([]*core.Lsps1Order{}, nil)
-		mockLnd.On("GetBlockHeight").Return(uint32(100), nil).Once()
-		mockLnd.On("ListPeers").Return([]*lightning.Peer{}, nil).Once()
+		mockLnd.On("GetInfo").Return(&lightning.GetInfoResult{
+			SyncedToChain:       true,
+			BlockHeight:         500,
+			NumPeers:            3,
+			NumActiveChannels:   1,
+			NumPendingChannels:  0,
+			NumInactiveChannels: 1,
+		}, nil).Once()
+		// One active channel (counted into outbound/inbound liquidity) and
+		// one inactive channel with a much larger balance (must be
+		// excluded), regression-testing the Active-only aggregation filter.
+		mockLnd.On("ListChannels").Return([]*lightning.Channel{
+			{Active: true, LocalBalance: 500000, RemoteBalance: 250000},
+			{Active: false, LocalBalance: 9000000, RemoteBalance: 9000000},
+		}, nil).Once()
 
 		req := &lsps.JsonRpcRequest{
 			Id:     json.RawMessage(`1`),
@@ -401,6 +442,14 @@ func TestDashboardService_RPC(t *testing.T) {
 		result := resp.Result.(SummaryResponse)
 		assert.Equal(t, "Test Node", result.NodeName)
 		assert.Equal(t, uint64(10000), result.LiquidityBlocked)
+		assert.Equal(t, uint64(500000), result.LiquidityOutbound)
+		assert.Equal(t, uint64(250000), result.LiquidityInbound)
+		assert.Equal(t, "online", result.NodeStatus)
+		assert.True(t, result.SyncedToChain)
+		assert.Equal(t, uint32(500), result.SyncHeight)
+		assert.Equal(t, uint32(3), result.PeersConnected)
+		assert.Equal(t, uint32(1), result.ChannelsActive)
+		assert.Equal(t, uint32(0), result.ChannelsPending)
 	})
 
 	t.Run("list_peers", func(t *testing.T) {

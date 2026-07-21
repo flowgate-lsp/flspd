@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/flokiorg/go-flokicoin/wire"
@@ -20,21 +21,19 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// heldInvoicePollInterval is how often CREATED orders are re-checked
-// against LND's actual invoice state to catch a hold invoice's ACCEPTED
-// transition. This is the *only* reliable way to observe that transition:
-// confirmed live against a real flnd node (2026-07-17) that LND's base
-// SubscribeInvoices RPC only ever delivers "newly added" and "settled"
-// events (invoices.InvoiceSubscription has NewInvoices/SettledInvoices
-// channels and add/settle indexes only, nothing for ACCEPTED) -- a hold
-// invoice's HTLC can be locked in and sitting ACCEPTED at LND with flspd
-// never notified over that stream. recoverSettledCreatedOrders' direct
-// LookupInvoiceState call doesn't have this gap, so it's reused here as a
-// periodic poll, not just a startup sweep. 3s is trivially fast relative to
-// any hold invoice's real safety margin (LND's own hold-invoice-expiry
-// watcher triggers on the order of tens of minutes) -- this just needs to
-// be well under that.
-const heldInvoicePollInterval = 3 * time.Second
+// heldInvoiceSafetyNetPollInterval (H-10/H-11/H-12): CREATED orders'
+// ACCEPTED transition is primarily observed live now, via a per-invoice
+// SubscribeSingleInvoice watcher attached at order-creation time
+// (WatchOrder/watchOrderInvoice) -- LND's base SubscribeInvoices RPC only
+// ever delivers "newly added" and "settled" events, confirmed live against
+// a real flnd node (2026-07-17), so it can't be used for this directly.
+// This poll is now a safety net, not the primary detection path: it covers
+// (a) a watcher whose stream errored and was deliberately not
+// self-retried, and (b) any order that somehow never got WatchOrder called.
+// 60s is still trivially fast relative to a hold invoice's real safety
+// margin (LND's own hold-invoice-expiry watcher triggers on the order of
+// tens of minutes).
+const heldInvoiceSafetyNetPollInterval = 60 * time.Second
 
 // Lsps1SettlementService monitors LND invoice settlements and processes LSPS1 orders
 type Lsps1SettlementService struct {
@@ -51,6 +50,22 @@ type Lsps1SettlementService struct {
 	ctx                 context.Context
 	cancel              context.CancelFunc
 	wg                  sync.WaitGroup
+	// watchedOrders tracks orderId -> struct{} for orders with a live
+	// watchOrderInvoice goroutine currently running (H-12). Makes
+	// WatchOrder idempotent: the periodic safety-net poll re-discovers
+	// every still-OPEN CREATED order on each tick and calls WatchOrder
+	// again, which must be a no-op while a watcher for that order is
+	// already active rather than spawning a duplicate LND stream. Cleared
+	// when a watcher exits, so a later poll tick can re-attach one if an
+	// earlier watcher's stream errored out (deliberately not retried
+	// internally -- see watchOrderInvoice).
+	watchedOrders sync.Map
+	// pollRunning guards heldInvoiceSafetyNetPollInterval's ticker (H-10):
+	// recoverSettledCreatedOrders now runs in its own goroutine per tick
+	// (not inline in the shared event-dispatch select loop), and this
+	// flag skips starting a new run if the previous one is still going,
+	// rather than letting them pile up concurrently.
+	pollRunning atomic.Bool
 }
 
 // NewLsps1SettlementService creates a new settlement monitoring service
@@ -95,7 +110,7 @@ func (s *Lsps1SettlementService) Start(ctx context.Context) error {
 		// Recover stuck orders in a separate goroutine to avoid blocking Start()
 		go s.recoverStuckOrders()
 
-		pollTicker := time.NewTicker(heldInvoicePollInterval)
+		pollTicker := time.NewTicker(heldInvoiceSafetyNetPollInterval)
 		defer pollTicker.Stop()
 
 		for {
@@ -120,16 +135,35 @@ func (s *Lsps1SettlementService) Start(ctx context.Context) error {
 				switch update.State {
 				case lightning.InvoiceStateSettled:
 					s.processSettledInvoice(update)
-				case lightning.InvoiceStateAccepted:
-					// Unreachable via the base SubscribeInvoices RPC in
-					// practice (see heldInvoicePollInterval's doc comment)
-					// -- kept in case a future subscription mechanism
-					// does deliver it. pollTicker below is the real path.
-					s.processAcceptedInvoice(update)
+					// InvoiceStateAccepted has no case here: confirmed live
+					// against real flnd (2026-07-17) that LND's base
+					// SubscribeInvoices RPC never delivers it (see
+					// heldInvoiceSafetyNetPollInterval's doc comment).
+					// watchOrderInvoice's per-invoice SubscribeSingleInvoice
+					// stream is the live detection path now (H-12);
+					// processAcceptedInvoice/processAcceptedOrder remain
+					// directly unit-tested (settlement_service_test.go) and
+					// stay reachable in production via watchOrderInvoice and
+					// the safety-net poll below, not this switch.
 				}
 
 			case <-pollTicker.C:
-				s.recoverSettledCreatedOrders()
+				// H-10: run off this shared select loop, with an overlap
+				// guard, so N pending orders' worth of poll work can never
+				// delay a live invoice event for a different customer the
+				// way it used to when this ran inline here. Tracked by
+				// s.wg (like watchOrderInvoice) so Stop() still waits for
+				// an in-flight poll to finish before returning.
+				if s.pollRunning.CompareAndSwap(false, true) {
+					s.wg.Add(1)
+					go func() {
+						defer s.wg.Done()
+						defer s.pollRunning.Store(false)
+						s.recoverSettledCreatedOrders()
+					}()
+				} else {
+					log.Warn().Msg("LSPS1 Settlement: Safety-net poll still running from a previous tick, skipping this one")
+				}
 			}
 		}
 	}()
@@ -270,10 +304,6 @@ func (s *Lsps1SettlementService) processAcceptedOrder(order *core.Lsps1Order) {
 		go s.notificationService.NotifyOrderStateChanged(order.PeerId, order.OrderId, string(Lsps1OrderStatePaid), "", "")
 	}
 
-	// Reflect the CAS locally so the caller doesn't need a re-fetch.
-	order.OrderState = string(Lsps1OrderStatePaid)
-	order.PaymentState = string(Lsps1PaymentStateHold)
-
 	go s.openChannelForHeldOrder(order)
 }
 
@@ -286,6 +316,11 @@ func (s *Lsps1SettlementService) processAcceptedOrder(order *core.Lsps1Order) {
 // deferring: every second holding the HTLC is a real cost (risk of a
 // force-close as it nears its CLTV expiry), unlike the legacy flow where
 // the money is already safely captured and waiting costs nothing.
+//
+// Always called with order.FundingTxid == nil (a fresh attempt): a HOLD
+// order that already has funding recorded (crash recovery found an earlier
+// attempt's channel-open already broadcast) is routed to
+// reconcileFundedHeldOrder instead -- see recoverStuckOrders (H-4).
 func (s *Lsps1SettlementService) openChannelForHeldOrder(order *core.Lsps1Order) {
 	cfg := s.config.Load()
 
@@ -303,9 +338,15 @@ func (s *Lsps1SettlementService) openChannelForHeldOrder(order *core.Lsps1Order)
 		return
 	}
 
-	connected, err := s.client.IsConnected(peerId)
+	// A connectivity-check RPC error (e.g. a transient gRPC/LND hiccup) is
+	// not the same as a confirmed not-connected result (H-6): the legacy
+	// openChannelForOrder path can afford to just report FAILED and let a
+	// later attempt retry, but a held order's HTLC is actively ticking down
+	// to its CLTV deadline, so a few in-place retries are cheap insurance
+	// against triggering a needless instant refund over a blip.
+	connected, err := s.checkPeerConnectedWithRetry(peerId, order.OrderId)
 	if err != nil {
-		log.Error().Err(err).Str("order_id", order.OrderId).Msg("LSPS1 Settlement: Failed to check peer connectivity")
+		log.Error().Err(err).Str("order_id", order.OrderId).Msg("LSPS1 Settlement: Failed to check peer connectivity after retries")
 		s.cancelHeldOrder(order, err)
 		return
 	}
@@ -319,40 +360,17 @@ func (s *Lsps1SettlementService) openChannelForHeldOrder(order *core.Lsps1Order)
 		return
 	}
 
-	fee, err := s.feeEstimator.EstimateFeeRate(context.Background(), s.feeStrategy)
-	if err != nil || fee == nil {
-		log.Warn().Err(err).Str("order_id", order.OrderId).Msg("LSPS1 Settlement: Fee estimation failed, using target conf from config")
-		fee = &chain.FeeEstimation{
-			TargetConf: &cfg.TargetConf,
-		}
-	}
-
-	capacity := uint64(order.LspBalanceLoki+order.ClientBalanceLoki) + uint64(cfg.AdditionalChannelCapacity)
-	if capacity < cfg.MinChannelCapacityLoki {
-		capacity = cfg.MinChannelCapacityLoki
-	}
+	req := s.buildOpenChannelRequest(order, cfg, peerId)
 
 	log.Info().
 		Str("component", string(logging.LogComponentSettlement)).
 		Str("action", string(logging.LogActionRequest)).
 		Str("order_id", order.OrderId).
-		Uint64("capacity_loki", capacity).
-		Uint64("push_loki", uint64(order.ClientBalanceLoki)).
+		Uint64("capacity_loki", req.CapacityLoki).
+		Uint64("push_loki", req.PushLoki).
 		Msg("LSPS1 Settlement: Calling OpenChannel for held order")
 
-	channelPoint, err := s.client.OpenChannel(&lightning.OpenChannelRequest{
-		Destination:     peerId,
-		CapacityLoki:    capacity,
-		PushLoki:        uint64(order.ClientBalanceLoki),
-		AnnounceChannel: order.AnnounceChannel,
-		FeeLokiPerVByte: fee.LokiPerVByte,
-		TargetConf:      fee.TargetConf,
-		RoutingPolicy: &lightning.RoutingPolicy{
-			Ppm:           uint32(cfg.FeeRate * 1_000_000),
-			BaseMloki:     cfg.BaseFeeMloki,
-			TimeLockDelta: cfg.TimeLockDelta,
-		},
-	})
+	channelPoint, err := s.client.OpenChannel(req)
 
 	if err != nil {
 		log.Error().Err(err).Str("order_id", order.OrderId).Msg("LSPS1 Settlement: Failed to open channel for held order")
@@ -360,14 +378,18 @@ func (s *Lsps1SettlementService) openChannelForHeldOrder(order *core.Lsps1Order)
 		// Mirrors openChannelForOrder's F-8 handling: a retried attempt
 		// (crash recovery) can land here after an earlier attempt's
 		// OpenChannel already broadcast successfully. If so the LSP is
-		// already committed -- settle the invoice instead of cancelling
-		// it, even though this particular call errored.
-		if s.reconcileUnclaimedChannel(order, peerId) {
-			s.settleHeldOrderInvoice(order)
+		// already committed -- record the funding and go through the same
+		// settle-then-complete path as the happy path below (H-2: this
+		// must NOT mark the order COMPLETED before settlement is verified
+		// to have succeeded, unlike the old reconcileUnclaimedChannel-based
+		// handling here, which wrote COMPLETED before settlement was even
+		// attempted).
+		point, ok := s.findUnclaimedChannelPoint(order, peerId)
+		if !ok {
+			s.cancelHeldOrder(order, err)
 			return
 		}
-
-		s.cancelHeldOrder(order, err)
+		s.recordHeldOrderFundingAndSettle(order, point)
 		return
 	}
 
@@ -379,25 +401,110 @@ func (s *Lsps1SettlementService) openChannelForHeldOrder(order *core.Lsps1Order)
 		Msg("LSPS1 Settlement: Channel opening initiated for held order, settling invoice")
 
 	// The funding tx is broadcast and on-chain fees are already spent --
-	// this is the point of no return, so capture the funds now.
-	s.settleHeldOrderInvoice(order)
+	// this is the point of no return. Record funding before attempting
+	// settlement (not after, as this used to): if flspd crashes between
+	// OpenChannel succeeding and settlement completing, recoverStuckOrders
+	// must be able to find this order via FundingTxid and retry settlement
+	// directly, rather than falling through to a second OpenChannel attempt.
+	s.recordHeldOrderFundingAndSettle(order, channelPoint)
+}
 
-	outpointIdx := int(channelPoint.Index)
-	txid := channelPoint.Hash.String()
+// recordHeldOrderFundingAndSettle persists a held order's funding outpoint
+// and then attempts settlement, marking the order COMPLETED only if
+// settlement actually succeeds (H-2). If settlement fails, the order is
+// deliberately left at PAID/HOLD (not COMPLETED) with funding now recorded,
+// so a later recoverStuckOrders pass -- routed by PaymentState==HOLD
+// regardless of FundingTxid (H-4) -- retries settlement instead of the DB
+// silently claiming success for an uncaptured payment.
+//
+// S-6: if the funding claim itself doesn't succeed (a transient DB error,
+// or -- per S-5 -- another order already claimed this exact channel point),
+// this does NOT proceed to settle/complete: the order stays PAID/HOLD with
+// FundingTxid still nil in the DB, so the next recoverStuckOrders pass
+// routes it back through openChannelForHeldOrder, whose OpenChannel retry
+// will collide with the already-open channel and fall through to
+// findUnclaimedChannelPoint, which finds and claims the orphaned channel
+// properly -- reusing the existing self-healing mechanism instead of
+// risking an order marked COMPLETED with no funding_txid ever recorded.
+func (s *Lsps1SettlementService) recordHeldOrderFundingAndSettle(order *core.Lsps1Order, point *wire.OutPoint) {
+	outpointIdx := int(point.Index)
+	txid := point.Hash.String()
 
-	err = s.openingStore.UpdateLsps1OrderFunding(order.OrderId, txid, outpointIdx)
+	claimed, err := s.openingStore.UpdateLsps1OrderFunding(order.OrderId, txid, outpointIdx)
 	if err != nil {
 		log.Error().Err(err).Str("order_id", order.OrderId).Msg("LSPS1 Settlement: Failed to update order funding details")
+		return
+	}
+	if !claimed {
+		log.Warn().Str("order_id", order.OrderId).Str("channel_point", fmt.Sprintf("%s:%d", txid, outpointIdx)).Msg("LSPS1 Settlement: Channel point already claimed by another order, leaving PAID/HOLD for a later recovery pass")
+		return
+	}
+	order.FundingTxid = &txid
+	order.FundingOutpoint = &outpointIdx
+
+	s.settleAndCompleteHeldOrder(order)
+}
+
+// settleAndCompleteHeldOrder captures a held order's funds and marks it
+// COMPLETED, but only if SettleInvoice actually succeeds (H-2). The caller
+// must already have committed to this order (broadcast a channel-open, or
+// verified one is already active) before calling this, since from that
+// point on there's no "cancel" option left -- only "settled" or "needs a
+// retry."
+func (s *Lsps1SettlementService) settleAndCompleteHeldOrder(order *core.Lsps1Order) {
+	if !s.settleHeldOrderInvoice(order) {
+		log.Error().
+			Str("order_id", order.OrderId).
+			Msg("LSPS1 Settlement: Invoice not settled after retries, channel already committed -- leaving order PAID/HOLD for a later recovery pass to retry settlement")
+		return
 	}
 
-	_, err = s.openingStore.UpdateLsps1OrderState(order.OrderId, string(Lsps1OrderStateCompleted), string(Lsps1PaymentStatePaid), string(Lsps1OrderStatePaid))
+	updated, err := s.openingStore.UpdateLsps1OrderState(order.OrderId, string(Lsps1OrderStateCompleted), string(Lsps1PaymentStatePaid), string(Lsps1OrderStatePaid))
 	if err != nil {
 		log.Error().Err(err).Str("order_id", order.OrderId).Msg("LSPS1 Settlement: Failed to update order state to COMPLETED")
+		return
+	}
+	if !updated {
+		log.Info().Str("order_id", order.OrderId).Msg("LSPS1 Settlement: Order already transitioned out of PAID by a concurrent writer, skipping COMPLETED notification")
+		return
 	}
 
-	if s.notificationService != nil {
-		go s.notificationService.NotifyOrderStateChanged(order.PeerId, order.OrderId, string(Lsps1OrderStateCompleted), channelPoint.String(), "")
+	// S-10: both current callers (recordHeldOrderFundingAndSettle,
+	// reconcileFundedHeldOrder via recoverStuckOrders' own FundingTxid
+	// guard) always populate FundingTxid/FundingOutpoint before calling
+	// this function, so this nil-check never actually fires today.
+	// Deliberately left in rather than assumed away: it's cheap insurance
+	// against a future third caller forgetting to populate them first,
+	// which would otherwise silently send a notification with an empty
+	// channel_point instead of failing loudly. Reviewed 2026-07-18 (S-10)
+	// and kept as-is.
+	channelPoint := ""
+	if order.FundingTxid != nil && order.FundingOutpoint != nil {
+		channelPoint = fmt.Sprintf("%s:%d", *order.FundingTxid, *order.FundingOutpoint)
 	}
+	if s.notificationService != nil {
+		go s.notificationService.NotifyOrderStateChanged(order.PeerId, order.OrderId, string(Lsps1OrderStateCompleted), channelPoint, "")
+	}
+}
+
+// checkPeerConnectedWithRetry retries a connectivity check a few times
+// before giving up, so a single transient IsConnected RPC error doesn't get
+// treated the same as a confirmed not-connected result (H-6).
+func (s *Lsps1SettlementService) checkPeerConnectedWithRetry(peerId []byte, orderId string) (bool, error) {
+	const maxAttempts = 3
+	var err error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		var connected bool
+		connected, err = s.client.IsConnected(peerId)
+		if err == nil {
+			return connected, nil
+		}
+		log.Warn().Err(err).Str("order_id", orderId).Int("attempt", attempt).Msg("LSPS1 Settlement: IsConnected check failed, retrying")
+		if attempt < maxAttempts {
+			time.Sleep(time.Second)
+		}
+	}
+	return false, err
 }
 
 // cancelHeldOrder is the instant-refund path a hold invoice makes
@@ -408,22 +515,24 @@ func (s *Lsps1SettlementService) openChannelForHeldOrder(order *core.Lsps1Order)
 // invoice on its own as the HTLC nears its CLTV deadline, so the payer's
 // funds are never permanently stuck even if this particular call errors.
 func (s *Lsps1SettlementService) cancelHeldOrder(order *core.Lsps1Order, reason error) {
-	if order.PaymentPreimage != nil {
-		if preimage, err := hex.DecodeString(*order.PaymentPreimage); err == nil {
-			hash := sha256.Sum256(preimage)
-			if cancelErr := s.client.CancelInvoice(context.Background(), hash[:]); cancelErr != nil {
-				log.Warn().Err(cancelErr).Str("order_id", order.OrderId).Msg("LSPS1 Settlement: CancelInvoice failed, relying on LND's own hold-invoice expiry to release the HTLC")
-			}
-		} else {
-			log.Error().Err(err).Str("order_id", order.OrderId).Msg("LSPS1 Settlement: Failed to decode stored preimage while cancelling held order")
+	if hash, ok := s.paymentHashForOrder(order); ok {
+		if cancelErr := s.client.CancelInvoice(context.Background(), hash); cancelErr != nil {
+			log.Warn().Err(cancelErr).Str("order_id", order.OrderId).Msg("LSPS1 Settlement: CancelInvoice failed, relying on LND's own hold-invoice expiry to release the HTLC")
 		}
-	} else {
-		log.Error().Str("order_id", order.OrderId).Msg("LSPS1 Settlement: Held order has no stored preimage, cannot explicitly cancel invoice -- relying on LND's own hold-invoice expiry")
 	}
 
-	_, err := s.openingStore.UpdateLsps1OrderState(order.OrderId, string(Lsps1OrderStateFailed), string(Lsps1PaymentStateRefunded), string(Lsps1OrderStatePaid))
+	updated, err := s.openingStore.UpdateLsps1OrderState(order.OrderId, string(Lsps1OrderStateFailed), string(Lsps1PaymentStateRefunded), string(Lsps1OrderStatePaid))
 	if err != nil {
 		log.Error().Err(err).Str("order_id", order.OrderId).Msg("LSPS1 Settlement: Failed to update held order state to FAILED")
+		return
+	}
+	if !updated {
+		// H-5: a concurrent writer (e.g. a racing reconcile call) already
+		// moved this order out of PAID -- most likely it already completed
+		// successfully. Sending a FAILED notification now would be a
+		// spurious, contradictory message with no DB state behind it.
+		log.Info().Str("order_id", order.OrderId).Msg("LSPS1 Settlement: Order already transitioned out of PAID by a concurrent writer, skipping cancel notification")
+		return
 	}
 
 	if s.notificationService != nil {
@@ -437,16 +546,13 @@ func (s *Lsps1SettlementService) cancelHeldOrder(order *core.Lsps1Order, reason 
 // already broadcast) -- from that point on there's no "cancel" option
 // left, so failures are retried a few times and, if still failing, logged
 // loudly for manual review rather than looped on forever or treated as a
-// reason to undo an already-broadcast channel open.
-func (s *Lsps1SettlementService) settleHeldOrderInvoice(order *core.Lsps1Order) {
-	if order.PaymentPreimage == nil {
-		log.Error().Str("order_id", order.OrderId).Msg("LSPS1 Settlement: Held order has no stored preimage, cannot settle invoice -- manual review required")
-		return
-	}
-	preimage, err := hex.DecodeString(*order.PaymentPreimage)
-	if err != nil {
-		log.Error().Err(err).Str("order_id", order.OrderId).Msg("LSPS1 Settlement: Failed to decode stored preimage, cannot settle invoice -- manual review required")
-		return
+// reason to undo an already-broadcast channel open. Returns whether
+// settlement actually succeeded (H-2) so the caller can decide whether it's
+// safe to mark the order COMPLETED.
+func (s *Lsps1SettlementService) settleHeldOrderInvoice(order *core.Lsps1Order) bool {
+	preimage, ok := s.decodeAndValidatePreimage(order, "settle invoice -- manual review required")
+	if !ok {
+		return false
 	}
 
 	const maxAttempts = 5
@@ -458,12 +564,166 @@ func (s *Lsps1SettlementService) settleHeldOrderInvoice(order *core.Lsps1Order) 
 				Str("component", string(logging.LogComponentSettlement)).
 				Str("order_id", order.OrderId).
 				Msg("LSPS1 Settlement: Hold invoice settled")
-			return
+			return true
 		}
 		log.Warn().Err(settleErr).Str("order_id", order.OrderId).Int("attempt", attempt).Msg("LSPS1 Settlement: SettleInvoice failed, retrying")
 		time.Sleep(time.Second)
 	}
 	log.Error().Err(settleErr).Str("order_id", order.OrderId).Msg("LSPS1 Settlement: SettleInvoice failed after retries -- channel is committed but invoice may not be settled, manual review required")
+	return false
+}
+
+// decodeAndValidatePreimage decodes order.PaymentPreimage and validates
+// it's exactly 32 bytes (H-9), logging a descriptive error naming what
+// operation needed it on any failure. Shared by cancelHeldOrder (via
+// paymentHashForOrder), settleHeldOrderInvoice, and the H-12 watcher --
+// all of which need to safely get from a stored preimage to usable bytes,
+// and previously duplicated this decode-then-length-check logic.
+func (s *Lsps1SettlementService) decodeAndValidatePreimage(order *core.Lsps1Order, operation string) ([]byte, bool) {
+	if order.PaymentPreimage == nil {
+		log.Error().Str("order_id", order.OrderId).Msgf("LSPS1 Settlement: Held order has no stored preimage, cannot %s", operation)
+		return nil, false
+	}
+	preimage, err := hex.DecodeString(*order.PaymentPreimage)
+	if err != nil {
+		log.Error().Err(err).Str("order_id", order.OrderId).Msgf("LSPS1 Settlement: Failed to decode stored preimage, cannot %s", operation)
+		return nil, false
+	}
+	if len(preimage) != 32 {
+		// A wrong-length preimage (data-integrity issue, not expected in
+		// practice -- see handler_lsps1.go, which always generates 32
+		// random bytes) would otherwise hash to the wrong payment hash.
+		log.Error().Str("order_id", order.OrderId).Int("preimage_len", len(preimage)).Msgf("LSPS1 Settlement: Stored preimage has unexpected length, refusing to use it, cannot %s", operation)
+		return nil, false
+	}
+	return preimage, true
+}
+
+// paymentHashForOrder derives a held order's invoice payment hash locally
+// from its stored preimage (sha256), for callers that need the hash
+// without settling/cancelling -- H-11's hash-based lookup and H-12's
+// per-invoice watcher, exactly as cancelHeldOrder already did inline.
+func (s *Lsps1SettlementService) paymentHashForOrder(order *core.Lsps1Order) ([]byte, bool) {
+	preimage, ok := s.decodeAndValidatePreimage(order, "derive payment hash")
+	if !ok {
+		return nil, false
+	}
+	hash := sha256.Sum256(preimage)
+	return hash[:], true
+}
+
+// WatchOrder attaches a live per-invoice watcher to a freshly-created
+// hold-invoice order (H-12, satisfies the OrderWatcher interface in
+// handlers.go): subscribes to LND's per-invoice stream so the order's
+// ACCEPTED transition is observed near-instantly instead of waiting on
+// the safety-net poll (heldInvoiceSafetyNetPollInterval). Safe to call
+// even if the service isn't running (e.g. mid-shutdown) -- logs and
+// relies on the safety-net poll in that case rather than starting a
+// watcher with nothing to tear it down.
+func (s *Lsps1SettlementService) WatchOrder(order *core.Lsps1Order) {
+	if s.ctx == nil || s.ctx.Err() != nil {
+		log.Warn().Str("order_id", order.OrderId).Msg("LSPS1 Settlement: Cannot attach live invoice watcher, service not running -- relying on the safety-net poll")
+		return
+	}
+	if _, alreadyWatching := s.watchedOrders.LoadOrStore(order.OrderId, struct{}{}); alreadyWatching {
+		// The safety-net poll re-discovers every still-OPEN order on each
+		// tick and calls WatchOrder again -- a no-op while this order's
+		// watcher is already running.
+		return
+	}
+	hash, ok := s.paymentHashForOrder(order)
+	if !ok {
+		s.watchedOrders.Delete(order.OrderId) // never actually started a watcher; don't block a future retry
+		return
+	}
+	s.wg.Add(1)
+	go s.watchOrderInvoice(order, hash)
+}
+
+// watchOrderInvoice is WatchOrder's goroutine body. Deliberately does NOT
+// retry on a stream error or exhausted subscription -- a dropped stream
+// just means this one order falls back to safety-net-poll coverage for
+// the rest of its lifetime, rather than the watcher silently retry-looping
+// forever. Exits on: service shutdown (s.ctx.Done()), a stream error, or
+// the order reaching a state where no further invoice events are useful
+// (ACCEPTED -- openChannelForHeldOrder/cancelHeldOrder take over from
+// there; SETTLED/CANCELED -- already terminal).
+func (s *Lsps1SettlementService) watchOrderInvoice(order *core.Lsps1Order, hash []byte) {
+	defer s.wg.Done()
+	defer s.watchedOrders.Delete(order.OrderId)
+
+	updateChan, errChan, err := s.client.SubscribeSingleInvoice(s.ctx, hash)
+	if err != nil {
+		log.Warn().Err(err).Str("order_id", order.OrderId).Msg("LSPS1 Settlement: Failed to subscribe to invoice updates, relying on the safety-net poll")
+		return
+	}
+
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+		case _, ok := <-errChan:
+			if !ok {
+				return
+			}
+			// Logged inside the adapter's stream-wrapper goroutine
+			// already; nothing more to do here except stop watching.
+			return
+		case update, ok := <-updateChan:
+			if !ok {
+				return
+			}
+			switch update.State {
+			case lightning.InvoiceStateAccepted:
+				s.processAcceptedOrder(order)
+				return
+			case lightning.InvoiceStateSettled:
+				s.processSettledOrder(order)
+				return
+			case lightning.InvoiceStateCanceled:
+				log.Info().Str("order_id", order.OrderId).Msg("LSPS1 Settlement: Watched invoice canceled (e.g. LND's own hold-invoice expiry), stopping watcher")
+				return
+			}
+			// InvoiceStateOpen (the initial state SubscribeSingleInvoice
+			// always sends immediately on subscribe) and any other state:
+			// keep watching.
+		}
+	}
+}
+
+// buildOpenChannelRequest computes the fee estimate, capacity, and
+// OpenChannelRequest shared by openChannelForOrder and
+// openChannelForHeldOrder (H-13): these were previously duplicated
+// byte-for-byte between the two, risking the held-order and legacy-order
+// flows silently drifting apart on a future change to fee-estimation
+// fallback or capacity calculation.
+func (s *Lsps1SettlementService) buildOpenChannelRequest(order *core.Lsps1Order, cfg *config.NodeConfig, peerId []byte) *lightning.OpenChannelRequest {
+	fee, err := s.feeEstimator.EstimateFeeRate(context.Background(), s.feeStrategy)
+	if err != nil || fee == nil {
+		log.Warn().Err(err).Str("order_id", order.OrderId).Msg("LSPS1 Settlement: Fee estimation failed, using target conf from config")
+		fee = &chain.FeeEstimation{
+			TargetConf: &cfg.TargetConf,
+		}
+	}
+
+	capacity := uint64(order.LspBalanceLoki+order.ClientBalanceLoki) + uint64(cfg.AdditionalChannelCapacity)
+	if capacity < cfg.MinChannelCapacityLoki {
+		capacity = cfg.MinChannelCapacityLoki
+	}
+
+	return &lightning.OpenChannelRequest{
+		Destination:     peerId,
+		CapacityLoki:    capacity,
+		PushLoki:        uint64(order.ClientBalanceLoki),
+		AnnounceChannel: order.AnnounceChannel,
+		FeeLokiPerVByte: fee.LokiPerVByte,
+		TargetConf:      fee.TargetConf,
+		RoutingPolicy: &lightning.RoutingPolicy{
+			Ppm:           uint32(cfg.FeeRate * 1_000_000),
+			BaseMloki:     cfg.BaseFeeMloki,
+			TimeLockDelta: cfg.TimeLockDelta,
+		},
+	}
 }
 
 func (s *Lsps1SettlementService) openChannelForOrder(order *core.Lsps1Order) {
@@ -510,42 +770,18 @@ func (s *Lsps1SettlementService) openChannelForOrder(order *core.Lsps1Order) {
 		return
 	}
 
-	// Estimate fee
-	fee, err := s.feeEstimator.EstimateFeeRate(context.Background(), s.feeStrategy)
-	if err != nil || fee == nil {
-		log.Warn().Err(err).Str("order_id", order.OrderId).Msg("LSPS1 Settlement: Fee estimation failed, using target conf from config")
-		fee = &chain.FeeEstimation{
-			TargetConf: &cfg.TargetConf,
-		}
-	}
-
-	capacity := uint64(order.LspBalanceLoki+order.ClientBalanceLoki) + uint64(cfg.AdditionalChannelCapacity)
-	if capacity < cfg.MinChannelCapacityLoki {
-		capacity = cfg.MinChannelCapacityLoki
-	}
-
 	// Open channel
+	req := s.buildOpenChannelRequest(order, cfg, peerId)
+
 	log.Info().
 		Str("component", string(logging.LogComponentSettlement)).
 		Str("action", string(logging.LogActionRequest)).
 		Str("order_id", order.OrderId).
-		Uint64("capacity_loki", capacity).
-		Uint64("push_loki", uint64(order.ClientBalanceLoki)).
+		Uint64("capacity_loki", req.CapacityLoki).
+		Uint64("push_loki", req.PushLoki).
 		Msg("LSPS1 Settlement: Calling OpenChannel")
 
-	channelPoint, err := s.client.OpenChannel(&lightning.OpenChannelRequest{
-		Destination:     peerId,
-		CapacityLoki:    capacity,
-		PushLoki:        uint64(order.ClientBalanceLoki),
-		AnnounceChannel: order.AnnounceChannel,
-		FeeLokiPerVByte: fee.LokiPerVByte,
-		TargetConf:      fee.TargetConf,
-		RoutingPolicy: &lightning.RoutingPolicy{
-			Ppm:           uint32(cfg.FeeRate * 1_000_000),
-			BaseMloki:     cfg.BaseFeeMloki,
-			TimeLockDelta: cfg.TimeLockDelta,
-		},
-	})
+	channelPoint, err := s.client.OpenChannel(req)
 
 	if err != nil {
 		log.Error().Err(err).Str("order_id", order.OrderId).Msg("LSPS1 Settlement: Failed to open channel")
@@ -565,9 +801,18 @@ func (s *Lsps1SettlementService) openChannelForOrder(order *core.Lsps1Order) {
 		}
 
 		// Update state to FAILED
-		_, dbErr := s.openingStore.UpdateLsps1OrderState(order.OrderId, string(Lsps1OrderStateFailed), string(Lsps1OrderStatePaid), string(Lsps1OrderStatePaid))
+		updated, dbErr := s.openingStore.UpdateLsps1OrderState(order.OrderId, string(Lsps1OrderStateFailed), string(Lsps1OrderStatePaid), string(Lsps1OrderStatePaid))
 		if dbErr != nil {
 			log.Error().Err(dbErr).Str("order_id", order.OrderId).Msg("LSPS1 Settlement: Failed to update order state to FAILED")
+			return
+		}
+		if !updated {
+			// A concurrent writer already moved this order out of PAID
+			// (most likely it already completed successfully) -- sending a
+			// FAILED notification now would be spurious and contradict the
+			// DB state.
+			log.Info().Str("order_id", order.OrderId).Msg("LSPS1 Settlement: Order already transitioned out of PAID by a concurrent writer, skipping FAILED notification")
+			return
 		}
 
 		if s.notificationService != nil {
@@ -588,14 +833,31 @@ func (s *Lsps1SettlementService) openChannelForOrder(order *core.Lsps1Order) {
 	outpointIdx := int(channelPoint.Index)
 	txid := channelPoint.Hash.String()
 
-	err = s.openingStore.UpdateLsps1OrderFunding(order.OrderId, txid, outpointIdx)
+	// S-6: don't mark COMPLETED if the funding claim itself didn't
+	// succeed (transient DB error, or -- per S-5 -- another order already
+	// claimed this exact channel point). Leaving the order PAID with
+	// FundingTxid still nil lets the next recoverStuckOrders pass retry
+	// via openChannelForOrder -> reconcileUnclaimedChannel's existing
+	// orphaned-channel recovery, instead of risking a COMPLETED order
+	// with no funding_txid ever recorded.
+	claimed, err := s.openingStore.UpdateLsps1OrderFunding(order.OrderId, txid, outpointIdx)
 	if err != nil {
 		log.Error().Err(err).Str("order_id", order.OrderId).Msg("LSPS1 Settlement: Failed to update order funding details")
+		return
+	}
+	if !claimed {
+		log.Warn().Str("order_id", order.OrderId).Str("channel_point", channelPoint.String()).Msg("LSPS1 Settlement: Channel point already claimed by another order, leaving PAID for a later recovery pass")
+		return
 	}
 
-	_, err = s.openingStore.UpdateLsps1OrderState(order.OrderId, string(Lsps1OrderStateCompleted), string(Lsps1OrderStatePaid), string(Lsps1OrderStatePaid))
+	updated, err := s.openingStore.UpdateLsps1OrderState(order.OrderId, string(Lsps1OrderStateCompleted), string(Lsps1OrderStatePaid), string(Lsps1OrderStatePaid))
 	if err != nil {
 		log.Error().Err(err).Str("order_id", order.OrderId).Msg("LSPS1 Settlement: Failed to update order state to COMPLETED")
+		return
+	}
+	if !updated {
+		log.Info().Str("order_id", order.OrderId).Msg("LSPS1 Settlement: Order already transitioned out of PAID by a concurrent writer, skipping COMPLETED notification")
+		return
 	}
 
 	// Notify client of COMPLETED state with channel point
@@ -630,6 +892,25 @@ func (s *Lsps1SettlementService) recoverStuckOrders() {
 			Msgf("LSPS1 Settlement: Found %d stuck PAID orders, recovering...", len(paidOrders))
 
 		for _, order := range paidOrders {
+			// PaymentState HOLD means this order was paid via a hold
+			// invoice: order_state=PAID here only means "committed to
+			// attempting fulfillment," never "funds captured" (see
+			// processAcceptedOrder's doc comment). This check must run
+			// BEFORE the FundingTxid check below (H-4): a held order can
+			// have FundingTxid already recorded (the channel-open half of
+			// openChannelForHeldOrder succeeded, but flspd crashed before
+			// settlement was confirmed) and still need the hold-aware path,
+			// not the settlement-unaware reconcileFundedOrder, which would
+			// mark it COMPLETED without ever verifying or retrying
+			// SettleInvoice (H-2/H-3).
+			if order.PaymentState == string(Lsps1PaymentStateHold) {
+				if order.FundingTxid != nil && order.FundingOutpoint != nil {
+					s.reconcileFundedHeldOrder(order)
+				} else {
+					s.openChannelForHeldOrder(order)
+				}
+				continue
+			}
 			// F-8: a PAID order that already has funding recorded means
 			// openChannelForOrder's OpenChannel call already succeeded on
 			// some earlier run — the only way it's still PAID (not
@@ -642,15 +923,6 @@ func (s *Lsps1SettlementService) recoverStuckOrders() {
 				s.reconcileFundedOrder(order)
 				continue
 			}
-			// PaymentState HOLD means this order was paid via a hold
-			// invoice that's still ACCEPTED, not settled -- crash
-			// recovery must go through the settle/cancel path, not
-			// openChannelForOrder (which assumes the funds are already
-			// captured and would never resolve the held HTLC).
-			if order.PaymentState == string(Lsps1PaymentStateHold) {
-				s.openChannelForHeldOrder(order)
-				continue
-			}
 			s.openChannelForOrder(order)
 		}
 	}
@@ -658,6 +930,46 @@ func (s *Lsps1SettlementService) recoverStuckOrders() {
 	// Also check CREATED orders: if the invoice was settled in LND while flspd
 	// was down, the order never progressed. Look each one up directly in LND.
 	s.recoverSettledCreatedOrders()
+}
+
+// verifyChannelActive checks whether order's recorded funding outpoint
+// corresponds to a channel LND currently reports as active -- shared by
+// reconcileFundedOrder (legacy flow) and reconcileFundedHeldOrder (H-3):
+// both need the same "don't blindly trust a stale FundingTxid" check before
+// treating a funded order as safe to finalize.
+func (s *Lsps1SettlementService) verifyChannelActive(order *core.Lsps1Order) bool {
+	if order.FundingTxid == nil || order.FundingOutpoint == nil {
+		// Defensive only (S-8): both current callers only reach this
+		// function after already checking FundingTxid/FundingOutpoint are
+		// non-nil, so this should never fire in practice -- but this
+		// function is documented as a shared, reusable helper, so it
+		// shouldn't trust that invariant silently. Failing loudly here
+		// beats a nil-pointer panic in NewOutPointFromString below if a
+		// future caller (or a reordering of an existing one) forgets it.
+		log.Error().Str("order_id", order.OrderId).Msg("LSPS1 Settlement: verifyChannelActive called without funding recorded -- this is a caller bug")
+		return false
+	}
+
+	peerId, err := hex.DecodeString(order.PeerId)
+	if err != nil {
+		log.Error().Err(err).Str("order_id", order.OrderId).Msg("LSPS1 Settlement: Failed to decode peer ID during funded-order reconciliation")
+		return false
+	}
+
+	outpoint, err := lightning.NewOutPointFromString(fmt.Sprintf("%s:%d", *order.FundingTxid, *order.FundingOutpoint))
+	if err != nil {
+		log.Error().Err(err).Str("order_id", order.OrderId).Msg("LSPS1 Settlement: Stored funding outpoint is invalid, cannot reconcile")
+		return false
+	}
+
+	if _, err := s.client.GetChannel(peerId, *outpoint); err != nil {
+		log.Warn().Err(err).
+			Str("order_id", order.OrderId).
+			Str("channel_point", fmt.Sprintf("%s:%d", *order.FundingTxid, *order.FundingOutpoint)).
+			Msg("LSPS1 Settlement: Order has recorded funding but no matching active channel found in LND — leaving PAID for manual review, not retrying OpenChannel")
+		return false
+	}
+	return true
 }
 
 // reconcileFundedOrder handles a PAID order that already has funding details
@@ -668,37 +980,30 @@ func (s *Lsps1SettlementService) recoverStuckOrders() {
 // NOT fall back to retrying OpenChannel — that ambiguous case (was the
 // channel ever really there?) needs a human to look, not a guess that
 // risks a duplicate open.
+//
+// Only ever called for legacy (non-hold) orders: recoverStuckOrders routes
+// HOLD orders to reconcileFundedHeldOrder instead (H-3/H-4), since this
+// function never checks or retries settlement.
 func (s *Lsps1SettlementService) reconcileFundedOrder(order *core.Lsps1Order) {
-	peerId, err := hex.DecodeString(order.PeerId)
-	if err != nil {
-		log.Error().Err(err).Str("order_id", order.OrderId).Msg("LSPS1 Settlement: Failed to decode peer ID during funded-order reconciliation")
-		return
-	}
-
-	outpoint, err := lightning.NewOutPointFromString(fmt.Sprintf("%s:%d", *order.FundingTxid, *order.FundingOutpoint))
-	if err != nil {
-		log.Error().Err(err).Str("order_id", order.OrderId).Msg("LSPS1 Settlement: Stored funding outpoint is invalid, cannot reconcile")
+	if !s.verifyChannelActive(order) {
 		return
 	}
 
 	channelPoint := fmt.Sprintf("%s:%d", *order.FundingTxid, *order.FundingOutpoint)
-	if _, err := s.client.GetChannel(peerId, *outpoint); err != nil {
-		log.Warn().Err(err).
-			Str("order_id", order.OrderId).
-			Str("channel_point", channelPoint).
-			Msg("LSPS1 Settlement: Order has recorded funding but no matching active channel found in LND — leaving PAID for manual review, not retrying OpenChannel")
-		return
-	}
-
 	log.Info().
 		Str("component", string(logging.LogComponentSettlement)).
 		Str("order_id", order.OrderId).
 		Str("channel_point", channelPoint).
 		Msg("LSPS1 Settlement: Recorded funding verified active in LND — reconciling order to COMPLETED")
 
-	_, err = s.openingStore.UpdateLsps1OrderState(order.OrderId, string(Lsps1OrderStateCompleted), string(Lsps1OrderStatePaid), string(Lsps1OrderStatePaid))
+	updated, err := s.openingStore.UpdateLsps1OrderState(order.OrderId, string(Lsps1OrderStateCompleted), string(Lsps1OrderStatePaid), string(Lsps1OrderStatePaid))
 	if err != nil {
 		log.Error().Err(err).Str("order_id", order.OrderId).Msg("LSPS1 Settlement: Failed to reconcile order state to COMPLETED")
+		return
+	}
+	if !updated {
+		// H-5: a concurrent writer already moved this order out of PAID.
+		log.Info().Str("order_id", order.OrderId).Msg("LSPS1 Settlement: Order already transitioned out of PAID by a concurrent writer, skipping reconciliation notification")
 		return
 	}
 
@@ -707,27 +1012,43 @@ func (s *Lsps1SettlementService) reconcileFundedOrder(order *core.Lsps1Order) {
 	}
 }
 
-// reconcileUnclaimedChannel looks for exactly one channel (LND's
+// reconcileFundedHeldOrder handles a HOLD order that already has funding
+// details recorded (H-3/H-4): the channel-open half of an earlier
+// openChannelForHeldOrder attempt already succeeded, but flspd crashed (or
+// SettleInvoice failed all its retries) before the order could be marked
+// COMPLETED. Verifies the channel is still active (mirroring
+// reconcileFundedOrder) before retrying settlement -- unlike
+// reconcileFundedOrder, this does NOT assume "funded" means "done": it
+// still needs settleAndCompleteHeldOrder to actually confirm/retry
+// SettleInvoice before the order can be marked COMPLETED.
+func (s *Lsps1SettlementService) reconcileFundedHeldOrder(order *core.Lsps1Order) {
+	if !s.verifyChannelActive(order) {
+		return
+	}
+	s.settleAndCompleteHeldOrder(order)
+}
+
+// findUnclaimedChannelPoint looks for exactly one channel (LND's
 // ListChannels already merges in still-pending, not-yet-confirmed opens --
 // see LndClient.ListChannels) to order's peer that isn't already recorded
 // as the funding for some other order, and if found, treats it as the
-// result of an earlier, crashed openChannelForOrder attempt: OpenChannel
-// broadcast the funding transaction successfully, but the crash landed
-// before UpdateLsps1OrderFunding could persist that. Reconciling here
-// instead of retrying OpenChannel avoids both a collision with LND's own
-// pending-channel limit and, worse, silently reporting FAILED for an
+// result of an earlier, crashed channel-open attempt: OpenChannel broadcast
+// the funding transaction successfully, but the crash landed before
+// UpdateLsps1OrderFunding could persist that. Reconciling here instead of
+// retrying OpenChannel avoids both a collision with LND's own
+// pending-channel limit and, worse, silently reporting FAILED/refunding an
 // order whose channel the LSP already paid on-chain fees to open.
 //
 // Deliberately conservative: zero or more than one unclaimed candidate is
-// ambiguous, so this returns false and lets the caller fall through to
-// its normal FAILED handling rather than guessing which channel (if any)
-// belongs to this order -- the same philosophy reconcileFundedOrder
-// already applies to the has-FundingTxid case above.
-func (s *Lsps1SettlementService) reconcileUnclaimedChannel(order *core.Lsps1Order, peerId []byte) bool {
+// ambiguous, so this returns false and lets the caller fall through to its
+// normal failure handling rather than guessing which channel (if any)
+// belongs to this order -- the same philosophy reconcileFundedOrder already
+// applies to the has-FundingTxid case.
+func (s *Lsps1SettlementService) findUnclaimedChannelPoint(order *core.Lsps1Order, peerId []byte) (*wire.OutPoint, bool) {
 	channels, err := s.client.ListChannels()
 	if err != nil {
 		log.Warn().Err(err).Str("order_id", order.OrderId).Msg("LSPS1 Settlement: Failed to list channels while checking for an unclaimed prior attempt")
-		return false
+		return nil, false
 	}
 
 	var peerChannels []*wire.OutPoint
@@ -738,7 +1059,7 @@ func (s *Lsps1SettlementService) reconcileUnclaimedChannel(order *core.Lsps1Orde
 		peerChannels = append(peerChannels, ch.ChannelPoint)
 	}
 	if len(peerChannels) == 0 {
-		return false
+		return nil, false
 	}
 
 	// Only worth the extra DB round-trip once there's at least one
@@ -746,7 +1067,7 @@ func (s *Lsps1SettlementService) reconcileUnclaimedChannel(order *core.Lsps1Orde
 	claimed, err := s.claimedChannelPoints()
 	if err != nil {
 		log.Warn().Err(err).Str("order_id", order.OrderId).Msg("LSPS1 Settlement: Failed to list existing order funding records while checking for an unclaimed prior attempt")
-		return false
+		return nil, false
 	}
 
 	var candidates []*wire.OutPoint
@@ -761,9 +1082,9 @@ func (s *Lsps1SettlementService) reconcileUnclaimedChannel(order *core.Lsps1Orde
 			log.Warn().
 				Str("order_id", order.OrderId).
 				Int("candidate_count", len(candidates)).
-				Msg("LSPS1 Settlement: Multiple unclaimed channels found for this peer, cannot disambiguate which (if any) belongs to this order — leaving FAILED for manual review")
+				Msg("LSPS1 Settlement: Multiple unclaimed channels found for this peer, cannot disambiguate which (if any) belongs to this order — leaving for manual review")
 		}
-		return false
+		return nil, false
 	}
 
 	point := candidates[0]
@@ -771,16 +1092,52 @@ func (s *Lsps1SettlementService) reconcileUnclaimedChannel(order *core.Lsps1Orde
 		Str("component", string(logging.LogComponentSettlement)).
 		Str("order_id", order.OrderId).
 		Str("channel_point", point.String()).
-		Msg("LSPS1 Settlement: Found an unclaimed channel to this peer — treating as an earlier attempt's crash-orphaned open and reconciling instead of retrying OpenChannel")
+		Msg("LSPS1 Settlement: Found an unclaimed channel to this peer — treating as an earlier attempt's crash-orphaned open")
+	return point, true
+}
 
-	if err := s.openingStore.UpdateLsps1OrderFunding(order.OrderId, point.Hash.String(), int(point.Index)); err != nil {
+// reconcileUnclaimedChannel is openChannelForOrder's (legacy flow) use of
+// findUnclaimedChannelPoint: records the found channel as this order's
+// funding and marks it COMPLETED directly, since the legacy flow's funds
+// are already captured by the time order_state reaches PAID -- there's no
+// settlement step left to verify. openChannelForHeldOrder does NOT use this
+// function (see recordHeldOrderFundingAndSettle): a held order's funds
+// aren't captured yet, so it must settle-then-check before it's safe to
+// call the order COMPLETED (H-2).
+func (s *Lsps1SettlementService) reconcileUnclaimedChannel(order *core.Lsps1Order, peerId []byte) bool {
+	point, ok := s.findUnclaimedChannelPoint(order, peerId)
+	if !ok {
+		return false
+	}
+
+	// S-5: findUnclaimedChannelPoint's read (ListChannels + a DB scan of
+	// already-claimed points) isn't atomic with this write -- two orders
+	// racing to reconcile the same peer's channel can both see it as
+	// unclaimed. The partial unique index on (funding_txid,
+	// funding_outpoint) makes the write itself atomic: claimed=false here
+	// means another order's write already won, so this one must back off
+	// exactly as if no unclaimed channel had been found, not proceed to
+	// mark itself COMPLETED against a channel that isn't actually its own.
+	claimed, err := s.openingStore.UpdateLsps1OrderFunding(order.OrderId, point.Hash.String(), int(point.Index))
+	if err != nil {
 		log.Error().Err(err).Str("order_id", order.OrderId).Msg("LSPS1 Settlement: Failed to record reconciled funding details")
 		return false
 	}
-	_, err = s.openingStore.UpdateLsps1OrderState(order.OrderId, string(Lsps1OrderStateCompleted), string(Lsps1OrderStatePaid), string(Lsps1OrderStatePaid))
+	if !claimed {
+		log.Warn().Str("order_id", order.OrderId).Str("channel_point", point.String()).Msg("LSPS1 Settlement: Channel point already claimed by another order while reconciling, cannot use it for this order")
+		return false
+	}
+	updated, err := s.openingStore.UpdateLsps1OrderState(order.OrderId, string(Lsps1OrderStateCompleted), string(Lsps1OrderStatePaid), string(Lsps1OrderStatePaid))
 	if err != nil {
 		log.Error().Err(err).Str("order_id", order.OrderId).Msg("LSPS1 Settlement: Failed to update reconciled order state to COMPLETED")
 		return false
+	}
+	if !updated {
+		// H-5: a concurrent writer already moved this order out of PAID --
+		// funding is still recorded above (harmless/idempotent), but don't
+		// send a COMPLETED notification for a transition that didn't happen.
+		log.Info().Str("order_id", order.OrderId).Msg("LSPS1 Settlement: Order already transitioned out of PAID by a concurrent writer, skipping reconciliation notification")
+		return true
 	}
 
 	if s.notificationService != nil {
@@ -834,7 +1191,27 @@ func (s *Lsps1SettlementService) recoverSettledCreatedOrders() {
 		if order.PaymentInvoice == "" {
 			continue
 		}
-		state, err := s.client.LookupInvoiceState(s.ctx, order.PaymentInvoice)
+
+		// H-11: a hold-invoice order's payment hash is already derivable
+		// locally from its stored preimage -- skip the DecodePayReq
+		// round-trip LookupInvoiceState needs for a legacy order with no
+		// stored preimage. The nil check comes first (silent, cheap) so a
+		// legacy order without a preimage -- the normal, expected case for
+		// that flow -- doesn't trigger paymentHashForOrder's error-level
+		// logging on every poll cycle.
+		var state lightning.InvoiceState
+		var err error
+		if order.PaymentPreimage != nil {
+			var hash []byte
+			var ok bool
+			hash, ok = s.paymentHashForOrder(order)
+			if !ok {
+				continue
+			}
+			state, err = s.client.LookupInvoiceStateByHash(s.ctx, hash)
+		} else {
+			state, err = s.client.LookupInvoiceState(s.ctx, order.PaymentInvoice)
+		}
 		if err != nil {
 			log.Warn().Err(err).
 				Str("order_id", order.OrderId).
@@ -879,6 +1256,14 @@ func (s *Lsps1SettlementService) recoverSettledCreatedOrders() {
 				Str("component", string(logging.LogComponentSettlement)).
 				Str("order_id", order.OrderId).
 				Msg("LSPS1 Settlement: Invoice is CANCELED — order cannot be fulfilled")
+		default:
+			// Still OPEN: this order predates the current process (no
+			// watcher is running for it yet, since WatchOrder is only
+			// called at order-creation time in handleLsps1CreateOrder).
+			// Attach one now so it gets live ACCEPTED coverage going
+			// forward instead of depending on the safety-net poll for its
+			// whole remaining lifetime (H-12).
+			s.WatchOrder(order)
 		}
 	}
 }

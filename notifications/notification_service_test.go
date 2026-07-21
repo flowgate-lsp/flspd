@@ -58,15 +58,25 @@ func (f *fakeOpeningStore) ListLsps1Orders(int, int) ([]*core.Lsps1Order, error)
 func (f *fakeOpeningStore) UpdateLsps1OrderState(string, string, string, string) (bool, error) {
 	return false, nil
 }
-func (f *fakeOpeningStore) UpdateLsps1OrderFunding(string, string, int) error { return nil }
-func (f *fakeOpeningStore) RegisterLsps5Webhook(*core.Lsps5Webhook) error     { return nil }
-func (f *fakeOpeningStore) RemoveLsps5Webhook(string, string) error           { return nil }
+func (f *fakeOpeningStore) UpdateLsps1OrderFunding(string, string, int) (bool, error) {
+	return true, nil
+}
+func (f *fakeOpeningStore) RegisterLsps5Webhook(*core.Lsps5Webhook) error { return nil }
+func (f *fakeOpeningStore) RemoveLsps5Webhook(string, string) error       { return nil }
 func (f *fakeOpeningStore) CountLsps1Orders(string, string, *time.Time) (int, error) {
 	return 0, nil
 }
-func (f *fakeOpeningStore) CountLsps5Webhooks(string) (int, error) { return 0, nil }
-func (f *fakeOpeningStore) GetReservedLiquidity() (uint64, error)  { return 0, nil }
-func (f *fakeOpeningStore) ExpireStaleOrders() (int64, error)      { return 0, nil }
+func (f *fakeOpeningStore) CountLsps2PendingRegistrations(string) (int, error) { return 0, nil }
+func (f *fakeOpeningStore) CountLsps5Webhooks(string) (int, error)             { return 0, nil }
+func (f *fakeOpeningStore) GetReservedLiquidity() (uint64, error)              { return 0, nil }
+func (f *fakeOpeningStore) ExpireStaleOrders() (int64, error)                  { return 0, nil }
+func (f *fakeOpeningStore) ExpireStaleLsps2Registrations() (int64, error)      { return 0, nil }
+func (f *fakeOpeningStore) ReserveLsps1Order(*core.Lsps1Order, uint64) (bool, error) {
+	return true, nil
+}
+func (f *fakeOpeningStore) ReserveLsps2Buy(*core.Lsps2BuyRegistration, uint64) (bool, error) {
+	return true, nil
+}
 
 // fakeNotifStore implements Store in-memory, so processPending/Enqueue tests
 // don't need a real database.

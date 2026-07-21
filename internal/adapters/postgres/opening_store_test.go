@@ -38,6 +38,8 @@ func sampleOrder(orderId string) *core.Lsps1Order {
 		PaymentInvoice:               "lnbc1...",
 		OrderTotalLoki:               100_000,
 		FeeTotalLoki:                 1_000,
+		ExpiresAt:                    time.Now().Add(24 * time.Hour),
+		ReservedAmountLoki:           100_000,
 	}
 }
 
@@ -267,6 +269,10 @@ func TestOpeningStore_Lsps2BuyRegistration_RoundTrip(t *testing.T) {
 		ParamsMaxClientToSelfDelay: 4320,
 		ParamsPromise:              "deadbeef",
 		Token:                      "",
+		CreatedAt:                  time.Now(),
+		ExpiresAt:                  time.Now().Add(time.Hour),
+		ReservedAmountLoki:         50_000,
+		State:                      core.Lsps2RegistrationActive,
 	}
 	require.NoError(t, store.RegisterLsps2Buy(reg))
 
@@ -276,6 +282,8 @@ func TestOpeningStore_Lsps2BuyRegistration_RoundTrip(t *testing.T) {
 	assert.Equal(t, reg.LspId, got.LspId)
 	assert.Equal(t, reg.PeerId, got.PeerId)
 	assert.Equal(t, reg.ParamsMinFeeMloki, got.ParamsMinFeeMloki)
+	assert.Equal(t, core.Lsps2RegistrationActive, got.State)
+	assert.Equal(t, reg.ReservedAmountLoki, got.ReservedAmountLoki)
 }
 
 // TestOpeningStore_Lsps2BuyRegistration_HighBitScid is the actual
@@ -311,6 +319,10 @@ func TestOpeningStore_Lsps2BuyRegistration_HighBitScid(t *testing.T) {
 		ParamsMaxClientToSelfDelay: 4320,
 		ParamsPromise:              "deadbeef",
 		Token:                      "",
+		CreatedAt:                  time.Now(),
+		ExpiresAt:                  time.Now().Add(time.Hour),
+		ReservedAmountLoki:         50_000,
+		State:                      core.Lsps2RegistrationActive,
 	}
 	require.NoError(t, store.RegisterLsps2Buy(reg))
 

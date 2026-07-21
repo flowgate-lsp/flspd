@@ -172,6 +172,6 @@ type fakeOpeningServiceChainFee struct {
 	cheaper bool
 }
 
-func (f *fakeOpeningServiceChainFee) IsCurrentChainFeeCheaper(token string, params *core.OpeningFeeParams) bool {
+func (f *fakeOpeningServiceChainFee) IsCurrentChainFeeCheaper(currentFeeratePerVByte *float64, referenceFeeratePerVByte float64) bool {
 	return f.cheaper
 }

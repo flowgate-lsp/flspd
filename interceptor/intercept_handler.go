@@ -21,6 +21,17 @@ import (
 	"golang.org/x/sync/singleflight"
 )
 
+// lsps1JitTag/lsps2JitTag mark a payments row as belonging to a
+// JIT-triggered channel open, persisted via RegisterPayment's tag column
+// and read back by PaymentInfo. resolvePayment uses whichever of these
+// comes back to re-derive isJit/isLsps2Registration on EVERY call, not
+// only the one that first registered the payment -- see the comment
+// where they're consumed, below.
+const (
+	lsps1JitTag = "lsps1.v1"
+	lsps2JitTag = "lsps2.jit"
+)
+
 type Interceptor struct {
 	nodeid []byte
 	client lightning.Client
@@ -65,6 +76,33 @@ func NewInterceptHandler(
 	}
 }
 
+// interceptOutcome carries a singleflight-shared InterceptResult out of
+// Intercept's payHashGroup.Do closure, alongside the two payment-level
+// totals (outgoingAmountMloki/incomingAmountMloki) needed to compute a
+// PER-CALLER forward amount afterward (Phase 7, F-23). Before this existed,
+// the closure computed one `amt` from whichever HTLC's own req happened to
+// win the singleflight race, then singleflight.Do returned that SAME
+// InterceptResult (including AmountMloki) to every other concurrent HTLC
+// sharing the payment hash -- correct for the winner, silently wrong for
+// every other genuinely-concurrent MPP part or replay, which would be told
+// to forward the winner's amount instead of its own.
+//
+// Residual, intentionally out-of-scope limitation: incomingAmountMloki
+// here is still whichever HTLC's req happened to first resolve the
+// payment (resolvePayment itself stays inside the shared closure, since
+// most of what it does -- CLTV/expiry checks, connectivity, the DB claim
+// itself -- is correctly a once-per-payment decision, not a once-per-HTLC
+// one). True proportional multi-part splitting would need a real
+// total-payment-amount field plumbed from LND's own HTLC intercept event
+// through core.InterceptRequest, which doesn't exist today -- this fix
+// closes the "every caller gets an identical, wrong, copied amount" defect
+// without attempting that larger, separate change.
+type interceptOutcome struct {
+	result              core.InterceptResult
+	outgoingAmountMloki int64
+	incomingAmountMloki int64
+}
+
 func (i *Interceptor) Intercept(req core.InterceptRequest) core.InterceptResult {
 	reqPaymentHashStr := hex.EncodeToString(req.PaymentHash)
 	log.Debug().Msgf("Intercept: scid=%s paymentHash=%s outgoingAmount=%v outgoingExpiry=%v incomingExpiry=%v", req.Scid.ToString(), reqPaymentHashStr, req.OutgoingAmountMloki, req.OutgoingExpiry, req.IncomingExpiry)
@@ -77,13 +115,12 @@ func (i *Interceptor) Intercept(req core.InterceptRequest) core.InterceptResult 
 		data, err := i.resolvePayment(req)
 		if err != nil {
 			log.Error().Msgf("resolvePayment(%x) error: %v", req.PaymentHash, err)
-			return core.InterceptResult{
+			return interceptOutcome{result: core.InterceptResult{
 				Action:      core.INTERCEPT_FAIL_HTLC_WITH_CODE,
 				FailureCode: core.FAILURE_TEMPORARY_NODE_FAILURE,
-			}, nil
+			}}, nil
 		}
 
-		token := data.token
 		params := data.params
 		paymentHash := data.paymentHash
 		paymentSecret := data.paymentSecret
@@ -103,18 +140,18 @@ func (i *Interceptor) Intercept(req core.InterceptRequest) core.InterceptResult 
 		nextHop, err := i.client.GetPeerId(&req.Scid)
 		if err != nil {
 			log.Error().Msgf("GetPeerId(%s) error: %v", req.Scid.ToString(), err)
-			return core.InterceptResult{
+			return interceptOutcome{result: core.InterceptResult{
 				Action: core.INTERCEPT_RESUME,
-			}, nil
+			}}, nil
 		}
 
 		// If the payment was registered, but the next hop is not the destination
 		// that means we are not the last hop of the payment, so we'll just forward.
 		if isRegistered && nextHop != nil && !bytes.Equal(nextHop, destination) {
 			log.Debug().Msgf("Intercept: paymentHash=%s routing to nextHop=%s (destination=%s)", reqPaymentHashStr, hex.EncodeToString(nextHop), hex.EncodeToString(destination))
-			return core.InterceptResult{
+			return interceptOutcome{result: core.InterceptResult{
 				Action: core.INTERCEPT_RESUME,
-			}, nil
+			}}, nil
 		}
 
 		// nextHop is set if the sender's scid corresponds to a known channel.
@@ -126,9 +163,9 @@ func (i *Interceptor) Intercept(req core.InterceptRequest) core.InterceptResult 
 			// is not registered, there's nothing left to be done. Just continue.
 			if !isRegistered {
 				log.Debug().Msgf("Intercept: paymentHash=%s skipping unregistered payment (nextHop unknown)", reqPaymentHashStr)
-				return core.InterceptResult{
+				return interceptOutcome{result: core.InterceptResult{
 					Action: core.INTERCEPT_RESUME,
-				}, nil
+				}}, nil
 			}
 
 			// The payment was registered, so the next hop is the registered
@@ -139,19 +176,19 @@ func (i *Interceptor) Intercept(req core.InterceptRequest) core.InterceptResult 
 		isConnected, err := i.client.IsConnected(nextHop)
 		if err != nil {
 			log.Error().Msgf("IsConnected(%x) error: %v", nextHop, err)
-			return core.InterceptResult{
+			return interceptOutcome{result: core.InterceptResult{
 				Action:      core.INTERCEPT_FAIL_HTLC_WITH_CODE,
 				FailureCode: core.FAILURE_TEMPORARY_CHANNEL_FAILURE,
-			}, nil
+			}}, nil
 		}
 
 		if isProbe {
 			// If this is a known probe, we'll quit early for non-connected clients.
 			if !isConnected {
 				log.Debug().Msgf("Intercept: paymentHash=%s probe detected but peer not connected", reqPaymentHashStr)
-				return core.InterceptResult{
+				return interceptOutcome{result: core.InterceptResult{
 					Action: core.INTERCEPT_RESUME,
-				}, nil
+				}}, nil
 			}
 
 			// If it's a probe, they are connected, but need a channel, we'll return
@@ -161,10 +198,10 @@ func (i *Interceptor) Intercept(req core.InterceptRequest) core.InterceptResult 
 			// know that the actual payment would probably succeed.
 			if channelPoint == nil {
 				log.Debug().Msgf("Intercept: paymentHash=%s probe detected, no channel exists", reqPaymentHashStr)
-				return core.InterceptResult{
+				return interceptOutcome{result: core.InterceptResult{
 					Action:      core.INTERCEPT_FAIL_HTLC_WITH_CODE,
 					FailureCode: core.FAILURE_INCORRECT_OR_UNKNOWN_PAYMENT_DETAILS,
-				}, nil
+				}}, nil
 			}
 		}
 
@@ -193,9 +230,9 @@ func (i *Interceptor) Intercept(req core.InterceptRequest) core.InterceptResult 
 
 		// The peer is online, we can resume the htlc if it's not a channel open.
 		if !isRegistered {
-			return core.InterceptResult{
+			return interceptOutcome{result: core.InterceptResult{
 				Action: core.INTERCEPT_RESUME,
-			}, nil
+			}}, nil
 		}
 
 		// Tracked so the routing policy (in particular TimeLockDelta, see
@@ -231,10 +268,10 @@ func (i *Interceptor) Intercept(req core.InterceptRequest) core.InterceptResult 
 			// Make sure the cltv delta is enough.
 			if int64(req.IncomingExpiry)-int64(req.OutgoingExpiry) < int64(cfg.TimeLockDelta) {
 				log.Debug().Msgf("Intercept: paymentHash=%s CLTV insufficient, outgoingExpiry=%v incomingExpiry=%v timeLockDelta=%v", reqPaymentHashStr, req.OutgoingExpiry, req.IncomingExpiry, cfg.TimeLockDelta)
-				return core.InterceptResult{
+				return interceptOutcome{result: core.InterceptResult{
 					Action:      core.INTERCEPT_FAIL_HTLC_WITH_CODE,
 					FailureCode: core.FAILURE_TEMPORARY_CHANNEL_FAILURE,
-				}, nil
+				}}, nil
 			}
 
 			validUntil, err := time.Parse(common.TimeFormat, params.ValidUntil)
@@ -243,47 +280,131 @@ func (i *Interceptor) Intercept(req core.InterceptRequest) core.InterceptResult 
 				if data.orderId != "" {
 					go i.notificationService.NotifyOrderStateChanged(hex.EncodeToString(nextHop), data.orderId, "FAILED", "", fmt.Sprintf("invalid valid_until format: %v", err))
 				}
-				return core.InterceptResult{
+				return interceptOutcome{result: core.InterceptResult{
 					Action:      core.INTERCEPT_FAIL_HTLC_WITH_CODE,
 					FailureCode: core.FAILURE_TEMPORARY_CHANNEL_FAILURE,
-				}, nil
+				}}, nil
 			}
 
 			// Make sure the opening_fee_params are not expired.
 			// If they are expired, but the current chain fee is fine, open channel anyway.
 			if time.Now().UTC().After(validUntil) {
-				if !i.openingService.IsCurrentChainFeeCheaper(token, params) {
+				// F-18: ask the same live fee estimator openChannel itself
+				// uses, not a config-vs-config comparison that was nearly
+				// always true regardless of real fee movement.
+				var currentFeeratePerVByte *float64
+				if feeEst, feeErr := i.feeEstimator.EstimateFeeRate(context.Background(), i.feeStrategy); feeErr == nil && feeEst != nil {
+					currentFeeratePerVByte = feeEst.LokiPerVByte
+				} else {
+					log.Warn().Err(feeErr).Msgf("Intercept: paymentHash=%s failed to estimate current chain fee for expired-quote check", reqPaymentHashStr)
+				}
+				if !i.openingService.IsCurrentChainFeeCheaper(currentFeeratePerVByte, cfg.ReferenceFeeratePerVByte) {
 					log.Warn().Msgf("Intercept: Expired payment registration, failing. paymentHash=%s validUntil=%s", reqPaymentHashStr, params.ValidUntil)
 					if data.orderId != "" {
 						go i.notificationService.NotifyOrderStateChanged(hex.EncodeToString(nextHop), data.orderId, "FAILED", "", "payment registration expired")
 					}
-					return core.InterceptResult{
+					return interceptOutcome{result: core.InterceptResult{
 						Action:      core.INTERCEPT_FAIL_HTLC_WITH_CODE,
 						FailureCode: core.FAILURE_TEMPORARY_CHANNEL_FAILURE,
-					}, nil
+					}}, nil
 				}
 
 				log.Info().Msgf("Intercept: Expired registration but current fee is cheaper, proceeding. paymentHash=%s", reqPaymentHashStr)
 			}
 
+			// Phase 7 (F-15/F-22, T7-2): claim the registration BEFORE
+			// calling openChannel, not after -- the actual concurrency
+			// gate. A second, distinct-payment-hash HTLC (a sequential
+			// replay once the first channel already exists, or a genuinely
+			// concurrent race) must not reach openChannel a second time for
+			// the same registration. Postgres row-level locking makes
+			// exactly one concurrent ClaimLsps2Registration call win,
+			// deterministically.
+			if data.isLsps2Registration {
+				claimed, claimErr := i.store.ClaimLsps2Registration(data.lsps2Scid)
+				if claimErr != nil {
+					log.Error().Err(claimErr).Msgf("Intercept: paymentHash=%s failed to claim LSPS2 registration scid=%d", reqPaymentHashStr, data.lsps2Scid)
+					return interceptOutcome{result: core.InterceptResult{
+						Action:      core.INTERCEPT_FAIL_HTLC_WITH_CODE,
+						FailureCode: core.FAILURE_TEMPORARY_CHANNEL_FAILURE,
+					}}, nil
+				}
+				if !claimed {
+					// Another HTLC already claimed, consumed, or the
+					// registration expired/was never ACTIVE -- do not open
+					// a second channel for it. There is no real channel
+					// yet for this HTLC to resume onto, so fail it (not
+					// INTERCEPT_RESUME): once the winner's channel is
+					// active, a retry's PaymentInfo(paymentHash) lookup
+					// (or GetPeerId resolving the now-real channel)
+					// resolves it directly.
+					log.Warn().Msgf("Intercept: paymentHash=%s scid=%d LSPS2 registration already claimed/consumed/expired, refusing to open a second channel (F-15)", reqPaymentHashStr, data.lsps2Scid)
+					return interceptOutcome{result: core.InterceptResult{
+						Action:      core.INTERCEPT_FAIL_HTLC_WITH_CODE,
+						FailureCode: core.FAILURE_TEMPORARY_CHANNEL_FAILURE,
+					}}, nil
+				}
+			}
+
 			channelPoint, err = i.openChannel(req.PaymentHash, destination, incomingAmountMloki, outgoingAmountMloki, tag, data.isJit)
-			if err != nil {
+			if err != nil && channelPoint == nil {
+				// Clean failure: no channel was opened at all (the
+				// on-chain OpenChannel call itself failed), so no capital
+				// was committed. Safe to release the registration for a
+				// later retry.
 				log.Error().Msgf("paymentHash: %s, openChannel(%x, %v) err: %v", reqPaymentHashStr, destination, incomingAmountMloki, err)
+				if data.isLsps2Registration {
+					if relErr := i.store.ReleaseLsps2Registration(data.lsps2Scid); relErr != nil {
+						log.Error().Err(relErr).Msgf("Intercept: paymentHash=%s failed to release LSPS2 registration scid=%d after openChannel failure", reqPaymentHashStr, data.lsps2Scid)
+					}
+				}
 				if data.orderId != "" {
 					go i.notificationService.NotifyOrderStateChanged(hex.EncodeToString(nextHop), data.orderId, "FAILED", "", fmt.Sprintf("failed to open channel: %v", err))
 				}
-				return core.InterceptResult{
+				return interceptOutcome{result: core.InterceptResult{
 					Action:      core.INTERCEPT_FAIL_HTLC_WITH_CODE,
 					FailureCode: core.FAILURE_TEMPORARY_CHANNEL_FAILURE,
-				}, nil
+				}}, nil
+			}
+			if err != nil {
+				// Partial success: openChannel's on-chain OpenChannel call
+				// succeeded (channelPoint is real, capital is already
+				// committed) but a later step inside it -- persisting
+				// funding_tx_id via SetFundingTx -- failed. This must NOT
+				// be treated the same as a clean failure: releasing the
+				// registration here would let a later HTLC claim it and
+				// open a SECOND real channel for capital that's already
+				// spent. Log loudly for operator visibility and fall
+				// through into the exact same success path below (Consume
+				// + WaitChannelPointActive etc.), using the channelPoint
+				// already in hand -- T7-13's crash-recovery sweep is the
+				// backstop if payments.funding_tx_id itself never gets
+				// backfilled.
+				log.Error().Err(err).Msgf("Intercept: paymentHash=%s channel %s opened successfully but failed to persist the funding record; treating as consumed, not failed", reqPaymentHashStr, channelPoint.String())
+			}
+
+			if data.isLsps2Registration {
+				// Non-fatal if this fails: the channel already opened
+				// successfully and real capital is already committed --
+				// failing the HTLC now would be strictly worse. Log and
+				// continue; T7-13's crash-recovery sweep is the backstop
+				// for a registration left at OPENING.
+				feeMloki := uint64(0)
+				if incomingAmountMloki > outgoingAmountMloki {
+					feeMloki = uint64(incomingAmountMloki - outgoingAmountMloki)
+				}
+				if _, consumeErr := i.store.ConsumeLsps2Registration(data.lsps2Scid, channelPoint, uint64(incomingAmountMloki), feeMloki); consumeErr != nil {
+					log.Error().Err(consumeErr).Msgf("Intercept: paymentHash=%s failed to consume LSPS2 registration scid=%d after successful channel open", reqPaymentHashStr, data.lsps2Scid)
+				}
 			}
 		}
 
-		// Scale the forwarding amount proportionally for MPP parts
-		// For single-part: amt = outgoingAmountMloki (since req.IncomingAmountMloki == incomingAmountMloki)
-		// For MPP: each part contributes proportionally based on its incoming amount
-		var bigProd, bigAmt big.Int
-		amt := (bigAmt.Div(bigProd.Mul(big.NewInt(outgoingAmountMloki), big.NewInt(int64(req.IncomingAmountMloki))), big.NewInt(incomingAmountMloki))).Int64()
+		// Scale the forwarding amount proportionally for MPP parts. This
+		// value is only used for the history-store record below (about the
+		// specific triggering HTLC) -- the InterceptResult actually
+		// returned to EACH caller is recomputed fresh outside the shared
+		// closure, per F-23 (see scaleForwardAmountMloki's doc comment).
+		amt := scaleForwardAmountMloki(outgoingAmountMloki, incomingAmountMloki, int64(req.IncomingAmountMloki))
 
 		deadline := time.Now().Add(60 * time.Second)
 
@@ -308,7 +429,7 @@ func (i *Interceptor) Intercept(req core.InterceptRequest) core.InterceptResult 
 		chanResult, err := i.client.WaitChannelPointActive(destination, *channelPoint, deadline)
 		if err != nil {
 			log.Debug().Msgf("Intercept: paymentHash=%s waiting for channel to open for peer %x: %v", reqPaymentHashStr, destination, err)
-			return failChannelOpenTimeout(err.Error()), nil
+			return interceptOutcome{result: failChannelOpenTimeout(err.Error())}, nil
 		}
 
 		{
@@ -318,7 +439,7 @@ func (i *Interceptor) Intercept(req core.InterceptRequest) core.InterceptResult 
 			if chanResult.ConfirmedScid == nil {
 				if chanResult.AliasScid == nil {
 					log.Error().Msgf("Error: WaitChannelPointActive: Both confirmed scid and alias scid are nil: %+v", chanResult)
-					return failChannelOpenTimeout("channel became active with no scid assigned"), nil
+					return interceptOutcome{result: failChannelOpenTimeout("channel became active with no scid assigned")}, nil
 				}
 				scid = chanResult.AliasScid
 			} else {
@@ -443,19 +564,59 @@ func (i *Interceptor) Intercept(req core.InterceptRequest) core.InterceptResult 
 				)
 			}
 
-			return core.InterceptResult{
-				Action:           core.INTERCEPT_RESUME_WITH_ONION,
-				Destination:      destination,
-				ChannelPoint:     channelPoint,
-				Scid:             *scid,
-				PaymentSecret:    paymentSecret,
-				AmountMloki:      uint64(amt),
-				TotalAmountMloki: uint64(outgoingAmountMloki),
+			return interceptOutcome{
+				result: core.InterceptResult{
+					Action:           core.INTERCEPT_RESUME_WITH_ONION,
+					Destination:      destination,
+					ChannelPoint:     channelPoint,
+					Scid:             *scid,
+					PaymentSecret:    paymentSecret,
+					AmountMloki:      uint64(amt), // recomputed per-caller below (F-23); this is only the triggering HTLC's own value, used for the history-store record above.
+					TotalAmountMloki: uint64(outgoingAmountMloki),
+				},
+				outgoingAmountMloki: outgoingAmountMloki,
+				incomingAmountMloki: incomingAmountMloki,
 			}, nil
 		}
 	})
 
-	return resp.(core.InterceptResult)
+	outcome := resp.(interceptOutcome)
+	result := outcome.result
+
+	// F-23: recompute AmountMloki here, OUTSIDE the singleflight closure,
+	// using THIS call's own req -- not whichever HTLC happened to win the
+	// race above. Before this fix, every concurrent HTLC sharing a payment
+	// hash received the exact same (winner's) AmountMloki, silently wrong
+	// for every part but the winner.
+	if result.Action == core.INTERCEPT_RESUME_WITH_ONION {
+		result.AmountMloki = uint64(scaleForwardAmountMloki(outcome.outgoingAmountMloki, outcome.incomingAmountMloki, int64(req.IncomingAmountMloki)))
+	}
+	return result
+}
+
+// scaleForwardAmountMloki computes one HTLC's proportional share of the
+// total outgoing amount: for a single-part payment, reqIncomingAmountMloki
+// == incomingAmountMloki, so this returns outgoingAmountMloki unchanged;
+// for a multi-part (MPP) payment, each part's own reqIncomingAmountMloki
+// scales its share of outgoingAmountMloki accordingly. Deliberately a pure
+// function of its three arguments only (Phase 7, F-23) -- Intercept calls
+// it fresh, per caller, with THAT caller's own req, outside the
+// payHashGroup singleflight closure that only runs once per shared
+// payment hash; before this fix, every concurrent HTLC sharing a payment
+// hash received the exact same computed amount, correct only for whichever
+// one happened to win the race.
+//
+// Residual limitation, intentionally out of scope here: incomingAmountMloki
+// is still whichever HTLC's own request first resolved the payment inside
+// the shared closure, not a true payment-level total independent of any
+// single part -- see interceptOutcome's doc comment for why fixing that
+// fully would need a new field plumbed from LND's own HTLC intercept event.
+func scaleForwardAmountMloki(outgoingAmountMloki, incomingAmountMloki, reqIncomingAmountMloki int64) int64 {
+	if incomingAmountMloki == 0 {
+		return 0
+	}
+	var bigProd, bigAmt big.Int
+	return bigAmt.Div(bigProd.Mul(big.NewInt(outgoingAmountMloki), big.NewInt(reqIncomingAmountMloki)), big.NewInt(incomingAmountMloki)).Int64()
 }
 
 func (i *Interceptor) notifyAndWait(reqPaymentHashStr string, nextHop []byte, isRegistered bool) *core.InterceptResult {
@@ -534,32 +695,16 @@ func (i *Interceptor) openChannel(paymentHash, destination []byte, incomingAmoun
 	// concurrently mid-flight (C-3).
 	cfg := i.config.Load()
 
-	capacity := incomingAmountMloki/1000 + cfg.AdditionalChannelCapacity
+	// RequiredCapacityLoki (Phase 7, F-24) is the single shared computation
+	// of real committed capacity -- also used by the LSPS1/LSPS2 handlers'
+	// liquidity checks and reservation bookkeeping, so this function and
+	// the ledger can never silently drift apart again. It folds in the
+	// BOLT2 ~1% reserve top-up (see its own doc comment for why that term
+	// exists -- root-caused 2026-07-16 from a live FAILURE_REASON_NO_ROUTE)
+	// but deliberately does not clamp to the floors checked just below.
+	capacity := int64(config.RequiredCapacityLoki(uint64(incomingAmountMloki/1000), uint64(outgoingAmountMloki/1000), cfg, isJit))
 	if capacity == cfg.PublicChannelAmount {
 		capacity++
-	}
-
-	// A channel can never actually forward more than ~99% of its own
-	// capacity to the far side: BOLT2 requires the funding party (the LSP,
-	// which puts up 100% of a JIT channel's capacity) to always keep a ~1%
-	// reserve on its own side of the channel, and flnd enforces this at the
-	// link level regardless of what forwarding policy is advertised (see
-	// flnd/server.go's RequiredRemoteMaxValue: capacity - capacity/100).
-	// incomingAmountMloki/1000 + AdditionalChannelCapacity doesn't budget
-	// for this reserve at all, so for a large-enough payment relative to
-	// the fixed padding, capacity*0.99 ends up smaller than
-	// outgoingAmountMloki -- the amount that actually needs to cross the
-	// channel, net of flspd's own JIT opening fee -- and the payment
-	// becomes permanently unroutable no matter how long the payer's client
-	// waits or retries. Root-caused 2026-07-16 from a live
-	// FAILURE_REASON_NO_ROUTE traced to flnd's own advertised
-	// htlc_maximum_msat on the freshly opened channel being smaller than
-	// the forwarded amount. Make sure capacity leaves that reserve on top
-	// of what needs to be forwarded, so AdditionalChannelCapacity is real
-	// headroom above the structural floor rather than partially consumed
-	// by it.
-	if minCapacity := outgoingAmountMloki/1000*100/99 + cfg.AdditionalChannelCapacity; minCapacity > capacity {
-		capacity = minCapacity
 	}
 
 	fee, err := i.feeEstimator.EstimateFeeRate(
@@ -573,19 +718,23 @@ func (i *Interceptor) openChannel(paymentHash, destination []byte, incomingAmoun
 		}
 	}
 
-	// Enforce Minimum Channel Capacity (Physical Floor)
-	if uint64(capacity) < cfg.MinChannelCapacityLoki {
+	// Enforce Minimum Channel Capacity (Physical Floor) and, for JIT, the
+	// Business Floor -- config.MeetsCapacityFloors is the same predicate
+	// the LSPS1/LSPS2 handlers validate against before ever reaching here.
+	// The business floor only applies when isJit AND JitEnabled, matching
+	// this function's original gating exactly (isJit alone can be true
+	// with JitEnabled since toggled off mid-flight, C-3-style).
+	enforceJitFloor := isJit && cfg.JitEnabled
+	if !config.MeetsCapacityFloors(uint64(capacity), cfg, enforceJitFloor) {
+		if cfg.JitMinChannelBalanceLoki != nil && enforceJitFloor && uint64(capacity) < *cfg.JitMinChannelBalanceLoki {
+			return nil, fmt.Errorf("channel capacity %d is smaller than business minimum %d", capacity, *cfg.JitMinChannelBalanceLoki)
+		}
 		return nil, fmt.Errorf("channel capacity %d is smaller than minimum %d (network floor)", capacity, cfg.MinChannelCapacityLoki)
 	}
 
 	// Enforce Business Limits for JIT
 	if cfg.JitEnabled && isJit {
-		// 1. Check Business Floor (Minimum Channel Size)
-		if cfg.JitMinChannelBalanceLoki != nil && uint64(capacity) < *cfg.JitMinChannelBalanceLoki {
-			return nil, fmt.Errorf("channel capacity %d is smaller than business minimum %d", capacity, *cfg.JitMinChannelBalanceLoki)
-		}
-
-		// 2. Check Maximum Payment Size
+		// Check Maximum Payment Size
 		if cfg.JitMaxPaymentSizeMloki > 0 && uint64(incomingAmountMloki) > cfg.JitMaxPaymentSizeMloki {
 			return nil, fmt.Errorf("payment size %d exceeds maximum allowed %d", incomingAmountMloki, cfg.JitMaxPaymentSizeMloki)
 		}
@@ -682,7 +831,6 @@ func computeJitOutgoingAmount(paymentSizeMloki, minFeeMloki int64, proportional 
 }
 
 type interceptData struct {
-	token               string
 	orderId             string
 	params              *core.OpeningFeeParams
 	paymentHash         []byte
@@ -693,11 +841,23 @@ type interceptData struct {
 	channelPoint        *wire.OutPoint
 	tag                 *string
 	isJit               bool
+	// isLsps2Registration marks a payment resolved via the LSPS2
+	// buy_registrations flow (Phase 7, F-15/T7-2) -- the only kind of JIT
+	// payment with a Claim/Consume/Release lifecycle to enforce. Derived
+	// from the payments row's persisted tag (lsps2JitTag), so it's set
+	// identically whether this call freshly registered the payment or
+	// found an existing row from an earlier call for the same
+	// payment_hash -- see resolvePayment.
+	isLsps2Registration bool
+	// lsps2Scid is the phantom SCID this registration lives at -- kept
+	// separate from req.Scid (the caller's own copy) so Intercept's
+	// Claim/Consume/Release calls read it from data, matching how every
+	// other per-payment field here is threaded through.
+	lsps2Scid uint64
 }
 
 func (i *Interceptor) resolvePayment(req core.InterceptRequest) (*interceptData, error) {
 	token, orderId, params, paymentHash, paymentSecret, destination, incomingAmountMloki, outgoingAmountMloki, channelPoint, tag, err := i.store.PaymentInfo(req.PaymentHash)
-	isJit := false
 
 	// If err is nil but paymentHash/token is empty, it means not found in payments table.
 	// We should treat this as "need fallback" for LSPS2.
@@ -717,28 +877,55 @@ func (i *Interceptor) resolvePayment(req core.InterceptRequest) (*interceptData,
 			}
 			paymentHash = req.PaymentHash
 			paymentSecret = []byte("lsps2-jit") // Mark as registered
+
+			// F-22: paymentSize is the amount to validate/compute the fee
+			// against -- the client's own fixed size if they gave one, else
+			// (BLIP-52's legal "variable size, single HTLC" mode) the real
+			// incoming amount actually paid. Before this fix, a nil
+			// PaymentSizeMloki left outgoingAmountMloki at its zero default
+			// for the entire rest of this flow -- openChannel would still
+			// open a real, fully-funded channel, then forward a
+			// guaranteed-to-fail $0 HTLC.
+			paymentSize := int64(req.IncomingAmountMloki)
 			if lsps2Order.PaymentSizeMloki != nil {
-				paymentSize := int64(*lsps2Order.PaymentSizeMloki)
-				minFee := int64(lsps2Order.ParamsMinFeeMloki)
+				paymentSize = int64(*lsps2Order.PaymentSizeMloki)
+			} else if lsps2Order.MaxPaymentSizeMloki != nil && req.IncomingAmountMloki > *lsps2Order.MaxPaymentSizeMloki {
+				// F-22 (redemption-time half): in variable-size mode, the
+				// real incoming HTLC amount was only ever bounded by an
+				// unrelated, node-wide ceiling (JitMaxPaymentSizeMloki),
+				// never by THIS registration's own worst-case bound --
+				// the exact figure its buy-time reservation
+				// (ReservedAmountLoki) was sized against. Without this
+				// check, the channel opened below (sized off
+				// incomingAmountMloki) could exceed what the
+				// reserved-liquidity ledger (F-16/F-20) believes is
+				// committed for this registration.
+				log.Warn().Msgf("LSPS2 JIT: incoming amount %d exceeds registration's own worst-case bound %d", req.IncomingAmountMloki, *lsps2Order.MaxPaymentSizeMloki)
+				return nil, fmt.Errorf("incoming amount %d exceeds registration's reserved worst-case bound %d", req.IncomingAmountMloki, *lsps2Order.MaxPaymentSizeMloki)
+			}
+			minFee := int64(lsps2Order.ParamsMinFeeMloki)
 
-				var fee int64
-				outgoingAmountMloki, fee = computeJitOutgoingAmount(paymentSize, minFee, lsps2Order.ParamsProportional)
+			var fee int64
+			outgoingAmountMloki, fee = computeJitOutgoingAmount(paymentSize, minFee, lsps2Order.ParamsProportional)
 
-				log.Info().Msgf("LSPS2 JIT: PaymentSize=%d, Fee=%d, Outgoing=%d", paymentSize, fee, outgoingAmountMloki)
+			log.Info().Msgf("LSPS2 JIT: PaymentSize=%d, Fee=%d, Outgoing=%d", paymentSize, fee, outgoingAmountMloki)
 
-				// Validation: Ensure the sender paid enough to cover the PaymentSize (which fee is calculated from)
-				if int64(req.IncomingAmountMloki) < paymentSize {
-					log.Warn().Msgf("LSPS2 JIT: Underpayment detected. PaymentSize=%d > Incoming=%d", paymentSize, req.IncomingAmountMloki)
-					return nil, fmt.Errorf("underpayment: incoming amount %d is less than required payment size %d", req.IncomingAmountMloki, paymentSize)
-				}
+			// Validation: Ensure the sender paid enough to cover the PaymentSize (which fee is calculated from)
+			if int64(req.IncomingAmountMloki) < paymentSize {
+				log.Warn().Msgf("LSPS2 JIT: Underpayment detected. PaymentSize=%d > Incoming=%d", paymentSize, req.IncomingAmountMloki)
+				return nil, fmt.Errorf("underpayment: incoming amount %d is less than required payment size %d", req.IncomingAmountMloki, paymentSize)
 			}
 			incomingAmountMloki = int64(req.IncomingAmountMloki)
-			isJit = true
+			lsps2Tag := lsps2JitTag
+			tag = &lsps2Tag
 
 			orderId = lsps2Order.Id
 
-			// Register the payment
-			err = i.store.RegisterPayment(token, orderId, params, destination, paymentHash, paymentSecret, incomingAmountMloki, outgoingAmountMloki, "")
+			// Register the payment, persisting lsps2JitTag as this row's
+			// tag -- read back by PaymentInfo on every later call for this
+			// payment_hash, so isJit/isLsps2Registration below can be
+			// re-derived from it instead of only being set here.
+			err = i.store.RegisterPayment(token, orderId, params, destination, paymentHash, paymentSecret, incomingAmountMloki, outgoingAmountMloki, lsps2JitTag)
 			if err != nil {
 				log.Error().Msgf("Failed to register LSPS2 payment: %v", err)
 				return nil, err
@@ -786,8 +973,7 @@ func (i *Interceptor) resolvePayment(req core.InterceptRequest) (*interceptData,
 						outgoingAmountMloki = int64(lsps1Order.ClientBalanceLoki * 1000)
 					}
 					incomingAmountMloki = int64(req.IncomingAmountMloki)
-					isJit = true
-					lsps1Tag := "lsps1.v1"
+					lsps1Tag := lsps1JitTag
 					tag = &lsps1Tag
 
 					orderId = lsps1Order.OrderId
@@ -807,8 +993,32 @@ func (i *Interceptor) resolvePayment(req core.InterceptRequest) (*interceptData,
 		return nil, err
 	}
 
+	// isJit/isLsps2Registration are derived from the final, PERSISTED tag
+	// here, unconditionally -- not only inside the "not found" fallback
+	// above. Before this fix, they were zero-initialized locals only ever
+	// flipped true inside that fallback, so any call that instead took the
+	// "found" branch (a retry after openChannel failed and
+	// ReleaseLsps2Registration already ran once, or any later HTLC arriving
+	// after RegisterPayment already wrote this payment_hash's row) silently
+	// lost the classification: Intercept would then skip
+	// ClaimLsps2Registration entirely on that call, defeating the very
+	// lifecycle F-15's fix depends on, and skip the JIT
+	// business-floor/max-payment-size checks in openChannel for the LSPS1
+	// case. Deriving from tag instead makes the classification the same on
+	// every call for a given payment_hash, retry or not.
+	isJit := false
+	isLsps2Registration := false
+	if tag != nil {
+		switch *tag {
+		case lsps2JitTag:
+			isJit = true
+			isLsps2Registration = true
+		case lsps1JitTag:
+			isJit = true
+		}
+	}
+
 	return &interceptData{
-		token:               token,
 		orderId:             orderId,
 		params:              params,
 		paymentHash:         paymentHash,
@@ -819,5 +1029,126 @@ func (i *Interceptor) resolvePayment(req core.InterceptRequest) (*interceptData,
 		channelPoint:        channelPoint,
 		tag:                 tag,
 		isJit:               isJit,
+		isLsps2Registration: isLsps2Registration,
+		lsps2Scid:           uint64(req.Scid),
 	}, nil
+}
+
+// RecoverStuckLsps2Registrations is the LSPS2 analogue of
+// settlement_service.go's recoverStuckOrders/reconcileUnclaimedChannel
+// (Phase 7, T7-13): a registration can be left at OPENING if flspd crashes
+// between openChannel succeeding (a real funding transaction already
+// broadcast, real capital already committed) and the
+// ConsumeLsps2Registration commit. Left alone, that registration is
+// unreachable by ClaimLsps2Registration forever (it's not ACTIVE) --
+// unaccounted for in reserved-liquidity terms, and, since it's exactly the
+// class of "real channel, no DB record" bug this codebase already found
+// and fixed once for LSPS1 (F-14), needs the same reconcile-against-LND
+// treatment, not a blind retry. Intended to run once at startup and,
+// optionally, on a periodic tick alongside OrderCleanupService.
+func (i *Interceptor) RecoverStuckLsps2Registrations() {
+	stuck, err := i.store.GetStuckLsps2Registrations()
+	if err != nil {
+		log.Error().Err(err).Msg("RecoverStuckLsps2Registrations: failed to list stuck registrations")
+		return
+	}
+	if len(stuck) == 0 {
+		return
+	}
+	log.Info().Int("count", len(stuck)).Msg("RecoverStuckLsps2Registrations: found registrations stuck at OPENING, reconciling against LND")
+
+	channels, err := i.client.ListChannels()
+	if err != nil {
+		log.Error().Err(err).Msg("RecoverStuckLsps2Registrations: failed to list channels, deferring to the next pass")
+		return
+	}
+
+	// Excludes channels already attributed to some other registration's
+	// completed purchase, mirroring LSPS1's own
+	// claimedChannelPoints/findUnclaimedChannelPoint (settlement_service.go)
+	// -- without this, a peer with ANY pre-existing channel (from an
+	// earlier LSPS1 order, a manual open, or a prior JIT purchase) would
+	// have that unrelated channel wrongly attributed to this stuck
+	// registration.
+	claimed, err := i.store.GetClaimedLsps2ChannelPoints()
+	if err != nil {
+		log.Error().Err(err).Msg("RecoverStuckLsps2Registrations: failed to list already-claimed channel points, deferring to the next pass")
+		return
+	}
+
+	for _, reg := range stuck {
+		destination, err := hex.DecodeString(reg.PeerId)
+		if err != nil {
+			log.Error().Err(err).Str("registration_id", reg.Id).Msg("RecoverStuckLsps2Registrations: invalid peer_id, skipping")
+			continue
+		}
+
+		// Deliberately conservative, same philosophy as
+		// findUnclaimedChannelPoint: collect every unclaimed channel to
+		// this peer, and only act if there's EXACTLY one. Zero or more
+		// than one is ambiguous -- guessing risks either falsely
+		// consuming a registration nothing was ever opened for, or
+		// mis-attributing one registration's channel to another.
+		var candidates []*lightning.Channel
+		for _, ch := range channels {
+			if ch.ChannelPoint == nil || !bytes.Equal(ch.PeerId, destination) {
+				continue
+			}
+			if claimed[ch.ChannelPoint.String()] {
+				continue
+			}
+			candidates = append(candidates, ch)
+		}
+
+		if len(candidates) > 1 {
+			log.Warn().Str("registration_id", reg.Id).Int("candidate_count", len(candidates)).Msg("RecoverStuckLsps2Registrations: multiple unclaimed channels found for this peer, cannot disambiguate which (if any) belongs to this registration -- leaving stuck for manual review")
+			continue
+		}
+
+		if len(candidates) == 1 {
+			existing := candidates[0]
+			// openChannel already succeeded before the crash -- finish
+			// what ConsumeLsps2Registration would have done, using the
+			// registration's own quoted figures as the best available
+			// approximation for the audit record (the exact per-HTLC
+			// amounts from the original triggering payment are gone with
+			// the crashed process). Preference order: the client's own
+			// fixed PaymentSizeMloki (exact, fixed-size mode) : the
+			// registration's own worst-case MaxPaymentSizeMloki (F-22,
+			// variable-size mode -- a real payment-size bound, still just
+			// an approximation of the true redeemed amount but not
+			// systematically inflated) : ReservedAmountLoki*1000 (last
+			// resort only, for a registration that predates
+			// MaxPaymentSizeMloki -- this one IS a known overstatement,
+			// since ReservedAmountLoki also bakes in capacity padding and
+			// the BOLT2 reserve top-up on top of the real payment size).
+			var paymentSizeMloki uint64
+			switch {
+			case reg.PaymentSizeMloki != nil:
+				paymentSizeMloki = *reg.PaymentSizeMloki
+			case reg.MaxPaymentSizeMloki != nil:
+				paymentSizeMloki = *reg.MaxPaymentSizeMloki
+			default:
+				paymentSizeMloki = reg.ReservedAmountLoki * 1000
+			}
+			consumed, err := i.store.ConsumeLsps2Registration(reg.Scid, existing.ChannelPoint, paymentSizeMloki, reg.ParamsMinFeeMloki)
+			if err != nil {
+				log.Error().Err(err).Str("registration_id", reg.Id).Msg("RecoverStuckLsps2Registrations: failed to consume registration for an already-open channel")
+				continue
+			}
+			if consumed {
+				log.Info().Str("registration_id", reg.Id).Str("channel_point", existing.ChannelPoint.String()).Msg("RecoverStuckLsps2Registrations: reconciled a crash-orphaned channel, registration marked CONSUMED")
+			}
+			continue
+		}
+
+		// No unclaimed channel found -- the crash happened before
+		// openChannel ever succeeded (or it genuinely failed). Safe to
+		// release back to ACTIVE so a real HTLC can retry.
+		if err := i.store.ReleaseLsps2Registration(reg.Scid); err != nil {
+			log.Error().Err(err).Str("registration_id", reg.Id).Msg("RecoverStuckLsps2Registrations: failed to release stuck registration")
+			continue
+		}
+		log.Info().Str("registration_id", reg.Id).Msg("RecoverStuckLsps2Registrations: no matching channel found, released back to ACTIVE for retry")
+	}
 }

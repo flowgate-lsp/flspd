@@ -113,40 +113,178 @@ func (s *PostgresInterceptStore) GetLsps2Order(scid uint64) (*core.Lsps2BuyRegis
 	// DEBUG LOGGING
 	log.Trace().Msgf("GetLsps2Order querying int64 SCID: %d (uint64: %d)", int64(scid), scid)
 	row := s.pool.QueryRow(context.Background(),
-		`SELECT id, lsp_id, peer_id, scid, mode, payment_size_mloki, 
-			params_min_fee_mloki, params_proportional, params_valid_until, 
-			params_min_lifetime, params_max_client_to_self_delay, params_promise, token
+		`SELECT `+lsps2BuyRegistrationColumns+`
 		FROM lsps2.buy_registrations WHERE scid=$1`, int64(scid))
 
-	var reg core.Lsps2BuyRegistration
-	var scidInt int64
-	err := row.Scan(
-		&reg.Id, &reg.LspId, &reg.PeerId, &scidInt, &reg.Mode, &reg.PaymentSizeMloki,
-		&reg.ParamsMinFeeMloki, &reg.ParamsProportional, &reg.ParamsValidUntil,
-		&reg.ParamsMinLifetime, &reg.ParamsMaxClientToSelfDelay, &reg.ParamsPromise, &reg.Token,
-	)
-	reg.Scid = uint64(scidInt)
+	reg, err := scanLsps2BuyRegistration(row)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, nil
 		}
 		return nil, err
 	}
-	return &reg, nil
+	return reg, nil
 }
 
-// GetPaidLsps1Order finds the oldest PAID order for a client that hasn't been fulfilled yet
+// execLsps2RegistrationCAS runs sql -- a full, self-contained
+// compare-and-set UPDATE targeting exactly one row by scid -- and reports
+// whether it actually matched a row. The shared boilerplate behind
+// ClaimLsps2Registration and ReleaseLsps2Registration: both are a
+// single-column CAS on lsps2.buy_registrations.state (the same shape
+// UpdateLsps1OrderState already generalized for lsps1.orders' two-column
+// case), differing only in which transition and extra condition each
+// enforces -- kept as two full, independently-readable/greppable SQL
+// statements at their call sites rather than a further-generalized,
+// string-built query, so the actual UPDATE each runs stays visible in one
+// place instead of assembled from parts.
+func (s *PostgresInterceptStore) execLsps2RegistrationCAS(sql string, scid uint64) (bool, error) {
+	result, err := s.pool.Exec(context.Background(), sql, int64(scid))
+	if err != nil {
+		return false, err
+	}
+	return result.RowsAffected() > 0, nil
+}
+
+// ClaimLsps2Registration atomically transitions a registration
+// ACTIVE->OPENING (Phase 7, F-15/F-22/T7-2): the actual concurrency gate a
+// real channel-open must pass *before* openChannel is called, not a
+// post-hoc bookkeeping entry after. Matches expires_at > now() too, so an
+// expired-but-not-yet-swept registration can't be claimed either.
+func (s *PostgresInterceptStore) ClaimLsps2Registration(scid uint64) (bool, error) {
+	return s.execLsps2RegistrationCAS(
+		`UPDATE lsps2.buy_registrations
+		 SET state = 'OPENING'
+		 WHERE scid = $1 AND state = 'ACTIVE' AND expires_at > now()`,
+		scid)
+}
+
+// ReleaseLsps2Registration reverts OPENING->ACTIVE (best-effort) after
+// openChannel failed, so a later HTLC can retry the same registration.
+func (s *PostgresInterceptStore) ReleaseLsps2Registration(scid uint64) error {
+	_, err := s.execLsps2RegistrationCAS(
+		`UPDATE lsps2.buy_registrations SET state = 'ACTIVE' WHERE scid = $1 AND state = 'OPENING'`,
+		scid)
+	return err
+}
+
+// ConsumeLsps2Registration atomically transitions OPENING->CONSUMED and
+// records the redemption in lsps2.bought_channels -- present in the schema
+// since the original migration, never written to before Phase 7 (F-15,
+// F-21). Both writes happen in one transaction so a registration can never
+// be marked CONSUMED without a matching bought_channels row, or vice versa.
+func (s *PostgresInterceptStore) ConsumeLsps2Registration(scid uint64, channelPoint *wire.OutPoint, paymentSizeMloki, feeMloki uint64) (bool, error) {
+	ctx := context.Background()
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback(ctx)
+
+	var registrationId string
+	err = tx.QueryRow(ctx,
+		`UPDATE lsps2.buy_registrations SET state = 'CONSUMED'
+		 WHERE scid = $1 AND state = 'OPENING'
+		 RETURNING id`,
+		int64(scid)).Scan(&registrationId)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			// Someone else already consumed, released, or expired this
+			// registration -- not this caller's channel to record.
+			return false, nil
+		}
+		return false, err
+	}
+
+	_, err = tx.Exec(ctx,
+		`INSERT INTO lsps2.bought_channels
+			(id, registration_id, funding_tx_id, funding_tx_outnum, fee_mloki, payment_size_mloki, is_completed, completed_at)
+		 VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, true, now())`,
+		registrationId, channelPoint.Hash[:], channelPoint.Index, feeMloki, paymentSizeMloki)
+	if err != nil {
+		return false, fmt.Errorf("ConsumeLsps2Registration: failed to record bought_channels for scid=%d: %w", scid, err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// GetStuckLsps2Registrations returns registrations left at OPENING -- e.g.
+// by a crash between openChannel succeeding and the
+// ConsumeLsps2Registration commit (T7-13, the LSPS2 analogue of
+// settlement_service.go's recoverStuckOrders/reconcileUnclaimedChannel).
+func (s *PostgresInterceptStore) GetStuckLsps2Registrations() ([]*core.Lsps2BuyRegistration, error) {
+	rows, err := s.pool.Query(context.Background(),
+		`SELECT `+lsps2BuyRegistrationColumns+`
+		FROM lsps2.buy_registrations WHERE state = 'OPENING'`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var regs []*core.Lsps2BuyRegistration
+	for rows.Next() {
+		reg, err := scanLsps2BuyRegistration(rows)
+		if err != nil {
+			return nil, err
+		}
+		regs = append(regs, reg)
+	}
+	return regs, rows.Err()
+}
+
+// GetClaimedLsps2ChannelPoints returns the set of channel points already
+// recorded in lsps2.bought_channels, keyed by wire.OutPoint.String()'s
+// "hash:index" form -- the same key shape RecoverStuckLsps2Registrations
+// compares against lightning.Channel.ChannelPoint.String(), and the same
+// convention Lsps1SettlementService.claimedChannelPoints uses for LSPS1's
+// funding_txid/funding_outpoint. A small, one-shot full-table scan: this
+// only ever runs once at startup (and optionally on a periodic tick),
+// never on the HTLC hot path.
+func (s *PostgresInterceptStore) GetClaimedLsps2ChannelPoints() (map[string]bool, error) {
+	rows, err := s.pool.Query(context.Background(),
+		`SELECT funding_tx_id, funding_tx_outnum FROM lsps2.bought_channels`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	claimed := make(map[string]bool)
+	for rows.Next() {
+		var fundingTxID []byte
+		var fundingTxOutnum int64
+		if err := rows.Scan(&fundingTxID, &fundingTxOutnum); err != nil {
+			return nil, err
+		}
+		point, err := lightning.NewOutPoint(fundingTxID, uint32(fundingTxOutnum))
+		if err != nil {
+			log.Error().Err(err).Msgf("GetClaimedLsps2ChannelPoints: invalid funding txid in database %x", fundingTxID)
+			continue
+		}
+		claimed[point.String()] = true
+	}
+	return claimed, rows.Err()
+}
+
+// GetPaidLsps1Order finds the oldest PAID order for a client that hasn't
+// been fulfilled yet. payment_state='PAID' excludes HOLD orders (H-1): a
+// held order's order_state is already 'PAID' the moment its HTLC is merely
+// ACCEPTED (see settlement_service.go's processAcceptedOrder doc comment),
+// but its funds aren't captured yet -- this JIT fallback must not treat
+// that as safe to open a channel for, or it races settlement_service's own
+// openChannelForHeldOrder into a duplicate channel open for the same order.
 func (s *PostgresInterceptStore) GetPaidLsps1Order(clientNodeId string) (*core.Lsps1Order, error) {
 	// We want orders that are PAID but don't have a channel (FundingTxid is null/empty)
 	// Ordered by created_at ASC to process oldest first (FIFO)
 	row := s.pool.QueryRow(context.Background(),
-		`SELECT order_id, peer_id, lsp_balance_loki, client_balance_loki, 
-			funding_confirms_within_blocks, required_channel_confirmations, 
-			channel_expiry_blocks, token, announce_channel, created_at, 
-			order_state, payment_state, payment_invoice, funding_txid, funding_outpoint,
+		`SELECT order_id, peer_id, lsp_balance_loki, client_balance_loki,
+			funding_confirms_within_blocks, required_channel_confirmations,
+			channel_expiry_blocks, token, announce_channel, created_at,
+			order_state, payment_state, payment_invoice, payment_preimage, funding_txid, funding_outpoint,
 			COALESCE(refund_onchain_address, ''), COALESCE(order_total_loki, 0), COALESCE(fee_total_loki, 0)
-		 FROM lsps1.orders 
-		 WHERE peer_id=$1 AND order_state='PAID' AND (funding_txid IS NULL OR funding_txid = '')
+		 FROM lsps1.orders
+		 WHERE peer_id=$1 AND order_state='PAID' AND payment_state='PAID' AND (funding_txid IS NULL OR funding_txid = '')
 		 ORDER BY created_at ASC LIMIT 1`, clientNodeId)
 
 	var order core.Lsps1Order
@@ -154,7 +292,7 @@ func (s *PostgresInterceptStore) GetPaidLsps1Order(clientNodeId string) (*core.L
 		&order.OrderId, &order.PeerId, &order.LspBalanceLoki, &order.ClientBalanceLoki,
 		&order.FundingConfirmsWithinBlocks, &order.RequiredChannelConfirmations,
 		&order.ChannelExpiryBlocks, &order.Token, &order.AnnounceChannel, &order.CreatedAt,
-		&order.OrderState, &order.PaymentState, &order.PaymentInvoice, &order.FundingTxid, &order.FundingOutpoint,
+		&order.OrderState, &order.PaymentState, &order.PaymentInvoice, &order.PaymentPreimage, &order.FundingTxid, &order.FundingOutpoint,
 		&order.RefundOnchainAddress, &order.OrderTotalLoki, &order.FeeTotalLoki,
 	)
 	if err != nil {

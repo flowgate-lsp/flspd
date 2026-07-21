@@ -2,10 +2,17 @@ package postgres
 
 import (
 	"context"
+	"errors"
 
 	"github.com/flowgate-lsp/flspd/core"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/rs/zerolog/log"
 )
+
+// pgUniqueViolation is Postgres' SQLSTATE code for a unique-constraint
+// violation (23505) -- shared by UpdateLsps1OrderFunding's S-5 conflict
+// detection.
+const pgUniqueViolation = "23505"
 
 // GetLsps1OrderByPaymentInvoice retrieves an LSPS1 order by its payment invoice string
 func (s *PostgresOpeningStore) GetLsps1OrderByPaymentInvoice(paymentInvoice string) (*core.Lsps1Order, error) {
@@ -58,7 +65,11 @@ func (s *PostgresOpeningStore) UpdateLsps1OrderState(orderId string, newState st
 	return true, nil
 }
 
-// GetPaidLsps1Order finds the oldest PAID order for a client that hasn't been fulfilled yet
+// GetPaidLsps1Order finds the oldest PAID order for a client that hasn't
+// been fulfilled yet. payment_state='PAID' excludes HOLD orders (H-1): see
+// PostgresInterceptStore.GetPaidLsps1Order's doc comment for why -- this
+// copy isn't on a live call path today but shares the same contract, so it
+// gets the same filter to avoid becoming a landmine if it is wired up later.
 func (s *PostgresOpeningStore) GetPaidLsps1Order(clientNodeId string) (*core.Lsps1Order, error) {
 	// We want orders that are PAID but don't have a channel (FundingTxid is null/empty)
 	// Ordered by created_at ASC to process oldest first (FIFO)
@@ -69,7 +80,7 @@ func (s *PostgresOpeningStore) GetPaidLsps1Order(clientNodeId string) (*core.Lsp
 			order_state, payment_state, payment_invoice, payment_preimage, funding_txid, funding_outpoint,
 			COALESCE(refund_onchain_address, ''), COALESCE(order_total_loki, 0), COALESCE(fee_total_loki, 0)
 		 FROM lsps1.orders
-		 WHERE peer_id=$1 AND order_state='PAID' AND (funding_txid IS NULL OR funding_txid = '')
+		 WHERE peer_id=$1 AND order_state='PAID' AND payment_state='PAID' AND (funding_txid IS NULL OR funding_txid = '')
 		 ORDER BY created_at ASC LIMIT 1`, clientNodeId)
 
 	var order core.Lsps1Order
@@ -86,8 +97,9 @@ func (s *PostgresOpeningStore) GetPaidLsps1Order(clientNodeId string) (*core.Lsp
 	return &order, nil
 }
 
-// GetPaidLsps1Orders finds all PAID orders for a client that haven't been fulfilled yet,
-// ordered by created_at ASC (FIFO).
+// GetPaidLsps1Orders finds all PAID orders for a client that haven't been
+// fulfilled yet, ordered by created_at ASC (FIFO). payment_state='PAID'
+// excludes HOLD orders (H-1) -- see GetPaidLsps1Order's doc comment.
 func (s *PostgresOpeningStore) GetPaidLsps1Orders(clientNodeId string) ([]*core.Lsps1Order, error) {
 	rows, err := s.pool.Query(context.Background(),
 		`SELECT order_id, peer_id, lsp_balance_loki, client_balance_loki,
@@ -96,7 +108,7 @@ func (s *PostgresOpeningStore) GetPaidLsps1Orders(clientNodeId string) ([]*core.
 			order_state, payment_state, payment_invoice, payment_preimage, funding_txid, funding_outpoint,
 			COALESCE(refund_onchain_address, ''), COALESCE(order_total_loki, 0), COALESCE(fee_total_loki, 0)
 		 FROM lsps1.orders
-		 WHERE peer_id=$1 AND order_state='PAID' AND (funding_txid IS NULL OR funding_txid = '')
+		 WHERE peer_id=$1 AND order_state='PAID' AND payment_state='PAID' AND (funding_txid IS NULL OR funding_txid = '')
 		 ORDER BY created_at ASC`, clientNodeId)
 	if err != nil {
 		return nil, err
@@ -121,8 +133,17 @@ func (s *PostgresOpeningStore) GetPaidLsps1Orders(clientNodeId string) ([]*core.
 	return orders, rows.Err()
 }
 
-// GetAllPaidLsps1Orders finds all PAID orders across all peers that haven't been fulfilled yet.
-// Used for startup recovery to retry orders that were stuck when flspd was down.
+// GetAllPaidLsps1Orders finds all PAID orders across all peers that haven't
+// reached a terminal state yet -- used for startup recovery
+// (recoverStuckOrders) to retry orders that were stuck when flspd was down.
+// Deliberately does NOT filter on funding_txid: recoverStuckOrders' own
+// Go-level branching already distinguishes "PAID, no funding yet" (retry
+// the whole open-channel attempt) from "PAID, funding already recorded"
+// (reconcile against LND instead of risking a duplicate OpenChannel, F-8)
+// from "PAID, payment_state=HOLD" (settle-or-retry, H-3/H-4) -- excluding
+// funded rows here would starve that branching of the exact rows it exists
+// to handle, making the funded-order recovery paths permanently
+// unreachable regardless of how correct their own logic is.
 func (s *PostgresOpeningStore) GetAllPaidLsps1Orders() ([]*core.Lsps1Order, error) {
 	rows, err := s.pool.Query(context.Background(),
 		`SELECT order_id, peer_id, lsp_balance_loki, client_balance_loki,
@@ -131,7 +152,7 @@ func (s *PostgresOpeningStore) GetAllPaidLsps1Orders() ([]*core.Lsps1Order, erro
 			order_state, payment_state, payment_invoice, payment_preimage, funding_txid, funding_outpoint,
 			COALESCE(refund_onchain_address, ''), COALESCE(order_total_loki, 0), COALESCE(fee_total_loki, 0)
 		 FROM lsps1.orders
-		 WHERE order_state='PAID' AND (funding_txid IS NULL OR funding_txid = '')
+		 WHERE order_state='PAID'
 		 ORDER BY created_at ASC`)
 	if err != nil {
 		return nil, err
@@ -191,23 +212,38 @@ func (s *PostgresOpeningStore) GetAllCreatedLsps1Orders() ([]*core.Lsps1Order, e
 	return orders, rows.Err()
 }
 
-// UpdateLsps1OrderFunding updates the funding_txid and funding_outpoint of an LSPS1 order
-func (s *PostgresOpeningStore) UpdateLsps1OrderFunding(orderId string, fundingTxid string, fundingOutpoint int) error {
+// UpdateLsps1OrderFunding updates the funding_txid and funding_outpoint of
+// an LSPS1 order, returning whether the claim actually succeeded. The
+// partial unique index on (funding_txid, funding_outpoint) added for S-5
+// makes this atomic: if a concurrent writer already recorded this exact
+// channel point against a different order, this call returns
+// (false, nil) -- a normal, expected outcome under concurrency (the same
+// TOCTOU window findUnclaimedChannelPoint's read can't close on its own),
+// not an error -- rather than silently overwriting or racing with it.
+// Callers must treat claimed=false the same as "no unclaimed channel was
+// actually available."
+func (s *PostgresOpeningStore) UpdateLsps1OrderFunding(orderId string, fundingTxid string, fundingOutpoint int) (bool, error) {
 	result, err := s.pool.Exec(context.Background(),
-		`UPDATE lsps1.orders 
+		`UPDATE lsps1.orders
 		 SET funding_txid = $2, funding_outpoint = $3
 		 WHERE order_id = $1`,
 		orderId, fundingTxid, fundingOutpoint)
 
 	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation {
+			log.Warn().Err(err).Msgf("UpdateLsps1OrderFunding: channel point %s:%d already claimed by another order, not %s", fundingTxid, fundingOutpoint, orderId)
+			return false, nil
+		}
 		log.Error().Err(err).Msgf("UpdateLsps1OrderFunding: failed to update order %s", orderId)
-		return err
+		return false, err
 	}
 
 	rowsAffected := result.RowsAffected()
 	if rowsAffected == 0 {
 		log.Warn().Msgf("UpdateLsps1OrderFunding: no rows updated for order %s", orderId)
+		return false, nil
 	}
 
-	return nil
+	return true, nil
 }

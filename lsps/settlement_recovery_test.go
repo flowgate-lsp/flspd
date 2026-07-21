@@ -55,7 +55,7 @@ func TestRecoverSettledCreatedOrders_SettledInvoiceProcessesOrder(t *testing.T) 
 
 	chanPoint := &wire.OutPoint{Hash: chainhash.Hash{0x01}, Index: 0}
 	client.On("OpenChannel", mock.Anything).Return(chanPoint, nil)
-	store.On("UpdateLsps1OrderFunding", "order-settled", chanPoint.Hash.String(), 0).Return(nil)
+	store.On("UpdateLsps1OrderFunding", "order-settled", chanPoint.Hash.String(), 0).Return(true, nil)
 	store.On("UpdateLsps1OrderState", "order-settled", "PAID", "PAID", "CREATED").Return(true, nil)
 	store.On("UpdateLsps1OrderState", "order-settled", "COMPLETED", "PAID", "PAID").Return(true, nil)
 
@@ -299,7 +299,7 @@ func TestRecoverStuckOrders_UnfundedOrderReconcilesWhenOpenChannelCollidesWithPr
 	// channel point.
 	store.On("ListLsps1Orders", 500, 0).Return([]*core.Lsps1Order{}, nil)
 
-	store.On("UpdateLsps1OrderFunding", "order-crash-orphaned", priorAttemptPoint.Hash.String(), int(priorAttemptPoint.Index)).Return(nil)
+	store.On("UpdateLsps1OrderFunding", "order-crash-orphaned", priorAttemptPoint.Hash.String(), int(priorAttemptPoint.Index)).Return(true, nil)
 	store.On("UpdateLsps1OrderState", "order-crash-orphaned", "COMPLETED", "PAID", "PAID").Return(true, nil)
 
 	svc := newRecoveryTestService(client, store, nil)

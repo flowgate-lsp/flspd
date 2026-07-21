@@ -11,7 +11,9 @@ import (
 	"github.com/flokiorg/flnd/lnrpc"
 	"github.com/flokiorg/flnd/lnrpc/invoicesrpc"
 	"github.com/flowgate-lsp/flspd/core"
+	"github.com/flowgate-lsp/flspd/platform/logging"
 	"github.com/flowgate-lsp/flspd/ports"
+	"github.com/rs/zerolog/log"
 )
 
 // LndClientWrapper is the subset of the lnd client Handlers itself needs
@@ -28,6 +30,12 @@ type LndClientWrapper interface {
 	// -- an instant, on-chain-fee-free refund -- instead of requiring the
 	// slow RefundOnchainAddress path.
 	AddHoldInvoice(ctx context.Context, req *invoicesrpc.AddHoldInvoiceRequest) (*invoicesrpc.AddHoldInvoiceResp, error)
+	// CancelInvoice releases a hold invoice's HTLCs. Used as a compensating
+	// action (H-7) if AddHoldInvoice succeeds but the order's DB write
+	// subsequently fails: without it, the invoice would be orphaned at LND
+	// with its preimage lost (never persisted), stuck until LND's own
+	// hold-invoice-expiry watcher eventually releases it.
+	CancelInvoice(ctx context.Context, paymentHash []byte) error
 }
 
 // NotificationService interface for sending LSPS5 webhook notifications
@@ -36,12 +44,35 @@ type NotificationService interface {
 	NotifyOrderStateChanged(pubkey string, orderId string, state string, channelPoint string, errorMsg string) (bool, error)
 }
 
+// OrderWatcher attaches a live per-invoice watcher to a freshly-created
+// hold-invoice order (H-12), so its ACCEPTED transition is observed
+// near-instantly instead of waiting on the safety-net poll.
+// *Lsps1SettlementService satisfies this directly. Nil-safe by convention:
+// Handlers checks for a nil orderWatcher before calling it, since not
+// every construction site (most tests, in particular) needs live
+// watching.
+type OrderWatcher interface {
+	WatchOrder(order *core.Lsps1Order)
+}
+
 type Config struct {
 	Lsps1MaxPendingOrders int
-	Lsps5MaxWebhooks      int
-	EnableLsps5Https      bool   // Enable HTTPS webhook transport
-	EnableLsps5Nostr      bool   // Enable Nostr notification transport
-	Lsps5NostrPubkey      string // Hex-encoded Nostr public key for notifications
+	// Lsps2MaxPendingRegistrations mirrors Lsps1MaxPendingOrders for LSPS2
+	// buy registrations (Phase 7, F-17): before this existed, lsps2.buy
+	// had no per-peer standing cap at all, unlike lsps1.create_order.
+	Lsps2MaxPendingRegistrations int
+	// MaxGlobalPendingReservationsPerNode (loki) is the fleet-wide ceiling
+	// on total live reservations across BOTH protocols and ALL peers
+	// (Phase 7, F-17): a per-peer cap alone is Sybil-able -- a fresh BOLT8
+	// handshake with a new keypair costs nothing and needs no on-chain
+	// action -- so this is the load-bearing limit against that. Checked
+	// against the same GetReservedLiquidity sum CheckOnChainLiquidity
+	// already reads. Zero means "no fleet ceiling enforced."
+	MaxGlobalPendingReservationsPerNode uint64
+	Lsps5MaxWebhooks                    int
+	EnableLsps5Https                    bool   // Enable HTTPS webhook transport
+	EnableLsps5Nostr                    bool   // Enable Nostr notification transport
+	Lsps5NostrPubkey                    string // Hex-encoded Nostr public key for notifications
 }
 
 // Handlers implements the LSPS0/1/2/5 protocol methods: parsing a
@@ -58,6 +89,82 @@ type Handlers struct {
 	openingService      ports.OpeningService
 	liquidityManager    LiquidityManager
 	notificationService NotificationService
+	orderWatcher        OrderWatcher
+	// burstLimiter is the cheapest, first line of defense against a spam
+	// burst from one peer (Phase 7, F-17/T7-7) -- an in-memory, per-peer
+	// counter checked before ANY DB/RPC work, including promise-signature
+	// verification (a real cryptographic operation lsps2.buy otherwise
+	// runs unconditionally on every call). Not durable across restarts by
+	// design -- the DB-backed standing cap and fleet ceiling below it are
+	// the restart-durable layers; this one only needs to shape bursts
+	// within one process's uptime.
+	burstLimiter *peerBurstLimiter
+}
+
+// BurstLimiter exposes the per-peer burst shaper so callers (cmd/flspd's
+// startup wiring) can run its periodic eviction loop -- see
+// peerBurstLimiter.StartEvictionLoop.
+func (s *Handlers) BurstLimiter() *peerBurstLimiter {
+	return s.burstLimiter
+}
+
+// checkFleetCeilingAndLiquidity enforces the fleet-wide pending-reservation
+// ceiling (Phase 7, F-17/T7-7) AND the plain on-chain-liquidity-sufficiency
+// check together, from ONE GetLiquiditySnapshot fetch -- before this was
+// unified, each handler independently called GetReservedOnChainLiquidity
+// for the fleet ceiling and then CheckOnChainLiquidity (its own separate
+// wallet-balance + reserved-liquidity fetch) right after, doubling both
+// round trips for every request once the fleet ceiling was enabled.
+//
+// The fleet ceiling is a Sybil-resistant cap a per-peer standing cap alone
+// can't provide, since a fresh BOLT8 keypair costs nothing and needs no
+// on-chain action; zero means no fleet ceiling configured. Both checks are
+// the same cheap, non-atomic fast-fail character as before (good UX, not
+// the final word) -- the advisory-locked Reserve* re-check is still the
+// only atomicity guarantee. A snapshot-fetch failure now rejects the
+// request outright (matching the liquidity check's own pre-existing
+// fail-closed behavior) rather than the fleet-ceiling half's old
+// fail-open-on-error behavior -- a deliberate, safe simplification: both
+// figures come from the same underlying queries, so if one would have
+// failed, the other was already very likely to as well, and rejecting is
+// always the safe direction for a financial gate.
+//
+// insufficientLiquidityCode/insufficientLiquidityMsg let each protocol
+// keep its own pre-existing error code/wording for that case (LSPS1 and
+// LSPS2 have always differed here); the fleet-ceiling rejection message is
+// already shared, since it's a new check with no prior API contract to
+// preserve. Returns nil if the request may proceed.
+func (s *Handlers) checkFleetCeilingAndLiquidity(req *JsonRpcRequest, component logging.LogComponent, requestedCapacity uint64, insufficientLiquidityCode int, insufficientLiquidityMsg string) *JsonRpcResponse {
+	snap, err := s.liquidityManager.GetLiquiditySnapshot(context.Background())
+	if err != nil {
+		log.Warn().
+			Err(err).
+			Str("component", string(component)).
+			Str("action", string(logging.LogActionReject)).
+			Msg("Request rejected - failed to check on-chain liquidity")
+		return NewJsonRpcErrorResponse(req.Id, insufficientLiquidityCode, insufficientLiquidityMsg, nil)
+	}
+
+	if s.config.MaxGlobalPendingReservationsPerNode > 0 && snap.ReservedLoki+requestedCapacity > s.config.MaxGlobalPendingReservationsPerNode {
+		log.Warn().
+			Str("component", string(component)).
+			Str("action", string(logging.LogActionReject)).
+			Uint64("reserved_total", snap.ReservedLoki).
+			Uint64("requested_capacity", requestedCapacity).
+			Uint64("fleet_ceiling", s.config.MaxGlobalPendingReservationsPerNode).
+			Msg("Request rejected - fleet-wide pending reservation ceiling reached")
+		return NewJsonRpcErrorResponse(req.Id, 203, "LSP at capacity, please retry later", nil)
+	}
+
+	if requestedCapacity > snap.AvailableLoki() {
+		log.Warn().
+			Str("component", string(component)).
+			Str("action", string(logging.LogActionReject)).
+			Msg("Request rejected - insufficient on-chain liquidity")
+		return NewJsonRpcErrorResponse(req.Id, insufficientLiquidityCode, insufficientLiquidityMsg, nil)
+	}
+
+	return nil
 }
 
 func NewHandlers(
@@ -67,6 +174,7 @@ func NewHandlers(
 	openingService ports.OpeningService,
 	liquidityManager LiquidityManager,
 	notificationService NotificationService,
+	orderWatcher OrderWatcher,
 ) *Handlers {
 	return &Handlers{
 		config:              config,
@@ -75,6 +183,8 @@ func NewHandlers(
 		openingService:      openingService,
 		liquidityManager:    liquidityManager,
 		notificationService: notificationService,
+		orderWatcher:        orderWatcher,
+		burstLimiter:        newPeerBurstLimiter(defaultBurstLimit, defaultBurstWindow),
 	}
 }
 

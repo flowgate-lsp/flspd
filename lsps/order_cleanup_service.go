@@ -9,6 +9,11 @@ import (
 )
 
 // OrderCleanupService runs a background job to expire stale LSPS1 orders
+// AND stale LSPS2 buy registrations (Phase 7, T7-6) -- both are reservations
+// against the same finite on-chain wallet balance, so both need the same
+// "flip to EXPIRED once past expires_at" sweep. Kept as one service/one
+// ticker rather than two, since they run on the same cadence and share the
+// same failure-handling shape.
 type OrderCleanupService struct {
 	store    ports.OpeningStore
 	interval time.Duration
@@ -63,12 +68,24 @@ func (s *OrderCleanupService) runCleanup() {
 	count, err := s.store.ExpireStaleOrders()
 	if err != nil {
 		log.Error().Err(err).Msg("OrderCleanupService: Failed to expire stale orders")
+	} else if count > 0 {
+		log.Info().Int64("expired_count", count).Msg("OrderCleanupService: Expired stale LSPS1 orders")
+	} else {
+		log.Debug().Msg("OrderCleanupService: No stale LSPS1 orders to expire")
+	}
+
+	// Phase 7, T7-6: LSPS2 buy registrations get the same sweep. A
+	// separate error/count check -- one table's failure must not skip the
+	// other's sweep.
+	regCount, err := s.store.ExpireStaleLsps2Registrations()
+	if err != nil {
+		log.Error().Err(err).Msg("OrderCleanupService: Failed to expire stale LSPS2 registrations")
 		return
 	}
 
-	if count > 0 {
-		log.Info().Int64("expired_count", count).Msg("OrderCleanupService: Expired stale LSPS1 orders")
+	if regCount > 0 {
+		log.Info().Int64("expired_count", regCount).Msg("OrderCleanupService: Expired stale LSPS2 buy registrations")
 	} else {
-		log.Debug().Msg("OrderCleanupService: No stale orders to expire")
+		log.Debug().Msg("OrderCleanupService: No stale LSPS2 registrations to expire")
 	}
 }

@@ -48,7 +48,14 @@ const (
 	DefaultMaxClientToSelfDelay  = 10080          // ~1 week
 	DefaultFeeParamsValidity     = time.Hour      // Fee params validity duration
 	DefaultLsps1MaxPendingOrders = 50             // Max pending LSPS1 orders per peer
-	DefaultLsps5MaxWebhooks      = 100            // Max LSPS5 webhooks per client
+	// DefaultLsps2MaxPendingRegistrations mirrors DefaultLsps1MaxPendingOrders
+	// for LSPS2 buy registrations (Phase 7, F-17/T7-7).
+	DefaultLsps2MaxPendingRegistrations = 50
+	DefaultLsps5MaxWebhooks             = 100 // Max LSPS5 webhooks per client
+	// BurstLimiterEvictionInterval bounds how often the in-memory per-peer
+	// burst-shaper map is swept for expired entries -- needed so a real
+	// Sybil attempt (many fresh peer identities) can't grow it unbounded.
+	BurstLimiterEvictionInterval = 5 * time.Minute
 
 	// LSP Policy Limits
 	AbsoluteMinChannelCapacityLoki = 20000 // Hard floor for channel size enforced by LSP
@@ -250,17 +257,36 @@ func runLspd(cliCtx *cli.Context) error {
 
 		// Start LSPS1 settlement service for this node
 		settlementSvc := lsps.NewLsps1SettlementService(client, openingStore, historyStore, node.NodeConfig, feeEstimator, feeStrategy, dashBridge)
+		// orderWatcher is only wired into lspsHandlers below if the
+		// settlement service actually started (H-12) -- mirrors the
+		// existing behavior where a failed settlement-service start
+		// already leaves this node's invoice-driven processing disabled.
+		var orderWatcher lsps.OrderWatcher
 		err = settlementSvc.Start(ctx)
 		if err != nil {
 			log.Error().Err(err).Msg("Failed to start LSPS1 settlement service")
 		} else {
 			settlementServices = append(settlementServices, settlementSvc)
+			orderWatcher = settlementSvc
 		}
 
 		forwardSync := lnd.NewForwardSync(node.NodeId, client, historyStore)
 		go forwardSync.ForwardsSynchronize(ctx)
 		notificationService.SetNodePrivKey(node.PrivateKey)
 		handler := interceptor.NewInterceptHandler(client, node.NodeConfig, interceptStore, historyStore, openingService, feeEstimator, feeStrategy, dashBridge, node.PrivateKey)
+		// Phase 7 (T7-13): reconcile any LSPS2 registration left stuck at
+		// OPENING by a crash between openChannel succeeding and the
+		// consuming DB write. Launched in a goroutine, mirroring LSPS1's
+		// own recoverStuckOrders (settlement_service.go: "Recover stuck
+		// orders in a separate goroutine to avoid blocking Start()") --
+		// this must NOT block startup (with multiple nodes, a slow
+		// ListChannels call here would delay every later node's init
+		// too). Safe to run concurrently with the interceptor already
+		// taking live traffic: ClaimLsps2Registration's CAS
+		// (state='ACTIVE') already fails closed against any registration
+		// still at OPENING, so a real HTLC racing this sweep is simply
+		// rejected and retried later, never double-processed.
+		go handler.RecoverStuckLsps2Registrations()
 		combinedHandler := services.NewCombinedHandler(handler)
 		htlcInterceptor, err = lnd.NewLndHtlcInterceptor(node.NodeConfig, client, combinedHandler)
 		if err != nil {
@@ -277,6 +303,15 @@ func runLspd(cliCtx *cli.Context) error {
 		if lsps5MaxWebhooks <= 0 {
 			lsps5MaxWebhooks = DefaultLsps5MaxWebhooks
 		}
+		lsps2MaxRegistrations, _ := strconv.Atoi(os.Getenv("LSPS2_MAX_PENDING_REGISTRATIONS"))
+		if lsps2MaxRegistrations <= 0 {
+			lsps2MaxRegistrations = DefaultLsps2MaxPendingRegistrations
+		}
+		// Unlike the per-peer standing caps above (always on, with a real
+		// default), the fleet-wide ceiling is opt-in: zero means disabled,
+		// so an existing deployment that never sets this env var sees no
+		// behavior change (Phase 7, F-17/T7-7).
+		maxGlobalPendingReservationsLoki, _ := strconv.ParseUint(os.Getenv("MAX_GLOBAL_PENDING_RESERVATIONS_LOKI"), 10, 64)
 
 		var lspNostrPubkey string
 		if lspNostrPrivKey != "" {
@@ -288,15 +323,18 @@ func runLspd(cliCtx *cli.Context) error {
 		}
 
 		lspsConfig := lsps.Config{
-			Lsps1MaxPendingOrders: lsps1MaxOrders,
-			Lsps5MaxWebhooks:      lsps5MaxWebhooks,
-			EnableLsps5Https:      true,
-			EnableLsps5Nostr:      lspNostrPrivKey != "",
-			Lsps5NostrPubkey:      lspNostrPubkey,
+			Lsps1MaxPendingOrders:               lsps1MaxOrders,
+			Lsps2MaxPendingRegistrations:        lsps2MaxRegistrations,
+			MaxGlobalPendingReservationsPerNode: maxGlobalPendingReservationsLoki,
+			Lsps5MaxWebhooks:                    lsps5MaxWebhooks,
+			EnableLsps5Https:                    true,
+			EnableLsps5Nostr:                    lspNostrPrivKey != "",
+			Lsps5NostrPubkey:                    lspNostrPubkey,
 		}
 
 		liquidityManager := lsps.NewLiquidityManager(client, openingStore)
-		lspsHandlers := lsps.NewHandlers(lspsConfig, client, nodesService, openingService, liquidityManager, dashBridge)
+		lspsHandlers := lsps.NewHandlers(lspsConfig, client, nodesService, openingService, liquidityManager, dashBridge, orderWatcher)
+		go lspsHandlers.BurstLimiter().StartEvictionLoop(ctx.Done(), BurstLimiterEvictionInterval)
 		lspsServer := translsps.NewServer(client, lspsHandlers)
 		lspsServer.Start()
 		lspsServers = append(lspsServers, lspsServer)
@@ -455,7 +493,13 @@ func initializeNodes(configs []*config.NodeConfig) ([]*core.Node, error) {
 		// Make sure the nodes is available and set name and pubkey if not
 		// set in config. This mutates cfg directly, before it's wrapped in
 		// a NodeConfigRef below — safe, single-threaded startup code.
-		info, err := client.GetInfo()
+		//
+		// Retried for a bit: on a fresh `docker compose up`, flspd's own
+		// container can win the race against flnd's gRPC server still
+		// coming up, and a single failed attempt here would otherwise take
+		// down the whole process (fatal below) for a purely transient
+		// reason.
+		info, err := getInfoWithRetry(client, 30*time.Second)
 		if err != nil {
 			decodedPubkey, decodeErr := hex.DecodeString(cfg.NodePubkey)
 			if cfg.Name == "" || cfg.NodePubkey == "" ||
@@ -499,4 +543,25 @@ func initializeNodes(configs []*config.NodeConfig) ([]*core.Node, error) {
 	}
 
 	return nodes, nil
+}
+
+// getInfoWithRetry retries client.GetInfo() with a fixed backoff until it
+// succeeds or timeout elapses, returning the last error on timeout.
+func getInfoWithRetry(client *lnd.LndClient, timeout time.Duration) (*lightning.GetInfoResult, error) {
+	deadline := time.Now().Add(timeout)
+	const retryInterval = 2 * time.Second
+
+	for {
+		info, err := client.GetInfo()
+		if err == nil {
+			return info, nil
+		}
+
+		if time.Now().After(deadline) {
+			return nil, err
+		}
+
+		log.Warn().Err(err).Msg("GetInfo failed, node may still be starting up, retrying...")
+		time.Sleep(retryInterval)
+	}
 }

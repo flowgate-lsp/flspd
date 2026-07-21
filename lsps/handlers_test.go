@@ -58,6 +58,11 @@ func (m *MockLndClient) GetBlockHeight() (uint32, error) {
 	return args.Get(0).(uint32), args.Error(1)
 }
 
+func (m *MockLndClient) CancelInvoice(ctx context.Context, paymentHash []byte) error {
+	args := m.Called(ctx, paymentHash)
+	return args.Error(0)
+}
+
 type MockNodesService struct {
 	mock.Mock
 }
@@ -94,19 +99,9 @@ func (m *MockOpeningService) ValidateOpeningFeeParams(params *core.OpeningFeePar
 	return args.Bool(0)
 }
 
-func (m *MockOpeningService) IsCurrentChainFeeCheaper(token string, params *core.OpeningFeeParams) bool {
-	args := m.Called(token, params)
+func (m *MockOpeningService) IsCurrentChainFeeCheaper(currentFeeratePerVByte *float64, referenceFeeratePerVByte float64) bool {
+	args := m.Called(currentFeeratePerVByte, referenceFeeratePerVByte)
 	return args.Bool(0)
-}
-
-func (m *MockOpeningService) RegisterLsps2Buy(reg *core.Lsps2BuyRegistration) error {
-	args := m.Called(reg)
-	return args.Error(0)
-}
-
-func (m *MockOpeningService) RegisterLsps1Order(order *core.Lsps1Order) error {
-	args := m.Called(order)
-	return args.Error(0)
 }
 
 func (m *MockOpeningService) GetLsps1Order(orderId string) (*core.Lsps1Order, error) {
@@ -140,6 +135,11 @@ func (m *MockOpeningService) CountLsps1Orders(clientNodeId string, state string,
 	return args.Int(0), args.Error(1)
 }
 
+func (m *MockOpeningService) CountLsps2PendingRegistrations(peerId string) (int, error) {
+	args := m.Called(peerId)
+	return args.Int(0), args.Error(1)
+}
+
 func (m *MockOpeningService) CountLsps5Webhooks(clientNodeId string) (int, error) {
 	args := m.Called(clientNodeId)
 	return args.Int(0), args.Error(1)
@@ -158,6 +158,40 @@ func (m *MockLiquidityManager) GetAvailableOnChainLiquidity(ctx context.Context)
 func (m *MockLiquidityManager) GetReservedOnChainLiquidity(ctx context.Context) (uint64, error) {
 	args := m.Called(ctx)
 	return args.Get(0).(uint64), args.Error(1)
+}
+
+func (m *MockLiquidityManager) GetLiquiditySnapshot(ctx context.Context) (LiquiditySnapshot, error) {
+	args := m.Called(ctx)
+	if args.Get(0) == nil {
+		return LiquiditySnapshot{}, args.Error(1)
+	}
+	return args.Get(0).(LiquiditySnapshot), args.Error(1)
+}
+
+// sufficientLiquiditySnapshot is a LiquiditySnapshot whose AvailableLoki()
+// comfortably exceeds anything a test might request -- the
+// GetLiquiditySnapshot-mock equivalent of the old
+// CheckOnChainLiquidity(mock.Anything, mock.Anything).Return(nil) pattern
+// used throughout this package's tests before checkFleetCeilingAndLiquidity
+// unified the two checks into one fetch.
+var sufficientLiquiditySnapshot = LiquiditySnapshot{ConfirmedBalanceLoki: 1_000_000_000_000}
+
+// mockSufficientLiquidity registers a GetLiquiditySnapshot expectation
+// that always reports comfortably-available liquidity, for tests that
+// only care about reaching/passing the liquidity check, not its exact
+// threshold.
+func mockSufficientLiquidity(m *MockLiquidityManager) {
+	m.On("GetLiquiditySnapshot", mock.Anything).Return(sufficientLiquiditySnapshot, nil)
+}
+
+func (m *MockLiquidityManager) ReserveLsps1Order(ctx context.Context, order *core.Lsps1Order) (bool, error) {
+	args := m.Called(ctx, order)
+	return args.Bool(0), args.Error(1)
+}
+
+func (m *MockLiquidityManager) ReserveLsps2Buy(ctx context.Context, reg *core.Lsps2BuyRegistration) (bool, error) {
+	args := m.Called(ctx, reg)
+	return args.Bool(0), args.Error(1)
 }
 
 func (m *MockLiquidityManager) CheckOnChainLiquidity(ctx context.Context, amountSat uint64) error {
@@ -189,7 +223,7 @@ func TestLsps2Buy(t *testing.T) {
 	mockLiquidity := new(MockLiquidityManager)
 	mockNotification := new(MockNotificationService)
 
-	server := NewHandlers(Config{Lsps1MaxPendingOrders: 5, Lsps5MaxWebhooks: 10}, mockLnd, mockNodes, mockOpening, mockLiquidity, mockNotification)
+	server := NewHandlers(Config{Lsps1MaxPendingOrders: 5, Lsps5MaxWebhooks: 10}, mockLnd, mockNodes, mockOpening, mockLiquidity, mockNotification, nil)
 
 	// Test Data
 	privKey, pubKey := btcec.PrivKeyFromBytes([]byte("testprivkey1111111111111111111"))
@@ -211,10 +245,10 @@ func TestLsps2Buy(t *testing.T) {
 	validUntil := time.Now().Add(24 * time.Hour).Format(time.RFC3339)
 
 	mockOpening.On("ValidateOpeningFeeParams", mock.AnythingOfType("*core.OpeningFeeParams"), pubKey).Return(true)
-	mockOpening.On("RegisterLsps2Buy", mock.AnythingOfType("*core.Lsps2BuyRegistration")).Return(nil)
 
 	// Mock Liquidity Check (Success)
-	mockLiquidity.On("CheckOnChainLiquidity", mock.Anything, mock.Anything).Return(nil)
+	mockSufficientLiquidity(mockLiquidity)
+	mockLiquidity.On("ReserveLsps2Buy", mock.Anything, mock.AnythingOfType("*core.Lsps2BuyRegistration")).Return(true, nil)
 
 	// Construct Request
 	buyParams := Lsps2BuyParams{
@@ -269,7 +303,7 @@ func TestLsps2Buy_PaymentSizeValidation(t *testing.T) {
 	mockLiquidity := new(MockLiquidityManager)
 	mockNotification := new(MockNotificationService)
 
-	server := NewHandlers(Config{Lsps1MaxPendingOrders: 5, Lsps5MaxWebhooks: 10}, mockLnd, mockNodes, mockOpening, mockLiquidity, mockNotification)
+	server := NewHandlers(Config{Lsps1MaxPendingOrders: 5, Lsps5MaxWebhooks: 10}, mockLnd, mockNodes, mockOpening, mockLiquidity, mockNotification, nil)
 
 	// Test Data
 	privKey, pubKey := btcec.PrivKeyFromBytes([]byte("testprivkey1111111111111111111"))
@@ -300,7 +334,7 @@ func TestLsps2Buy_PaymentSizeValidation(t *testing.T) {
 	// 4. Compute Fee
 
 	// So for Case 1, we DO need to mock liquidity check because it passes minimal bounds and reaches check.
-	mockLiquidity.On("CheckOnChainLiquidity", mock.Anything, mock.Anything).Return(nil).Maybe()
+	mockSufficientLiquidity(mockLiquidity)
 
 	// Case 1: Payment Size Too Small (Fee >= Amount)
 	// MinFee = 1000, PaymentSize = 1000 -> Fee = 1000. Fee >= Amount (1000 >= 1000) -> Error
@@ -353,7 +387,7 @@ func TestLsps1CreateOrder(t *testing.T) {
 	mockLiquidity := new(MockLiquidityManager)
 	mockNotification := new(MockNotificationService)
 
-	server := NewHandlers(Config{Lsps1MaxPendingOrders: 5, Lsps5MaxWebhooks: 10}, mockLnd, mockNodes, mockOpening, mockLiquidity, mockNotification)
+	server := NewHandlers(Config{Lsps1MaxPendingOrders: 5, Lsps5MaxWebhooks: 10}, mockLnd, mockNodes, mockOpening, mockLiquidity, mockNotification, nil)
 
 	// Test Data
 	privKey, pubKey := btcec.PrivKeyFromBytes([]byte("testprivkey1111111111111111111"))
@@ -412,7 +446,7 @@ func TestLsps1CreateOrder(t *testing.T) {
 	mockNodes.On("GetMinChannelCapacity").Return(uint64(20000))
 
 	// Mock Liquidity Check (Success)
-	mockLiquidity.On("CheckOnChainLiquidity", mock.Anything, mock.Anything).Return(nil)
+	mockSufficientLiquidity(mockLiquidity)
 
 	// Mock AddHoldInvoice
 	mockLnd.On("AddHoldInvoice", mock.Anything, mock.AnythingOfType("*invoicesrpc.AddHoldInvoiceRequest")).Return(&invoicesrpc.AddHoldInvoiceResp{
@@ -420,7 +454,7 @@ func TestLsps1CreateOrder(t *testing.T) {
 	}, nil)
 
 	// Mock Register Order
-	mockOpening.On("RegisterLsps1Order", mock.AnythingOfType("*core.Lsps1Order")).Return(nil)
+	mockLiquidity.On("ReserveLsps1Order", mock.Anything, mock.AnythingOfType("*core.Lsps1Order")).Return(true, nil)
 
 	// Execute
 	params := Lsps1CreateOrderRequest{

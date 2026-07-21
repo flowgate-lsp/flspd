@@ -42,6 +42,7 @@ number-soup and then get reorganized a second time.
 | 4 | YAML-driven integration tests | Runner + 3 seed scenarios merged | ✅ Runner built + 4 scenarios landed (T4-1/T4-2/T4-3): `lsps1_order_settle_and_open.yaml`, `lsps1_recovery_after_restart.yaml` (F-1 regression, real kill/restart), `lsps1_settle_under_fee_congestion.yaml` (T4-3 mempool fault injection, new) all pass on real flspd/flnd/chain processes. The recovery scenario's flakiness (2026-07-15 finding) is now root-caused and fixed — F-14, a real crash-orphaned-channel bug, not a timing race; a separate itest-harness design gap (devnet channels accumulate unbounded across scenario runs with no per-run DB to reconcile against) means it can still read `FAILED` when run alongside other channel-opening scenarios on a well-used devnet — see F-14's writeup for the full explanation and recommended harness-level follow-up. `lsps2_jit_happy_path.yaml` intentionally left known-failing on the distinct zero-conf-balance-sync race documented in T4-1 — not swept under the rug; revisited on 2026-07-15 and again 2026-07-16 (see the dedicated writeup after T4-3): one genuine root-caused bug fixed (an unsatisfiable `QueryRoutes` amount); a second, distinct failure (`"unable to find a path to destination"`) traced precisely to flnd's `errNoPathFound`/`getOutgoingBalance` source and, as of 2026-07-16, **initially appeared to be confirmed via a precisely-timestamped side-by-side reproduction** as specific to flspd's own live connection — **but a later 2026-07-16 session rigorously re-tested that conclusion and refuted it**: five independently-controlled probe variants (interceptor stream alone, the other three streams without it, zero streams on a cleaned devnet, zero streams after a fresh `flnd-lsp` restart, and a design that exactly replicates the original successful probe with two fully separate connections) **all failed identically** — the "connection identity/streams" explanation does not hold up. `getchaninfo` on a live test channel confirmed the graph edge/policy IS correctly present from the moment the channel opens, contradicting the `OutPolicySet` explanation too. The devnet's `flnd` build was found to be on `flokiorg/flnd`'s `sync/lnd-2026-07` branch — an active, uncommitted, in-progress upstream-LND reconciliation (325 files changed) touching exactly the relevant subsystems (`graph/db`, `funding/manager.go`'s `addToGraph`, `htlcswitch`'s interceptor/held-HTLC code), which looked like a strong suspect — **but a direct A/B test against flnd's stable `main` branch (== `v0.1.21-beta`, the exact tag flspd's own `go.mod` depends on) reproduced the identical failure, ruling the sync branch out.** A third hypothesis — accumulated multi-session devnet state — was also tested by wiping and re-provisioning the devnet from scratch and got the identical failure on a chain with zero history. **All three tested hypotheses refuted; root cause found and fixed anyway** by comparing against upstream LND's own zero-conf itest, which verifies channel readiness via `DescribeGraph`, not `QueryRoutes` — traced precisely: `DescribeGraph`/`GetChanInfo` read the graph DB directly, `QueryRoutes`'s pathfinding reads an in-memory `graphCache` that lags for a freshly-added zero-conf edge. `RouteLoop` now polls a new `IsChannelRoutable` (`GetChanInfo`-backed) instead of `QueryRoutes`; unit-tested and green. **Fully resolved end-to-end in a later 2026-07-16 session**: three more distinct bugs found and fixed on top of this one (JIT capacity not budgeting for the mandatory ~1% channel reserve; the itest client's `CreateJitInvoice` invoicing the gross amount instead of the LSPS2-fee-adjusted net amount; `UpdateChannelPolicy`'s TimeLockDelta silently not taking effect, needing a verify-and-retry loop via new `IsChannelPolicyApplied`) — and the "payer-side pathfinding flakiness" chased across every earlier session turned out to be ordinary insufficient local balance on the long-lived, reused, never-topped-up payer↔lsp channel, not a separate bug at all. `TestLsps2JitHappyPath` now passes reliably (~25/26 isolated runs). See the dedicated writeup's "fully resolved, end-to-end" entry for full detail. `kill_lsp`/`restart_lsp` and mempool fee-congestion fault injection landed (T4-3); relay-failure (`reject_then_accept`) fault injection not started, deliberately deferred (needs a gRPC MITM proxy, out of scope for this pass). Wired into CI as `.github/workflows/itest.yml` (2026-07-15) — `workflow_dispatch` + nightly, deliberately *not* on every push/PR (user's explicit call): the suite checks out and builds 4 sibling repos from source plus a live devnet before testing, realistically 10-20+ min with more inherent flakiness risk than a unit suite, not something to put in the PR-blocking path. |
 | 5 | Config model + secrets-by-reference | New model shipped behind compat shim | ✅ T5-1..T5-7 done (secrets-by-reference, unit/fee/channel-size model, profiles, CLI tooling, Settings.tsx re-skin — frontend not browser-verified, no automation tooling available) |
 | 6 | Repo structure / arbo migration | Tree matches target layout, build green throughout | ✅ Done. T6-1..T6-3 (format/ folded into common/, internal/adapters/ introduced, common/ split into core/ports/services/); T6-4 (rpc/→api/proto/rpc/, config/→platform/config/, build/→platform/build/, auth/→transport/auth/, notifications/ proto split→api/proto/notifications/, common/logger.go+log_enums.go→platform/logging/, notifications/server.go transport classification resolved "stays put", lsps/→lsps+transport/lsps/ and dashboard/→dashboard+transport/dashboard/ splits both landed on the real transport-vs-logic seam, verified live against devnet for lsps/); T6-5 (configs/examples/, test/itest/, deploy/, web/ — deploy/+web/ landed on explicit user go-ahead, stashed+reapplied someone else's uncommitted dev-tooling edits with re-derived paths) — all sub-items done. |
+| 7 | LSPS1/LSPS2 liquidity & expiration redesign | T7-1..T7-14 merged, F-15..F-24 closed | 🟡 Mostly done (2026-07-21) — T7-1..T7-5, T7-7..T7-9, T7-11, T7-13, T7-14 implemented + unit/integration tested (F-15..F-20, F-22..F-24 closed). Still open: T7-6's retention/archival half, T7-10 (dashboard backend), T7-12 (reconciliation job). See Phase 7 below |
 | — | Performance backlog (parallel, non-blocking) | — | ✅ P-3 verified as no-op (never called hot), nothing to do; P-4 done — split `Notify`/`NotifyAsync` on the real sync-vs-fire-and-forget seam; P-2 done — cached peer↔scid map off the existing peer/channel-event subscriptions; P-1 done for its `GetChannel` half (`WaitChannelPointActive`, verified live); its `QueryRoutes` half turned into the LSPS2 zero-conf race investigation itself (see Phase 4) — now fully resolved end-to-end (2026-07-16), see Phase 4's entry. All items verified live against the devnet where the code path allowed it. |
 
 ---
@@ -2183,6 +2184,297 @@ longer needed — that's a separate call for whoever owns the WIP.
 
 ---
 
+## Phase 7 — LSPS1/LSPS2 liquidity & expiration redesign
+
+**Trigger:** LSPS1 orders and LSPS2 JIT buy registrations each grew their own
+partial notion of "how long is this promise good for" and "how much capital
+does it commit" — LSPS1's got finished, LSPS2's didn't. Full review + unified
+redesign: https://claude.ai/code/artifact/2663a979-05c3-433d-8b97-9beb6ea0e353
+Operator dashboard mockup for T7-10:
+https://claude.ai/code/artifact/083f56f9-bf37-436d-9a68-e63543388958
+
+**Second pass (2026-07-21, same day):** the design was reviewed independently
+by a security auditor, a senior Go developer, and an accounting reviewer, each
+instructed to verify every claim against real code rather than trust the
+prose (mirrors REVIEW.md's own H-#→S-# second-pass convention). All three
+converged on the same shape of problem from different angles: the *principles*
+were right, but the *concrete artifacts* had defects serious enough to block
+implementing T7-1/T7-2/T7-5 as originally written. Three new code defects
+were found (F-22, F-23, F-24 below) — F-22 more severe and cheaper to trigger
+than F-15, this phase's own former top finding. F-15 and F-20 upgraded
+PLAUSIBLE→CONFIRMED; F-18 raised medium→high. Full second-pass detail (what
+changed and why) is in its own section inside the artifact above.
+
+**Implementation status (2026-07-21):** T7-1 through T7-5, T7-7, T7-8, T7-9,
+T7-11, T7-13, and T7-14 are implemented, building clean (`go build ./...`,
+`go vet ./...`), and covered by dedicated unit tests per finding — including
+real-Postgres concurrency proofs for the two most safety-critical races
+(F-15's claim atomicity: 20 concurrent goroutines, exactly 1 wins; F-20's
+reservation atomicity: 20/15 concurrent goroutines, sum never exceeds
+available balance under an advisory lock). T7-6 is only half done (the
+ACTIVE→EXPIRED sweep, generalized to both tables); the retention/archival
+half (deleting `EXPIRED`-never-`CONSUMED` rows, archiving `CONSUMED` rows
+first) was explicitly deferred as lower-priority and non-security-critical.
+T7-10 (dashboard backend — per-protocol breakdown, expiring-soonest queue,
+rejection-reason counters, peer-concentration alert) and T7-12 (periodic
+reconciliation job) were not started; both are additive/observability work
+that doesn't block the liquidity-safety fixes above. One deliberate design
+deviation from the original T7-7 note below: the per-peer standing cap
+(`Lsps2MaxPendingRegistrations`) shipped as a flat, env-var-configured
+`Config` field, mirroring LSPS1's own pre-existing `Lsps1MaxPendingOrders`
+pattern exactly (also a flat env var, not per-`NodeConfig`) — chosen for
+consistency between the two protocols' configuration surfaces over the
+originally-noted "on `NodeConfig`" approach; revisit if per-node tuning is
+ever actually needed.
+
+**Second-pass code review (2026-07-21, same day) and fixes:** an
+independent 9-angle review (line-by-line, removed-behavior, cross-file
+tracer, Go-pitfall, wrapper-correctness, plus reuse/simplification/
+efficiency/altitude cleanup passes) plus a 7-agent verification pass
+against the actual Phase 7 diff found 15 surviving issues, all directly
+re-verified by hand against the source (not just trusted from the
+review). 13 got concrete code fixes with dedicated regression tests; one
+(the wallet-balance-snapshot race in `ReserveLsps1Order`/`ReserveLsps2Buy`)
+is an irreducible latency tradeoff, closed instead with precise doc
+comments scoping exactly what is and isn't guaranteed; one (the dead
+`ports.OpeningService.RegisterLsps1Order`/`RegisterLsps2Buy` pass-through)
+was removed at the service layer only -- the store-layer methods stayed,
+since they're genuinely used as Postgres test fixtures throughout
+`internal/adapters/postgres`, not dead code themselves. Most severe finds:
+
+- Two **critical** bugs that could reopen F-15's double-channel-open: (1)
+  a real payment retry for the same `payment_hash` lost its
+  `isLsps2Registration`/`isJit` classification entirely, since it was only
+  derived inside `resolvePayment`'s "not found" fallback -- fixed by
+  persisting a `tag` marker (`lsps2JitTag`/`lsps1JitTag`) on the payments
+  row and re-deriving classification from it on every call, retry or not.
+  (2) `openChannel` returning `(channelPoint != nil, err != nil)` on a
+  successful on-chain open followed by a failed `SetFundingTx` write was
+  treated as total failure and released the registration -- fixed by
+  distinguishing "no channel exists" from "channel exists, bookkeeping
+  write failed" and falling through to the normal success/Consume path in
+  the latter case.
+- `RecoverStuckLsps2Registrations` matched a stuck registration to a
+  channel by peer ID alone (flagged independently by 4 of the 9 review
+  passes) -- fixed by excluding already-claimed channel points (new
+  `GetClaimedLsps2ChannelPoints` store method) and requiring exactly one
+  unclaimed candidate, mirroring LSPS1's `findUnclaimedChannelPoint`.
+- F-22's worst-case payment bound was never enforced at redemption in
+  variable-size mode -- fixed by persisting it (`max_payment_size_mloki`,
+  migration `000008`) and checking the real incoming HTLC amount against
+  it in `resolvePayment`.
+- The reserved-liquidity sum excluded LSPS1 orders in `PAID` state (only
+  `CREATED` counted) despite deliberately counting LSPS2's analogous
+  `OPENING` state -- fixed in the shared `reservedLiquiditySQL`.
+- LSPS1 was never actually migrated onto the shared
+  `config.RequiredCapacityLoki`/`MeetsCapacityFloors` this phase
+  introduced (`capacity.go`'s own doc comment claimed otherwise) -- now
+  migrated, closing both the "single source of truth" gap and a real
+  capacity mismatch against the interceptor's own LSPS1-JIT-fallback path.
+- `handleLsps1CreateOrder` loaded `NodeConfig` twice (C-3 violation) --
+  merged into one snapshot, reused throughout.
+- `lsps1.get_order` still recomputed expiry from live config instead of
+  the persisted `ExpiresAt` field this phase introduced specifically to
+  stop that class of drift -- fixed.
+- Fleet-ceiling checks were duplicated near-verbatim between
+  `handler_lsps1.go`/`handler_lsps2.go` (with a real, unexplained ordering
+  difference in the standing-cap checks) -- extracted into one shared
+  `checkFleetCeiling` method; LSPS1's standing-cap check moved to mirror
+  LSPS2's early placement (right after the burst limiter, before the
+  heavier capacity/fee/liquidity work).
+- Lower-severity: crash-recovery's accounting fallback overstated the
+  recorded payment size (now prefers `MaxPaymentSizeMloki` over the
+  padded/topped-up `ReservedAmountLoki`); `peerBurstLimiter.EvictExpired`/
+  `StartEvictionLoop` weren't nil-safe despite the type's own doc claim
+  (now are); a dead `token` field and a dead `Lsps2BoughtChannel` type were
+  removed.
+
+All fixes verified via `go build ./...`, `go vet ./...`, the full non-itest
+`go test` suite, and `-race` on `interceptor`/`lsps`/`internal/adapters/postgres`.
+
+**Third pass (same day) — the review's remaining cleanup findings.** The
+9-pass review above surfaced more candidates than the 15-item report cap
+allowed; correctness bugs were prioritized when trimming. Went back through
+the rest:
+
+- `ReserveLsps1Order`/`ReserveLsps2Buy`'s ~50-line duplicated transaction
+  skeleton, and the `lsps2.buy_registrations` column list duplicated
+  verbatim in 5 places -- extracted a shared `reserveIfAvailable` helper
+  (begin/lock/check/insert/commit, parameterized by an `insert` callback)
+  and a shared `lsps2BuyRegistrationColumns` const +
+  `scanLsps2BuyRegistration`/`insertLsps2BuyRegistration` helpers, reused by
+  every INSERT/SELECT across `opening_store.go` and `intercept_store.go`.
+- `RecoverStuckLsps2Registrations()` ran synchronously at startup, unlike
+  LSPS1's analogous `recoverStuckOrders` (launched via `go`) -- now
+  launched the same way; safe because `ClaimLsps2Registration`'s CAS
+  already fails closed against anything still at OPENING, so a real HTLC
+  racing the sweep is simply rejected and retried, never double-processed.
+- The fleet-ceiling check and `CheckOnChainLiquidity` each independently
+  queried the same reserved-liquidity sum (and re-fetched wallet balance)
+  once the fleet ceiling was enabled -- unified into one
+  `GetLiquiditySnapshot` fetch (`LiquiditySnapshot`/`AvailableLoki()`) used
+  by both, via a new `checkFleetCeilingAndLiquidity` handler method that
+  replaces the separate `checkFleetCeiling` + `CheckOnChainLiquidity` calls
+  in both `handler_lsps1.go`/`handler_lsps2.go`, preserving each protocol's
+  own distinct error code/message for the insufficient-liquidity case.
+- `ClaimLsps2Registration`/`ReleaseLsps2Registration` reimplemented the
+  same single-column CAS shape as each other -- extracted a shared
+  `execLsps2RegistrationCAS` helper (kept `UpdateLsps1OrderState`
+  separate, since it's a genuinely different two-column/different-table
+  shape; forcing one generic cross-table CAS would need string-built
+  SQL for no real benefit).
+- Investigated whether the single, fleet-wide (non-per-node) advisory
+  lock key is actually contradicted by `cmd/flspd/run.go`'s per-node
+  construction loop: it isn't -- this codebase's business config already
+  treats the fleet as sharing one config (`nodesService.
+  GetMinChannelCapacity()` and `getLsps1ConfigValues()` both explicitly
+  read `nodes[0]` regardless of which node is actually handling a
+  request), predating Phase 7 entirely. Documented at the lock key's
+  definition so a future reader doesn't have to re-derive this.
+- `peerBurstLimiter`'s single global mutex: analyzed and left as-is --
+  it only guards `lsps1.create_order`/`lsps2.buy` (negotiation calls, not
+  the HTLC-forwarding hot path) with an O(1) critical section; sharding
+  would add real complexity for contention that doesn't materialize at
+  this call frequency. Documented the reasoning at the type definition.
+
+All fixes re-verified via the same `go build`/`go vet`/full test
+suite/`-race` combination.
+
+**Findings** (continuing the F-# series from Phase 2/4, most severe first):
+
+- **F-15 (critical, CONFIRMED — upgraded from PLAUSIBLE)** — a single LSPS2
+  buy registration is never marked consumed, so a second distinct-payment-hash
+  HTLC routed through the same (never-expiring) phantom SCID re-enters
+  `Intercept`'s `channelPoint == nil` branch and opens a *second* real
+  on-chain channel for the same quote. `lsps2.bought_channels` already exists
+  in the schema (FK to `registration_id`, `is_completed` flag) — never
+  written to; strong evidence this was the intended guard.
+- **F-22 (critical, CONFIRMED, found in second pass)** — `lsps2.buy` without
+  the spec-optional `payment_size_mloki` skips every capacity/liquidity check
+  (they all live inside one `if params.PaymentSizeMloki != ""` block,
+  `lsps/handler_lsps2.go:194-245`) *and* causes the JIT forward amount to be
+  silently computed as zero at redemption (`interceptor/intercept_handler.go:704-745`)
+  — the LSP opens a real, fully-funded channel, then forwards a guaranteed-to-fail
+  $0 HTLC. Cheaper to trigger than F-15: no completed payment needed first.
+- **F-24 (critical, CONFIRMED, found in second pass, live bug independent of
+  this redesign)** — LSPS1 order creation liquidity-checks only
+  `lsp_balance_loki` (`lsps/handler_lsps1.go:230-231`), but
+  `buildOpenChannelRequest` (`lsps/settlement_service.go:709-717`) actually
+  funds `lsp_balance + client_balance + AdditionalChannelCapacity` — the
+  handler itself computes this larger figure two checks later for the
+  capacity-floor validation and simply never re-checks liquidity against it.
+  Under-counts real commitment on every LSPS1 order today; should not wait
+  for the rest of this phase (see T7-11).
+- **F-16 (high, CONFIRMED)** — `GetReservedLiquidity` (used by
+  `CheckOnChainLiquidity` for *both* protocols) sums only `lsps1.orders`;
+  `lsps2.buy_registrations` never counts against reserved capital, so every
+  LSPS2 quote is checked once against a balance nothing ever decrements.
+- **F-17 (high, CONFIRMED)** — `lsps2.buy` has no rate limit at all (no
+  per-peer cap, no global cap), unlike LSPS1's `Lsps1MaxPendingOrders`.
+- **F-23 (high, CONFIRMED, found in second pass)** — the `singleflight.Group`
+  keyed on `payment_hash` (`interceptor/intercept_handler.go:72`) correctly
+  stops a double channel-open for concurrent MPP parts, but also collapses
+  the *forward amount* across them — every part but the race winner is told
+  to forward the winner's amount, not its own; untested, and compounds with
+  F-22 in the JIT case.
+- **F-18 (high, CONFIRMED — raised from medium)** — `IsCurrentChainFeeCheaper`
+  (`services/opening_service.go:141`) never calls the fee estimator; it
+  compares the token's *currently configured* min-fee floor against the
+  quote's own floor — generated from the same table, so in the default,
+  unmodified-config case the comparison is `X ≤ X`, **always true**,
+  regardless of real chain-fee movement. Not "near" a rubber stamp — a
+  structural no-op in the common case.
+- **F-19 (medium, CONFIRMED)** — `ExpireStaleOrders` and `GetReservedLiquidity`
+  (`internal/adapters/postgres/opening_store.go:271,285`) hardcode
+  `INTERVAL '24 hours'` in SQL instead of reading the configurable
+  `Lsps1OrderExpirySeconds` — disagrees with `isOrderExpired`'s API-level
+  check the moment that config is changed from its default.
+- **F-20 (medium, CONFIRMED — upgraded from PLAUSIBLE)** — liquidity
+  check-then-reserve is a TOCTOU race for both `create_order` and `buy`:
+  nothing serializes "read available balance" and "commit a new reservation."
+- **F-21 (low, CONFIRMED)** — neither `lsps1.orders` nor
+  `lsps2.buy_registrations` rows are ever deleted, only state-flipped;
+  `idx_lsps2_buy_registrations_valid_until` and `lsps2.promises` are
+  provisioned in the schema for cleanup/tracking logic that was never
+  implemented.
+
+**Design:** one reservation ledger, not two — both tables gain
+`expires_at`/`reserved_amount_loki`/a `created_at`, LSPS2 also gains a
+3-value `state` column (`ACTIVE`→`OPENING`→`CONSUMED`/`EXPIRED` — not 2-value;
+see second pass). `GetReservedLiquidity` becomes a single union query across
+both, using one shared `RequiredCapacityLoki` function (payment/balance size
++ padding + BOLT2 reserve top-up + floors — not just `lsp_balance_loki` or a
+raw payment amount) so `openChannel` and the reservation-writer can't drift
+apart. Channel consumption is claimed *before* `openChannel` runs (not a
+post-hoc CAS after — see second pass), using the same expected-state pattern
+already established for `UpdateLsps1OrderState`/`UpdateLsps1OrderFunding`, on
+`interceptor.InterceptStore` (not `ports.OpeningStore` — different interface,
+matches what the interceptor already depends on). Full rationale, threat
+catalogue, second-pass corrections, and latency/CPU budget in the artifact
+above.
+
+**Rollout** (dependency order, not severity order):
+
+- [x] T7-1: schema, in three safe steps (nullable add → batched backfill →
+      `SET NOT NULL`, not one `ADD COLUMN ... NOT NULL DEFAULT now()` —
+      that forces a full-table rewrite under `ACCESS EXCLUSIVE`): `expires_at`/
+      `reserved_amount_loki`/3-value `state` on both tables, symmetric `CHECK`s
+      on `lsps1.orders` too, `created_at`/`completed_at` audit columns. Update
+      `RegisterLsps1Order`/`RegisterLsps2Buy` in the *same task* to compute
+      real values, not rely on a DB default
+- [x] T7-2: claim-before-open / consume-after-open in the interceptor's
+      JIT-open path (3-state lifecycle); write `lsps2.bought_channels`; test
+      N concurrent HTLCs on one scid → 1 open + N-1 clean failures (closes
+      F-15, F-22). Concurrency proven with 20 real-Postgres goroutines
+      (`internal/adapters/postgres/lsps2_reservation_test.go`)
+- [x] T7-3: rewrite `GetReservedLiquidity` as the cross-protocol union, using
+      `RequiredCapacityLoki` for both protocols' `reserved_amount_loki` (F-16, F-24)
+- [x] T7-4: cleanup/reservation SQL reads the persisted column, not a
+      literal — both tables' sweeps, not only LSPS1's (F-19)
+- [x] T7-5: advisory-lock-guarded check-and-reserve, shared by both protocols.
+      Shipped as a single-node constant lock key (`liquidityReservationLockKey`),
+      matching this codebase's liquidity accounting, which has never been
+      node-scoped; 64-bit `hashtextextended`, not 32-bit `hashtext` (F-20).
+      Concurrency proven with 20/15 real-Postgres goroutines never
+      over-committing (`internal/adapters/postgres/reserve_liquidity_test.go`)
+- [ ] T7-6: generalize `OrderCleanupService` to cover both tables. **Half
+      done**: the ACTIVE→EXPIRED sweep now runs for both
+      `lsps1.orders`/`lsps2.buy_registrations` independently (one protocol's
+      sweep failure doesn't block the other's). **Not done**: retention —
+      deleting only `EXPIRED`-never-`CONSUMED` rows; archiving anything
+      `CONSUMED`/`COMPLETED` first (≥1yr retention), never cascade-deleted
+      via `bought_channels`' FK (F-21)
+- [x] T7-7: layered rate limiting — in-memory per-peer burst shaper (the
+      literal first statement in both handlers, `lsps/rate_limiter.go`),
+      DB-backed per-peer standing cap (flat env var, mirroring LSPS1's own
+      pre-existing pattern rather than the `NodeConfig` approach originally
+      noted here — see implementation-status note above), and a fleet-wide
+      ceiling on total reserved loki across both protocols and all peers
+      (F-17). Burst/standing-cap/ceiling each independently tested for both
+      reject-when-over and don't-false-positive-when-under
+      (`lsps/rate_limiter_test.go`, `lsps/rate_limit_wiring_test.go`)
+- [x] T7-8: point `IsCurrentChainFeeCheaper` at the live fee estimator;
+      document its intended semantics precisely (F-18)
+- [x] T7-9: decide the fate of `lsps2.promises` — dropped (dead table, never
+      read from; migration 000007's down migration recreates it if ever needed)
+- [ ] T7-10: dashboard — per-protocol reserved-liquidity breakdown,
+      expiring-soonest queue, rejection-reason counters, peer-concentration
+      alert (mockup linked above). Not started
+- [x] T7-11: extract shared `RequiredCapacityLoki`; fix LSPS1's liquidity
+      check to use it instead of `lsp_balance_loki` alone — **independently
+      shippable now, does not need to wait for the rest of this phase** (F-24)
+- [ ] T7-12: periodic reconciliation job — compare `SUM(reserved_amount_loki)`
+      against real wallet balance + open channel capacity; alert on drift.
+      Not started
+- [x] T7-13: LSPS2 crash-recovery sweep for registrations stuck at `OPENING`,
+      same shape as LSPS1's existing `reconcileUnclaimedChannel`/`recoverStuckOrders`.
+      Wired to run once at startup per node, before that node's interceptor
+      takes live HTLC traffic (`cmd/flspd/run.go`)
+- [x] T7-14: compute each HTLC's own forward amount outside the
+      `payHashGroup` singleflight's shared critical section (F-23)
+
+---
+
 ## Performance backlog (non-blocking, run in parallel once Phase 1 gate is met)
 
 These are latency/CPU/memory notes from the original audit. None are
@@ -2296,3 +2588,5 @@ is the actual deliverable here, given what's already fragile in this area.
   https://claude.ai/code/artifact/5566942a-9b66-42d2-beda-c4bacc8f39f4
 - Repo structure / config UX review (SEC-1, C-1…C-3, config + arbo redesign):
   https://claude.ai/code/artifact/cd741dd7-ba77-4126-9fbf-48e9756f6621
+- LSPS1/LSPS2 liquidity & expiration review + redesign (F-15…F-21, T7-1…T7-10):
+  https://claude.ai/code/artifact/2663a979-05c3-433d-8b97-9beb6ea0e353

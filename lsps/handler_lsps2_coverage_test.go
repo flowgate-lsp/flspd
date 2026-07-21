@@ -47,8 +47,7 @@ func TestHandleLsps2Buy_CapacityChecks(t *testing.T) {
 				}})
 				ns.On("GetMinChannelCapacity").Return(MinChan)
 				os.On("ValidateOpeningFeeParams", mock.Anything, mock.Anything).Return(true)
-				lm.On("CheckOnChainLiquidity", mock.Anything, mock.Anything).Return(nil)
-				os.On("RegisterLsps2Buy", mock.Anything).Return(nil)
+				mockSufficientLiquidity(lm)
 			},
 			expectCode: 0,
 		},
@@ -66,7 +65,7 @@ func TestHandleLsps2Buy_CapacityChecks(t *testing.T) {
 				tt.mockSetup(mockNS, mockOS, mockLM)
 			}
 
-			server := NewHandlers(Config{}, mockLC, mockNS, mockOS, mockLM, mockNotif)
+			server := NewHandlers(Config{}, mockLC, mockNS, mockOS, mockLM, mockNotif, nil)
 
 			// Construct request
 			// We need a dummy opening_fee_params structure to pass unmarshalling

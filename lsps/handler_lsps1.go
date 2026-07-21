@@ -11,6 +11,7 @@ import (
 
 	"github.com/flokiorg/flnd/lnrpc/invoicesrpc"
 	"github.com/flowgate-lsp/flspd/core"
+	"github.com/flowgate-lsp/flspd/platform/config"
 	"github.com/flowgate-lsp/flspd/platform/logging"
 	"github.com/rs/zerolog/log"
 )
@@ -59,11 +60,16 @@ type Lsps1GetInfoResponse struct {
 	MaxChannelBalanceLoki           string                   `json:"max_channel_balance_loki"`
 }
 
-func (s *Handlers) getLsps1ConfigValues() (uint16, uint16, bool, uint32, time.Duration, uint64, uint64, uint64, uint64, uint64, uint64, int64) {
+// getLsps1ConfigValues also returns the raw, just-loaded *config.NodeConfig
+// (last value) so a single call can both extract the usual scalar fields
+// AND feed platform/config's shared RequiredCapacityLoki/MeetsCapacityFloors
+// -- callers computing capacity should use this cfg rather than loading a
+// second, potentially-inconsistent snapshot themselves (C-3).
+func (s *Handlers) getLsps1ConfigValues() (uint16, uint16, bool, uint32, time.Duration, uint64, uint64, uint64, uint64, uint64, uint64, int64, *config.NodeConfig) {
 	nodes := s.nodesService.GetNodes()
 	if len(nodes) == 0 || nodes[0].NodeConfig == nil {
 		// Should not happen if validation passed at startup
-		return 0, 0, false, 0, 0, 0, 0, 0, 0, 0, 0, 0
+		return 0, 0, false, 0, 0, 0, 0, 0, 0, 0, 0, 0, nil
 	}
 	c := nodes[0].NodeConfig.Load()
 
@@ -81,7 +87,7 @@ func (s *Handlers) getLsps1ConfigValues() (uint16, uint16, bool, uint32, time.Du
 	maxChan := *c.Lsps1MaxChannelBalanceLoki
 	additional := c.AdditionalChannelCapacity
 
-	return minReqConf, fundingConf, supportsZeroReserve, maxExpiry, orderExpiry, minClient, maxClient, minLsp, maxLsp, minChan, maxChan, additional
+	return minReqConf, fundingConf, supportsZeroReserve, maxExpiry, orderExpiry, minClient, maxClient, minLsp, maxLsp, minChan, maxChan, additional, c
 }
 
 func (s *Handlers) handleLsps1GetInfo(req *JsonRpcRequest) *JsonRpcResponse {
@@ -90,7 +96,7 @@ func (s *Handlers) handleLsps1GetInfo(req *JsonRpcRequest) *JsonRpcResponse {
 		Str("action", string(logging.LogActionRequest)).
 		Msg("LSPS1: Received get_info request")
 
-	minReqConf, fundingConf, supportsZeroReserve, maxExpiry, _, minClient, maxClient, minLsp, maxLsp, minChan, maxChan, _ := s.getLsps1ConfigValues()
+	minReqConf, fundingConf, supportsZeroReserve, maxExpiry, _, minClient, maxClient, minLsp, maxLsp, minChan, maxChan, _, _ := s.getLsps1ConfigValues()
 
 	nodes := s.nodesService.GetNodes()
 	var openingFeeParams []*Lsps2OpeningFeeParams
@@ -138,10 +144,17 @@ func (s *Handlers) handleLsps1GetInfo(req *JsonRpcRequest) *JsonRpcResponse {
 }
 
 // isOrderExpired checks if an order is expired based on the invoice expiry duration
-func (s *Handlers) isOrderExpired(createdAt time.Time) bool {
-	_, _, _, _, orderExpiry, _, _, _, _, _, _, _ := s.getLsps1ConfigValues()
-	expiryTime := createdAt.Add(orderExpiry)
-	return time.Now().After(expiryTime)
+// isOrderExpired compares against the order's own persisted expires_at --
+// computed once at creation time from the config live then (F-19) -- not
+// createdAt + the CURRENTLY configured expiry duration. Before this fix,
+// this recomputed from live config on every call, so changing
+// Lsps1OrderExpirySeconds (hot-swappable via the dashboard, no restart
+// needed) after an order already existed made get_order disagree with
+// the DB-level sweep and reserved-liquidity accounting, which both
+// correctly use the order's own frozen expires_at -- reproducing F-19's
+// exact bug class for this one read path.
+func isOrderExpired(expiresAt time.Time) bool {
+	return time.Now().After(expiresAt)
 }
 
 type Lsps1CreateOrderRequest struct {
@@ -183,6 +196,15 @@ type Lsps1PaymentBolt11 struct {
 }
 
 func (s *Handlers) handleLsps1CreateOrder(req *JsonRpcRequest, peer []byte) *JsonRpcResponse {
+	peerId := hex.EncodeToString(peer)
+
+	// Phase 7 (F-17/T7-7): the burst limiter is checked before anything
+	// else in this handler -- including param parsing -- so a spam burst
+	// from one peer never reaches the DB/RPC work below it.
+	if !s.burstLimiter.Allow(peerId) {
+		return NewJsonRpcErrorResponse(req.Id, -32603, "Rate limit exceeded, please retry later", nil)
+	}
+
 	var params Lsps1CreateOrderRequest
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		log.Trace().
@@ -206,13 +228,17 @@ func (s *Handlers) handleLsps1CreateOrder(req *JsonRpcRequest, peer []byte) *Jso
 		log.Warn().
 			Str("component", string(logging.LogComponentLSPS1)).
 			Str("action", string(logging.LogActionReject)).
-			Str("peer_id", hex.EncodeToString(peer)).
+			Str("peer_id", peerId).
 			Msg("LSPS1: Order rejected - at least one balance must be non-zero")
 		return NewJsonRpcErrorResponse(req.Id, -32602, "Invalid params: either client_balance or lsp_balance must be non-zero", nil)
 	}
 
-	// Validation: Check bounds
-	_, _, _, _, orderExpiry, minClient, maxClient, _, maxLsp, _, _, _ := s.getLsps1ConfigValues()
+	// Validation: Check bounds. Loaded ONCE for this whole request (C-3) --
+	// before this fix, this function called getLsps1ConfigValues() a
+	// second time further down for the capacity/floor checks, so a
+	// dashboard config update landing between the two calls could split
+	// one request's decisions across two different config snapshots.
+	_, _, _, _, orderExpiry, minClient, maxClient, _, maxLsp, minBusinessChan, maxChan, additionalPadding, cfg := s.getLsps1ConfigValues()
 
 	if clientBalance < minClient || clientBalance > maxClient {
 		return NewJsonRpcErrorResponse(req.Id, 100, "Client balance out of bounds", map[string]interface{}{
@@ -226,25 +252,42 @@ func (s *Handlers) handleLsps1CreateOrder(req *JsonRpcRequest, peer []byte) *Jso
 		})
 	}
 
-	// Validation: Check On-Chain Liquidity
-	// We need to reserve LspBalanceLoki for this channel.
-	if err := s.liquidityManager.CheckOnChainLiquidity(context.Background(), lspBalance); err != nil {
-		log.Warn().
-			Err(err).
-			Str("component", string(logging.LogComponentLSPS1)).
-			Str("action", string(logging.LogActionReject)).
-			Msg("LSPS1: Order rejected - insufficient on-chain liquidity")
-		return NewJsonRpcErrorResponse(req.Id, 1, "Client rejected: insufficient liquidity", nil)
+	// Phase 7 (F-17/T7-7): standing per-peer cap on live orders, mirroring
+	// lsps2.buy's CountLsps2PendingRegistrations check. Moved here (right
+	// after the cheap param-bounds checks, well before fee computation,
+	// capacity/floor validation, and hold-invoice creation) so a peer
+	// already at their standing limit is rejected before any of that
+	// heavier work runs -- there was previously no protocol-specific
+	// reason for this check to sit so much later than its LSPS2
+	// counterpart's equivalent placement.
+	// Only count orders created within the last 24 hours (non-expired).
+	cutoffTime := time.Now().Add(-orderExpiry)
+	pendingCount, err := s.openingService.CountLsps1Orders(peerId, string(Lsps1OrderStateCreated), &cutoffTime)
+	if err == nil && pendingCount >= s.config.Lsps1MaxPendingOrders {
+		return NewJsonRpcErrorResponse(req.Id, -32603, fmt.Sprintf("Too many pending orders (max %d)", s.config.Lsps1MaxPendingOrders), nil)
 	}
 
 	// Validation: Check minimum channel capacity
-	// We check if (requested + additional) meets both the physical floor and the business limit
+	// We check if (requested + additional [+ BOLT2 reserve top-up]) meets
+	// both the physical floor and the business limit.
 	channelCapacity := clientBalance + lspBalance
 	minPhysicalFloor := s.nodesService.GetMinChannelCapacity()
-	_, _, _, _, _, _, _, _, _, minBusinessChan, maxChan, additionalPadding := s.getLsps1ConfigValues()
+
+	// F-24/F-17(#7 second pass): finalCapacity now goes through the same
+	// shared config.RequiredCapacityLoki the interceptor's openChannel and
+	// LSPS2's handler already use, instead of LSPS1's own inline
+	// channelCapacity+padding math -- before this fix, an LSPS1 order's
+	// reservation never included the BOLT2 ~1% reserve top-up term, so it
+	// could under-reserve relative to what the interceptor's own JIT
+	// reconnect-fallback path (resolvePayment's GetPaidLsps1Order branch)
+	// would actually fund for this exact order if that's the path that
+	// ends up opening its channel. clientBalance is the side that needs
+	// reserve headroom here, mirroring that fallback path's own
+	// convention of using ClientBalanceLoki as the "outgoing" term.
+	finalCapacity := config.RequiredCapacityLoki(channelCapacity, clientBalance, cfg, false)
 
 	// 1. Check Physical Floor (LND requirement)
-	if channelCapacity+uint64(additionalPadding) < minPhysicalFloor {
+	if finalCapacity < minPhysicalFloor {
 		log.Warn().
 			Str("component", string(logging.LogComponentLSPS1)).
 			Str("action", string(logging.LogActionReject)).
@@ -260,7 +303,6 @@ func (s *Handlers) handleLsps1CreateOrder(req *JsonRpcRequest, peer []byte) *Jso
 	}
 
 	// 2. Check Business Limits (Advertised in get_info)
-	finalCapacity := channelCapacity + uint64(additionalPadding)
 	if finalCapacity < minBusinessChan || (maxChan > 0 && finalCapacity > maxChan) {
 		log.Warn().
 			Str("component", string(logging.LogComponentLSPS1)).
@@ -276,6 +318,17 @@ func (s *Handlers) handleLsps1CreateOrder(req *JsonRpcRequest, peer []byte) *Jso
 			"requested":    channelCapacity,
 			"padding":      additionalPadding,
 		})
+	}
+
+	// F-24: check (and later reserve) the real committed capacity --
+	// finalCapacity, just computed above for the business-floor check
+	// (clientBalance+lspBalance+padding) -- not lsp_balance_loki alone.
+	// LSPS1 is 100%-LSP-funded (buildOpenChannelRequest funds this exact
+	// figure, minus flooring); clientBalance is inbound liquidity the LSP
+	// pays for out of its own capital, not the client's money, so it must
+	// be part of what's liquidity-checked, not just lspBalance.
+	if resp := s.checkFleetCeilingAndLiquidity(req, logging.LogComponentLSPS1, finalCapacity, 1, "Client rejected: insufficient liquidity"); resp != nil {
+		return resp
 	}
 
 	// Calculate Fee
@@ -331,15 +384,6 @@ func (s *Handlers) handleLsps1CreateOrder(req *JsonRpcRequest, peer []byte) *Jso
 		feeLoki = 2000 // Default if no node found?
 	}
 
-	// DOS Protection: Limit pending orders per peer
-	// Only count orders created within the last 24 hours (non-expired)
-	peerId := hex.EncodeToString(peer)
-	cutoffTime := time.Now().Add(-orderExpiry)
-	pendingCount, err := s.openingService.CountLsps1Orders(peerId, string(Lsps1OrderStateCreated), &cutoffTime)
-	if err == nil && pendingCount >= s.config.Lsps1MaxPendingOrders {
-		return NewJsonRpcErrorResponse(req.Id, -32603, fmt.Sprintf("Too many pending orders (max %d)", s.config.Lsps1MaxPendingOrders), nil)
-	}
-
 	orderTotal := clientBalance + feeLoki
 
 	// Generate a hold invoice: the LSP (not LND) generates and holds the
@@ -383,7 +427,7 @@ func (s *Handlers) handleLsps1CreateOrder(req *JsonRpcRequest, peer []byte) *Jso
 	// Persist Order
 	order := &core.Lsps1Order{
 		OrderId:                      orderID,
-		PeerId:                       hex.EncodeToString(peer),
+		PeerId:                       peerId,
 		LspBalanceLoki:               int64(lspBalance),
 		ClientBalanceLoki:            int64(clientBalance),
 		FundingConfirmsWithinBlocks:  int(params.FundingConfirmsWithinBlocks),
@@ -399,16 +443,73 @@ func (s *Handlers) handleLsps1CreateOrder(req *JsonRpcRequest, peer []byte) *Jso
 		RefundOnchainAddress:         params.RefundOnchainAddress,
 		OrderTotalLoki:               int64(orderTotal),
 		FeeTotalLoki:                 int64(feeLoki),
+		// Phase 7 (F-19/F-24/T7-1): expiry and reserved amount are computed
+		// once, here, from live config -- never re-derived from
+		// created_at+config later, and reserving the real capacity
+		// (requiredCapacity), not lsp_balance_loki alone.
+		ExpiresAt:          expiry,
+		ReservedAmountLoki: finalCapacity,
 	}
 
-	err = s.openingService.RegisterLsps1Order(order)
+	// F-20/T7-5: re-check liquidity and persist atomically under an
+	// advisory lock, immediately before committing -- the earlier
+	// CheckOnChainLiquidity call above was a cheap, non-atomic fast-fail
+	// (good UX: reject early rather than build a hold invoice for a
+	// clearly-insufficient request), but time has passed since then (an
+	// AddHoldInvoice round trip), and a bare read-then-insert would still
+	// let two concurrent orders both pass against the same stale figure.
+	reserved, reserveErr := s.liquidityManager.ReserveLsps1Order(context.Background(), order)
+	// Distinct from reserveErr != nil (a hard DB/transaction failure):
+	// insufficientLiquidity is the clean case where the re-check itself
+	// succeeded but simply found no room left. Tracked separately so a
+	// genuine error can never be misreported as "insufficient liquidity"
+	// just because reserved's zero value also happens to be false.
+	insufficientLiquidity := reserveErr == nil && !reserved
+	err = reserveErr
+	if insufficientLiquidity {
+		err = fmt.Errorf("insufficient liquidity on re-check")
+	}
 	if err != nil {
 		log.Error().
 			Err(err).
 			Str("component", string(logging.LogComponentLSPS1)).
 			Str("action", string(logging.LogActionFailure)).
 			Msg("LSPS1: Failed to persist order in database")
+
+		// H-7: AddHoldInvoice already succeeded at LND, but the preimage
+		// (a local variable) was never persisted since the DB write just
+		// failed. Without a compensating cancel, this hold invoice is
+		// orphaned -- flspd has no stored preimage to settle or cancel it
+		// with later, so any HTLC that locks into it would sit ACCEPTED
+		// until LND's own hold-invoice-expiry watcher eventually releases
+		// it. Fired async (S-7): its outcome never changes the error
+		// response already decided below, and CancelInvoice's own failure
+		// is non-fatal either way -- that watcher is still the fallback --
+		// so there's no reason to make the client wait on this RPC. Same
+		// compensating action applies whether the DB write hard-failed or
+		// the atomic re-check simply found liquidity gone in the meantime.
+		go func() {
+			if cancelErr := s.lndClient.CancelInvoice(context.Background(), paymentHash[:]); cancelErr != nil {
+				log.Error().
+					Err(cancelErr).
+					Str("component", string(logging.LogComponentLSPS1)).
+					Msg("LSPS1: Failed to cancel orphaned hold invoice after order persistence failure -- relying on LND's own hold-invoice expiry")
+			}
+		}()
+
+		if insufficientLiquidity {
+			return NewJsonRpcErrorResponse(req.Id, 1, "Client rejected: insufficient liquidity", nil)
+		}
 		return NewJsonRpcErrorResponse(req.Id, -32603, "Database error", nil)
+	}
+
+	// H-12: attach a live per-invoice watcher now, right at order-creation
+	// time -- gives near-instant ACCEPTED detection instead of waiting up
+	// to heldInvoiceSafetyNetPollInterval for the safety-net poll to catch
+	// it. Nil-safe: not every construction site wires this up (most tests
+	// don't need live watching).
+	if s.orderWatcher != nil {
+		s.orderWatcher.WatchOrder(order)
 	}
 
 	resp := Lsps1CreateOrderResponse{
@@ -466,8 +567,6 @@ func (s *Handlers) handleLsps1GetOrder(req *JsonRpcRequest) *JsonRpcResponse {
 		Interface("params", params).
 		Msg("LSPS1: Received get_order request")
 
-	_, _, _, _, orderExpiry, _, _, _, _, _, _, _ := s.getLsps1ConfigValues()
-
 	order, err := s.openingService.GetLsps1Order(params.OrderId)
 	if err != nil {
 		// Assume error means not found for now, or distinguish DB error?
@@ -478,12 +577,16 @@ func (s *Handlers) handleLsps1GetOrder(req *JsonRpcRequest) *JsonRpcResponse {
 	// TODO: Check if payment is actually paid by querying LND if state is EXPECT_PAYMENT?
 	// For now, trust DB state.
 
-	expiry := order.CreatedAt.Add(orderExpiry)
+	// The order's own persisted expiry (F-19/Phase 7) -- not recomputed
+	// from live config, so this stays consistent with the DB sweep and
+	// reserved-liquidity accounting no matter what Lsps1OrderExpirySeconds
+	// is configured to now.
+	expiry := order.ExpiresAt
 
 	// Check if order is expired and override state if necessary
 	orderState := order.OrderState
 	paymentState := order.PaymentState
-	if orderState == string(Lsps1OrderStateCreated) && s.isOrderExpired(order.CreatedAt) {
+	if orderState == string(Lsps1OrderStateCreated) && isOrderExpired(order.ExpiresAt) {
 		orderState = string(Lsps1OrderStateExpired)
 		paymentState = string(Lsps1PaymentStateExpired)
 	}
@@ -518,8 +621,17 @@ func (s *Handlers) handleLsps1GetOrder(req *JsonRpcRequest) *JsonRpcResponse {
 		respOrderState = string(Lsps1OrderStateCreated)
 	}
 
+	// Only report channel details once the order has actually reached
+	// COMPLETED. FundingTxid alone is no longer sufficient: for a
+	// hold-invoice order, recordHeldOrderFundingAndSettle now records
+	// FundingTxid *before* settlement is confirmed (for crash-safety, see
+	// settlement_service.go), so a HOLD order can have a non-nil
+	// FundingTxid while its payment is still uncaptured. Gating on
+	// OrderState==COMPLETED keeps this response internally consistent --
+	// a client is never told "here is your funded channel" for an order
+	// whose Payment.Bolt11.State still reads HOLD/EXPECT_PAYMENT.
 	var channelInfo interface{}
-	if order.FundingTxid != nil && *order.FundingTxid != "" {
+	if orderState == string(Lsps1OrderStateCompleted) && order.FundingTxid != nil && *order.FundingTxid != "" {
 		vout := 0
 		if order.FundingOutpoint != nil {
 			vout = *order.FundingOutpoint

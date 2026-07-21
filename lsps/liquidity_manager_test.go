@@ -127,6 +127,36 @@ func TestLiquidityManagerMatrix(t *testing.T) {
 	}
 }
 
+// TestGetLiquiditySnapshot_FetchesBalanceAndReservedTogether is the
+// regression test for the shared-fetch refactor (closes the "fleet
+// ceiling and CheckOnChainLiquidity each independently re-query reserved
+// liquidity" finding): GetLiquiditySnapshot must return exactly one
+// wallet-balance read and one reserved-liquidity read, correctly
+// combined, callable once per request by anything needing either figure.
+func TestGetLiquiditySnapshot_FetchesBalanceAndReservedTogether(t *testing.T) {
+	mockLnd := new(MockLightningClient)
+	mockStore := new(MockOpeningStore)
+
+	mockLnd.On("WalletBalance", mock.Anything).Return(&lightning.WalletBalanceResult{ConfirmedBalance: 10_000_000}, nil)
+	mockStore.On("GetReservedLiquidity").Return(uint64(3_000_000), nil)
+
+	lm := NewLiquidityManager(mockLnd, mockStore)
+
+	snap, err := lm.GetLiquiditySnapshot(context.Background())
+	assert.NoError(t, err)
+	assert.Equal(t, uint64(10_000_000), snap.ConfirmedBalanceLoki)
+	assert.Equal(t, uint64(3_000_000), snap.ReservedLoki)
+	assert.Equal(t, uint64(7_000_000), snap.AvailableLoki())
+
+	mockLnd.AssertNumberOfCalls(t, "WalletBalance", 1)
+	mockStore.AssertNumberOfCalls(t, "GetReservedLiquidity", 1)
+}
+
+func TestLiquiditySnapshot_AvailableLoki_FloorsAtZeroWhenReservedExceedsBalance(t *testing.T) {
+	snap := LiquiditySnapshot{ConfirmedBalanceLoki: 5_000, ReservedLoki: 6_000}
+	assert.Equal(t, uint64(0), snap.AvailableLoki(), "reserved exceeding balance must floor at zero, not wrap/underflow")
+}
+
 func TestLiquidityManager_LndError(t *testing.T) {
 	mockLnd := new(MockLightningClient)
 	mockStore := new(MockOpeningStore)

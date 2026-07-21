@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/flokiorg/flnd/lnrpc"
+	"github.com/flokiorg/flnd/lnrpc/invoicesrpc"
 	"github.com/flokiorg/flnd/lnrpc/routerrpc"
 	"github.com/flowgate-lsp/flspd/internal/adapters/lnd"
 	"github.com/flowgate-lsp/flspd/lightning"
@@ -190,6 +191,26 @@ func (d *Devnet) RawRouterClient(role string) (routerrpc.RouterClient, error) {
 		return nil, fmt.Errorf("role %q client is not *lnd.LndClient", role)
 	}
 	return lndClient.RouterClient(), nil
+}
+
+// RawInvoicesClient exposes role's raw invoicesrpc.InvoicesClient, for the
+// same reason as RawRouterClient -- the H-12 devnet verification test needs
+// to drive SubscribeSingleInvoice/AddHoldInvoice directly against real
+// flnd, independent of flspd's own wrapper, to prove the underlying RPC
+// actually delivers ACCEPTED rather than trusting the proto docs (this
+// fork has diverged from upstream LND invoice-subscription behavior
+// before -- see heldInvoiceSafetyNetPollInterval's doc comment in
+// lsps/settlement_service.go).
+func (d *Devnet) RawInvoicesClient(role string) (invoicesrpc.InvoicesClient, error) {
+	client, err := d.LightningClient(role)
+	if err != nil {
+		return nil, err
+	}
+	lndClient, ok := client.(*lnd.LndClient)
+	if !ok {
+		return nil, fmt.Errorf("role %q client is not *lnd.LndClient", role)
+	}
+	return lndClient.InvoicesClient(), nil
 }
 
 func (d *Devnet) waitForRole(t *testing.T, role string, timeout time.Duration) {

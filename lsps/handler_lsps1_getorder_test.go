@@ -40,7 +40,7 @@ func newGetOrderTestServer(t *testing.T, mockOS *MockOpeningService, orderExpiry
 		Lsps1MaxChannelBalanceLoki:           &maxChan,
 	})}}).Maybe()
 
-	return NewHandlers(Config{}, new(MockLndClient), mockNS, mockOS, new(MockLiquidityManager), new(MockNotificationService))
+	return NewHandlers(Config{}, new(MockLndClient), mockNS, mockOS, new(MockLiquidityManager), new(MockNotificationService), nil)
 }
 
 func TestHandleLsps1GetInfo(t *testing.T) {
@@ -91,10 +91,8 @@ func uint64Ptr(v uint64) *uint64 { return &v }
 func boolPtr(v bool) *bool       { return &v }
 
 func TestIsOrderExpired(t *testing.T) {
-	server := newGetOrderTestServer(t, new(MockOpeningService), 3600) // 1 hour
-
-	assert.False(t, server.isOrderExpired(time.Now()), "a just-created order must not be expired")
-	assert.True(t, server.isOrderExpired(time.Now().Add(-2*time.Hour)), "an order older than the expiry window must be expired")
+	assert.False(t, isOrderExpired(time.Now().Add(time.Hour)), "an expires_at in the future must not be expired")
+	assert.True(t, isOrderExpired(time.Now().Add(-time.Hour)), "an expires_at in the past must be expired")
 }
 
 func TestHandleLsps1GetOrder_InvalidParams(t *testing.T) {
@@ -123,6 +121,7 @@ func TestHandleLsps1GetOrder_ActiveCreatedOrder(t *testing.T) {
 	order := &core.Lsps1Order{
 		OrderId:      "order-active",
 		CreatedAt:    time.Now(),
+		ExpiresAt:    time.Now().Add(time.Hour),
 		OrderState:   string(Lsps1OrderStateCreated),
 		PaymentState: "EXPECT_PAYMENT",
 		Token:        "tok",
@@ -150,6 +149,7 @@ func TestHandleLsps1GetOrder_ExpiredCreatedOrder_StateOverridden(t *testing.T) {
 	order := &core.Lsps1Order{
 		OrderId:      "order-expired",
 		CreatedAt:    time.Now().Add(-2 * time.Hour),
+		ExpiresAt:    time.Now().Add(-time.Hour),
 		OrderState:   string(Lsps1OrderStateCreated),
 		PaymentState: "EXPECT_PAYMENT",
 	}
@@ -164,6 +164,46 @@ func TestHandleLsps1GetOrder_ExpiredCreatedOrder_StateOverridden(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, string(Lsps1OrderStateExpired), result.OrderState)
 	assert.Equal(t, string(Lsps1PaymentStateExpired), result.Payment.Bolt11.State)
+}
+
+// TestHandleLsps1GetOrder_UsesPersistedExpiresAt_NotLiveConfig is the
+// regression test for the F-19 read-path gap: get_order must report the
+// order's own frozen expires_at, not recompute created_at + the
+// CURRENTLY configured Lsps1OrderExpirySeconds. Here the order's own
+// persisted ExpiresAt says "still active", while the server's live config
+// (a much shorter duration than when the order was created) would have
+// called it expired if get_order still recomputed from config -- proving
+// the two are no longer coupled.
+func TestHandleLsps1GetOrder_UsesPersistedExpiresAt_NotLiveConfig(t *testing.T) {
+	mockOS := new(MockOpeningService)
+	order := &core.Lsps1Order{
+		OrderId:      "order-config-changed",
+		CreatedAt:    time.Now().Add(-2 * time.Hour),
+		ExpiresAt:    time.Now().Add(time.Hour), // order's own window: still active
+		OrderState:   string(Lsps1OrderStateCreated),
+		PaymentState: "EXPECT_PAYMENT",
+	}
+	mockOS.On("GetLsps1Order", "order-config-changed").Return(order, nil)
+	// Live config now says 1 hour -- if get_order still recomputed
+	// created_at(-2h)+1h, that's already in the past (expired). The
+	// persisted ExpiresAt (+1h from now) must win instead.
+	server := newGetOrderTestServer(t, mockOS, 3600)
+
+	req := &JsonRpcRequest{Id: json.RawMessage(`"id"`), Params: json.RawMessage(`{"order_id":"order-config-changed"}`)}
+	resp := server.handleLsps1GetOrder(req)
+
+	require.Nil(t, resp.Error)
+	result, ok := resp.Result.(Lsps1CreateOrderResponse)
+	require.True(t, ok)
+	assert.Equal(t, string(Lsps1OrderStateCreated), result.OrderState, "must stay CREATED per the order's own persisted ExpiresAt, regardless of the currently configured expiry duration")
+	assert.WithinDuration(t, order.ExpiresAt, mustParseRFC3339(t, result.Payment.Bolt11.ExpiresAt), time.Second, "reported ExpiresAt must be the order's own persisted field")
+}
+
+func mustParseRFC3339(t *testing.T, s string) time.Time {
+	t.Helper()
+	parsed, err := time.Parse(time.RFC3339, s)
+	require.NoError(t, err)
+	return parsed
 }
 
 // TestHandleLsps1GetOrder_PaidOrder_MapsToCreatedForSpecCompliance covers
@@ -218,4 +258,39 @@ func TestHandleLsps1GetOrder_FundedOrder_ReportsChannel(t *testing.T) {
 	channelMap, ok := result.Channel.(map[string]interface{})
 	require.True(t, ok)
 	assert.Equal(t, "abc123:1", channelMap["funding_outpoint"])
+}
+
+// TestHandleLsps1GetOrder_HeldOrderWithFunding_DoesNotReportChannel is the
+// regression test for a review finding: recordHeldOrderFundingAndSettle
+// (settlement_service.go) now records FundingTxid *before* settlement is
+// confirmed, for crash-safety -- so a hold-invoice order can have a
+// non-nil FundingTxid while order_state is still PAID and payment_state is
+// still HOLD (payment not yet captured). Before this fix, get_order gated
+// the Channel block purely on FundingTxid!=nil, so a client polling during
+// this window (or if settlement never completes) would see a
+// self-contradictory response: Payment.Bolt11.State="HOLD" (not paid) next
+// to a populated Channel block implying the channel is funded and ready.
+func TestHandleLsps1GetOrder_HeldOrderWithFunding_DoesNotReportChannel(t *testing.T) {
+	mockOS := new(MockOpeningService)
+	txid := "held-order-txid"
+	vout := 0
+	order := &core.Lsps1Order{
+		OrderId:         "order-held-funded",
+		CreatedAt:       time.Now(),
+		OrderState:      string(Lsps1OrderStatePaid),
+		PaymentState:    "HOLD",
+		FundingTxid:     &txid,
+		FundingOutpoint: &vout,
+	}
+	mockOS.On("GetLsps1Order", "order-held-funded").Return(order, nil)
+	server := newGetOrderTestServer(t, mockOS, 3600)
+
+	req := &JsonRpcRequest{Id: json.RawMessage(`"id"`), Params: json.RawMessage(`{"order_id":"order-held-funded"}`)}
+	resp := server.handleLsps1GetOrder(req)
+
+	require.Nil(t, resp.Error)
+	result, ok := resp.Result.(Lsps1CreateOrderResponse)
+	require.True(t, ok)
+	assert.Equal(t, "HOLD", result.Payment.Bolt11.State, "payment must still read HOLD -- not yet captured")
+	assert.Nil(t, result.Channel, "must not report a funded channel while the order hasn't reached COMPLETED, even though FundingTxid is already recorded")
 }

@@ -139,6 +139,15 @@ func (c *LndClient) RouterClient() routerrpc.RouterClient {
 	return c.routerClient
 }
 
+// InvoicesClient exposes the raw invoicesrpc client for the same reason as
+// RouterClient -- the H-12 devnet verification test needs to drive
+// SubscribeSingleInvoice/AddHoldInvoice directly against real flnd,
+// independent of flspd's own SubscribeSingleInvoice wrapper, to prove the
+// underlying RPC actually behaves as documented rather than trusting it.
+func (c *LndClient) InvoicesClient() invoicesrpc.InvoicesClient {
+	return c.invoicesClient
+}
+
 func (c *LndClient) Close() {
 	cancel := c.listenerCancel
 	if cancel != nil {
@@ -392,8 +401,16 @@ func (c *LndClient) GetInfo() (*lightning.GetInfoResult, error) {
 	}
 
 	return &lightning.GetInfoResult{
-		Alias:  info.Alias,
-		Pubkey: info.IdentityPubkey,
+		Alias:               info.Alias,
+		Pubkey:              info.IdentityPubkey,
+		Version:             info.Version,
+		BlockHeight:         info.BlockHeight,
+		SyncedToChain:       info.SyncedToChain,
+		SyncedToGraph:       info.SyncedToGraph,
+		NumActiveChannels:   info.NumActiveChannels,
+		NumPendingChannels:  info.NumPendingChannels,
+		NumInactiveChannels: info.NumInactiveChannels,
+		NumPeers:            info.NumPeers,
 	}, nil
 }
 
@@ -812,6 +829,10 @@ func (c *LndClient) ListChannels() ([]*lightning.Channel, error) {
 			ChannelPoint:  outpoint,
 			PeerId:        peerId,
 			PendingHtlcs:  pendingHtlcs,
+			Active:        c.Active,
+			Capacity:      c.Capacity,
+			LocalBalance:  c.LocalBalance,
+			RemoteBalance: c.RemoteBalance,
 		}
 	}
 
@@ -831,6 +852,10 @@ func (c *LndClient) ListChannels() ([]*lightning.Channel, error) {
 			ConfirmedScid: nil,
 			ChannelPoint:  outpoint,
 			PeerId:        peerId,
+			Active:        false, // pending-open: not yet usable, excluded from liquidity aggregation
+			Capacity:      c.Channel.Capacity,
+			LocalBalance:  c.Channel.LocalBalance,
+			RemoteBalance: c.Channel.RemoteBalance,
 		})
 	}
 
@@ -959,6 +984,18 @@ func (c *LndClient) LookupInvoiceState(ctx context.Context, paymentRequest strin
 		return lightning.InvoiceStateOpen, fmt.Errorf("decode payment hash: %w", err)
 	}
 	inv, err := c.client.LookupInvoice(ctx, &lnrpc.PaymentHash{RHash: hashBytes})
+	if err != nil {
+		return lightning.InvoiceStateOpen, fmt.Errorf("LookupInvoice: %w", err)
+	}
+	return convertInvoiceState(inv.State), nil
+}
+
+// LookupInvoiceStateByHash is LookupInvoiceState's cheaper sibling (H-11):
+// skips the DecodePayReq round-trip when the caller already has the
+// payment hash (e.g. derived locally from a hold invoice's stored
+// preimage), rather than deriving it from a bolt11 string every time.
+func (c *LndClient) LookupInvoiceStateByHash(ctx context.Context, paymentHash []byte) (lightning.InvoiceState, error) {
+	inv, err := c.client.LookupInvoice(ctx, &lnrpc.PaymentHash{RHash: paymentHash})
 	if err != nil {
 		return lightning.InvoiceStateOpen, fmt.Errorf("LookupInvoice: %w", err)
 	}

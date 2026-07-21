@@ -21,6 +21,10 @@ func runCount(store *MockOpeningStore, err error) *int32 {
 	store.On("ExpireStaleOrders").Run(func(mock.Arguments) {
 		atomic.AddInt32(&count, 1)
 	}).Return(int64(0), err)
+	// Phase 7, T7-6: runCleanup also sweeps LSPS2 registrations every
+	// tick now -- every existing test using this helper needs this call
+	// satisfied too, or it panics the moment a real tick reaches it.
+	store.On("ExpireStaleLsps2Registrations").Return(int64(0), nil).Maybe()
 	return &count
 }
 
@@ -98,4 +102,47 @@ func TestOrderCleanupService_ExpireErrorDoesNotStopTheLoop(t *testing.T) {
 	require.Eventually(t, func() bool {
 		return atomic.LoadInt32(count) >= 2
 	}, time.Second, 10*time.Millisecond, "an ExpireStaleOrders error on one tick must not stop later ticks from running")
+}
+
+// TestOrderCleanupService_SweepsLsps2RegistrationsToo is the regression
+// test for T7-6: every cleanup tick must also sweep stale LSPS2 buy
+// registrations, not just LSPS1 orders -- both are reservations against
+// the same wallet balance and need the same expiry enforcement.
+func TestOrderCleanupService_SweepsLsps2RegistrationsToo(t *testing.T) {
+	store := new(MockOpeningStore)
+	store.On("ExpireStaleOrders").Return(int64(0), nil)
+
+	var lsps2Count int32
+	store.On("ExpireStaleLsps2Registrations").Run(func(mock.Arguments) {
+		atomic.AddInt32(&lsps2Count, 1)
+	}).Return(int64(3), nil)
+
+	svc := NewOrderCleanupService(store, time.Hour)
+	go svc.Start()
+	defer svc.Stop()
+
+	require.Eventually(t, func() bool {
+		return atomic.LoadInt32(&lsps2Count) >= 1
+	}, time.Second, 10*time.Millisecond, "the LSPS2 registration sweep must run on the same schedule as the LSPS1 order sweep")
+}
+
+// TestOrderCleanupService_Lsps1ErrorDoesNotSkipLsps2Sweep proves the two
+// sweeps are independent: a failure expiring LSPS1 orders must not prevent
+// the LSPS2 registration sweep from still running on the same tick.
+func TestOrderCleanupService_Lsps1ErrorDoesNotSkipLsps2Sweep(t *testing.T) {
+	store := new(MockOpeningStore)
+	store.On("ExpireStaleOrders").Return(int64(0), assert.AnError)
+
+	var lsps2Count int32
+	store.On("ExpireStaleLsps2Registrations").Run(func(mock.Arguments) {
+		atomic.AddInt32(&lsps2Count, 1)
+	}).Return(int64(0), nil)
+
+	svc := NewOrderCleanupService(store, time.Hour)
+	go svc.Start()
+	defer svc.Stop()
+
+	require.Eventually(t, func() bool {
+		return atomic.LoadInt32(&lsps2Count) >= 1
+	}, time.Second, 10*time.Millisecond, "an LSPS1 sweep failure must not prevent the LSPS2 sweep from still running")
 }

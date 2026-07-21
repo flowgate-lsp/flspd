@@ -6,11 +6,20 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"time"
 
+	"github.com/flowgate-lsp/flspd/common"
 	"github.com/flowgate-lsp/flspd/core"
+	"github.com/flowgate-lsp/flspd/platform/config"
 	"github.com/flowgate-lsp/flspd/platform/logging"
 	"github.com/rs/zerolog/log"
 )
+
+// lsps2RegistrationMaxTTL bounds how long an LSPS2 buy registration can
+// stay ACTIVE regardless of the quote's own valid_until (Phase 7, F-21):
+// before this existed, a registration never expired at all, no matter how
+// far out its quoted valid_until was set.
+const lsps2RegistrationMaxTTL = 24 * time.Hour
 
 type Lsps2GetInfoLegacyParams struct {
 	Token string `json:"token"`
@@ -133,6 +142,28 @@ func (s *Handlers) lsps2GetInfo(req *JsonRpcRequest) *JsonRpcResponse {
 }
 
 func (s *Handlers) lsps2Buy(req *JsonRpcRequest, peer []byte) *JsonRpcResponse {
+	// Phase 7 (F-17/T7-7): checked before anything else in this handler --
+	// including promise-signature verification, a real cryptographic
+	// operation this method otherwise runs unconditionally on every call --
+	// so a spam burst from one peer never reaches that work, let alone the
+	// DB/RPC calls further down.
+	peerId := hex.EncodeToString(peer)
+	if !s.burstLimiter.Allow(peerId) {
+		return NewJsonRpcErrorResponse(req.Id, -32603, "Rate limit exceeded, please retry later", nil)
+	}
+
+	// Phase 7 (F-17/T7-7): standing per-peer cap on live registrations,
+	// mirroring lsps1.create_order's CountLsps1Orders check below. Unlike
+	// the burst limiter (in-memory, resets on restart), this reads the
+	// durable DB state, so it holds even across a spread-out attack that
+	// stays under the burst window.
+	if s.config.Lsps2MaxPendingRegistrations > 0 {
+		pendingCount, err := s.openingService.CountLsps2PendingRegistrations(peerId)
+		if err == nil && pendingCount >= s.config.Lsps2MaxPendingRegistrations {
+			return NewJsonRpcErrorResponse(req.Id, -32603, fmt.Sprintf("Too many pending registrations (max %d)", s.config.Lsps2MaxPendingRegistrations), nil)
+		}
+	}
+
 	log.Trace().Msgf("LSPS2: lsps2Buy raw params: %s", string(req.Params))
 	var params Lsps2BuyParams
 	if err := json.Unmarshal(req.Params, &params); err != nil {
@@ -200,56 +231,78 @@ Loop:
 		if *paymentSize < commonParams.MinPaymentSizeMloki || *paymentSize > commonParams.MaxPaymentSizeMloki {
 			return NewJsonRpcErrorResponse(req.Id, 203, "Payment size out of bounds", nil)
 		}
+	}
 
-		// Validation: Check min channel capacity (approximate neededSat as capacity)
-		neededSat := *paymentSize / 1000
-		additional := uint64(validCfg.AdditionalChannelCapacity)
+	// F-22: every registration must be checked against SOME bound, even the
+	// spec-legal "variable size, single HTLC" mode where the client omits
+	// payment_size_mloki entirely. Before this fix, that mode skipped every
+	// capacity/liquidity check below, and at redemption the JIT forward
+	// amount silently computed as zero -- the LSP would open a real,
+	// fully-funded channel and then forward a guaranteed-to-fail $0 HTLC.
+	// worstCaseMloki is the largest amount this registration could ever be
+	// redeemed for: the client's own requested size if given, else the
+	// quote's own MaxPaymentSizeMloki ceiling.
+	worstCaseMloki := commonParams.MaxPaymentSizeMloki
+	if paymentSize != nil {
+		worstCaseMloki = *paymentSize
+	}
+	if worstCaseMloki == 0 {
+		return NewJsonRpcErrorResponse(req.Id, 203, "No usable payment size bound (payment_size_mloki not set and quote has no max_payment_size_mloki)", nil)
+	}
+
+	// Compute Opening Fee and the net (outgoing) amount for the worst case,
+	// mirroring the gross-minus-fee relationship the interceptor's own
+	// computeJitOutgoingAmount uses at redemption time -- needed for the
+	// BOLT2 reserve-headroom term in RequiredCapacityLoki below.
+	openingFee, err := ComputeOpeningFee(worstCaseMloki, commonParams.MinFeeMloki, uint64(commonParams.Proportional))
+	if err != nil {
+		return NewJsonRpcErrorResponse(req.Id, 203, "Fee computation overflow", nil)
+	}
+	if openingFee >= worstCaseMloki {
+		return NewJsonRpcErrorResponse(req.Id, 202, "Payment size too small (fee >= amount)", nil)
+	}
+	worstOutgoingMloki := worstCaseMloki - openingFee
+
+	requiredCapacity := config.RequiredCapacityLoki(worstCaseMloki/1000, worstOutgoingMloki/1000, validCfg, true)
+
+	// Enforce Physical Floor and (JIT) Business Floor -- same predicate the
+	// interceptor's openChannel checks before it ever gets there.
+	if !config.MeetsCapacityFloors(requiredCapacity, validCfg, true) {
 		physicalFloor := s.nodesService.GetMinChannelCapacity()
 		businessFloor := uint64(0)
 		if validCfg.JitMinChannelBalanceLoki != nil {
 			businessFloor = *validCfg.JitMinChannelBalanceLoki
 		}
+		return NewJsonRpcErrorResponse(req.Id, 203, fmt.Sprintf("Payment size too small even with padding (physical min %d, business min %d)", physicalFloor, businessFloor), nil)
+	}
 
-		// Enforce Physical Floor
-		if neededSat+additional < physicalFloor {
-			return NewJsonRpcErrorResponse(req.Id, 203, fmt.Sprintf("Payment size too small even with %d padding (min %d)", additional, physicalFloor), nil)
-		}
-
-		// Enforce Business Limit
-		if neededSat+additional < businessFloor {
-			return NewJsonRpcErrorResponse(req.Id, 203, fmt.Sprintf("Payment size too small even with %d padding (business min %d)", additional, businessFloor), nil)
-		}
-
-		// Validation: Check On-Chain Liquidity
-		// We approximate needed liquidity as the payment size (converted to sats).
-		// Note: PaymentSizeMloki is milliloki, we need sats (loki). 1 Loki = 1000 mLoki.
-		// neededSat is already calculated above
-		if err := s.liquidityManager.CheckOnChainLiquidity(context.Background(), neededSat); err != nil {
-			log.Warn().
-				Err(err).
-				Str("component", string(logging.LogComponentLSPS2)).
-				Str("action", string(logging.LogActionReject)).
-				Msg("LSPS2: Buy rejected - insufficient on-chain liquidity")
-			return NewJsonRpcErrorResponse(req.Id, 203, "Payment size too large: insufficient liquidity", nil)
-		}
-
-		// Compute Opening Fee
-		openingFee, err := ComputeOpeningFee(*paymentSize, commonParams.MinFeeMloki, uint64(commonParams.Proportional))
-		if err != nil {
-			return NewJsonRpcErrorResponse(req.Id, 203, "Fee computation overflow", nil)
-		}
-
-		if openingFee >= *paymentSize {
-			return NewJsonRpcErrorResponse(req.Id, 202, "Payment size too small (fee >= amount)", nil)
-		}
+	// Validation: Check On-Chain Liquidity against the real committed
+	// capacity (F-16/F-24), not the raw payment size.
+	if resp := s.checkFleetCeilingAndLiquidity(req, logging.LogComponentLSPS2, requiredCapacity, 203, "Payment size too large: insufficient liquidity"); resp != nil {
+		return resp
 	}
 
 	regID, _ := generateUUID()
 
-	err = s.openingService.RegisterLsps2Buy(&core.Lsps2BuyRegistration{
+	// Phase 7 (F-15/F-19/F-21/T7-1/T7-2): a registration now carries its
+	// own expiry and reservation, and starts life ACTIVE (not yet
+	// consumed). ExpiresAt is bounded by both the quote's own valid_until
+	// AND a hard ceiling, so a registration can never outlive a sane bound
+	// even if a client somehow obtained a very long-lived quote.
+	now := time.Now().UTC()
+	expiresAt := now.Add(lsps2RegistrationMaxTTL)
+	if validUntil, err := time.Parse(common.TimeFormat, commonParams.ValidUntil); err == nil && validUntil.Before(expiresAt) {
+		expiresAt = validUntil
+	}
+
+	// F-20/T7-5: re-check liquidity and persist atomically under an
+	// advisory lock, immediately before committing -- closes the same
+	// TOCTOU race as LSPS1's create_order (see its handler for the full
+	// rationale).
+	reserved, err := s.liquidityManager.ReserveLsps2Buy(context.Background(), &core.Lsps2BuyRegistration{
 		Id:                         regID,
 		LspId:                      hex.EncodeToString(validNode.PublicKey.SerializeCompressed()),
-		PeerId:                     hex.EncodeToString(peer),
+		PeerId:                     peerId,
 		Scid:                       scid,
 		Mode:                       0,
 		PaymentSizeMloki:           paymentSize,
@@ -260,8 +313,20 @@ Loop:
 		ParamsMaxClientToSelfDelay: commonParams.MaxClientToSelfDelay,
 		ParamsPromise:              commonParams.Promise,
 		Token:                      validToken,
+		CreatedAt:                  now,
+		ExpiresAt:                  expiresAt,
+		ReservedAmountLoki:         requiredCapacity,
+		State:                      core.Lsps2RegistrationActive,
+		// F-22 (redemption-time half): persist the same worst-case bound
+		// the reservation itself was sized against, so the interceptor's
+		// resolvePayment can enforce it at redemption -- not just here at
+		// buy time -- in variable-size mode, where the real HTLC amount
+		// isn't known until redemption.
+		MaxPaymentSizeMloki: &worstCaseMloki,
 	})
-
+	if err == nil && !reserved {
+		return NewJsonRpcErrorResponse(req.Id, 203, "Payment size too large: insufficient liquidity", nil)
+	}
 	if err != nil {
 		log.Error().
 			Err(err).

@@ -62,8 +62,9 @@ func TestHandleLsps1CreateOrder_Matrix(t *testing.T) {
 			clientBalance: "0",
 			lspBalance:    "10000", // < MinChan (20000)
 			mockSetup: func(lm *MockLiquidityManager, ns *MockNodesService, os *MockOpeningService, lc *MockLndClient, notif *MockNotificationService) {
-				lm.On("CheckOnChainLiquidity", mock.Anything, uint64(10000)).Return(nil)
+				mockSufficientLiquidity(lm)
 				ns.On("GetMinChannelCapacity").Return(MinChan)
+				os.On("CountLsps1Orders", mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
 			},
 			expectCode: 100,
 			expectMsg:  "Channel capacity too small",
@@ -73,7 +74,7 @@ func TestHandleLsps1CreateOrder_Matrix(t *testing.T) {
 			clientBalance: "0",
 			lspBalance:    "50000",
 			mockSetup: func(lm *MockLiquidityManager, ns *MockNodesService, os *MockOpeningService, lc *MockLndClient, notif *MockNotificationService) {
-				lm.On("CheckOnChainLiquidity", mock.Anything, uint64(50000)).Return(nil)
+				mockSufficientLiquidity(lm)
 				ns.On("GetMinChannelCapacity").Return(MinChan)
 				ns.On("GetNodes").Return([]*core.Node{{NodeConfig: config.NewNodeConfigRef(&config.NodeConfig{})}})
 				os.On("GetFeeParamsMenu", mock.Anything, mock.Anything).Return([]*core.OpeningFeeParams{{
@@ -81,7 +82,7 @@ func TestHandleLsps1CreateOrder_Matrix(t *testing.T) {
 				}}, nil)
 				os.On("CountLsps1Orders", mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
 				lc.On("AddHoldInvoice", mock.Anything, mock.Anything).Return(&invoicesrpc.AddHoldInvoiceResp{PaymentRequest: "lnbc..."}, nil)
-				os.On("RegisterLsps1Order", mock.Anything).Return(nil)
+				lm.On("ReserveLsps1Order", mock.Anything, mock.Anything).Return(true, nil)
 				notif.On("NotifyOrderStateChanged", mock.Anything, mock.Anything, "CREATED", "", "").Return(true, nil)
 			},
 			expectCode: 0, // Success (no error field in response, but test checks result != nil)
@@ -128,13 +129,13 @@ func TestHandleLsps1CreateOrder_Matrix(t *testing.T) {
 				tt.mockSetup(mockLM, mockNS, mockOS, mockLC, mockNotif)
 			} else {
 				// Default permissive mocks for validations that proceed far enough to need them
-				mockLM.On("CheckOnChainLiquidity", mock.Anything, mock.Anything).Return(nil).Maybe()
+				mockSufficientLiquidity(mockLM)
 				mockNS.On("GetMinChannelCapacity").Return(MinChan).Maybe()
 			}
 
 			// Server setup
 			cfg := Config{Lsps1MaxPendingOrders: 10}
-			server := NewHandlers(cfg, mockLC, mockNS, mockOS, mockLM, mockNotif)
+			server := NewHandlers(cfg, mockLC, mockNS, mockOS, mockLM, mockNotif, nil)
 
 			// Request construction
 			reqData := map[string]interface{}{
@@ -236,7 +237,7 @@ func TestHandleLsps1CreateOrder_FeeMatchesUnifiedFeeFunction(t *testing.T) {
 		Lsps1MaxChannelBalanceLoki:           &maxChan,
 	})}})
 	mockNS.On("GetMinChannelCapacity").Return(minChan)
-	mockLM.On("CheckOnChainLiquidity", mock.Anything, lspBalanceLoki).Return(nil)
+	mockSufficientLiquidity(mockLM)
 	mockOS.On("GetFeeParamsMenu", mock.Anything, mock.Anything).Return([]*core.OpeningFeeParams{{
 		MinFeeMloki: minFeeMloki, Proportional: proportional,
 	}}, nil)
@@ -244,12 +245,12 @@ func TestHandleLsps1CreateOrder_FeeMatchesUnifiedFeeFunction(t *testing.T) {
 	mockLC.On("AddHoldInvoice", mock.Anything, mock.MatchedBy(func(req *invoicesrpc.AddHoldInvoiceRequest) bool {
 		return req.Value == wantFeeLoki // clientBalance is 0, so order total == fee
 	})).Return(&invoicesrpc.AddHoldInvoiceResp{PaymentRequest: "lnbc..."}, nil)
-	mockOS.On("RegisterLsps1Order", mock.MatchedBy(func(order *core.Lsps1Order) bool {
+	mockLM.On("ReserveLsps1Order", mock.Anything, mock.MatchedBy(func(order *core.Lsps1Order) bool {
 		return order.FeeTotalLoki == wantFeeLoki
-	})).Return(nil)
+	})).Return(true, nil)
 	mockNotif.On("NotifyOrderStateChanged", mock.Anything, mock.Anything, "CREATED", "", "").Return(true, nil)
 
-	server := NewHandlers(Config{Lsps1MaxPendingOrders: 10}, mockLC, mockNS, mockOS, mockLM, mockNotif)
+	server := NewHandlers(Config{Lsps1MaxPendingOrders: 10}, mockLC, mockNS, mockOS, mockLM, mockNotif, nil)
 
 	reqData := map[string]interface{}{
 		"client_balance_loki":            "0",

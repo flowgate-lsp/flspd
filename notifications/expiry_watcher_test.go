@@ -55,7 +55,13 @@ func (f *fakeExpiryLightningClient) ListPeers() ([]*lightning.Peer, error)     {
 func (f *fakeExpiryLightningClient) SubscribeInvoices() (<-chan *lightning.InvoiceUpdate, <-chan error, error) {
 	return nil, nil, nil
 }
+func (f *fakeExpiryLightningClient) SubscribeSingleInvoice(context.Context, []byte) (<-chan *lightning.InvoiceUpdate, <-chan error, error) {
+	return nil, nil, nil
+}
 func (f *fakeExpiryLightningClient) LookupInvoiceState(context.Context, string) (lightning.InvoiceState, error) {
+	return 0, nil
+}
+func (f *fakeExpiryLightningClient) LookupInvoiceStateByHash(context.Context, []byte) (lightning.InvoiceState, error) {
 	return 0, nil
 }
 func (f *fakeExpiryLightningClient) SettleInvoice(context.Context, []byte) error { return nil }

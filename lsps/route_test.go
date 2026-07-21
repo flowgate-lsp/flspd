@@ -25,7 +25,7 @@ func TestRoute_DispatchesToCorrectHandler(t *testing.T) {
 	// to a handler whose *own* early-return (invalid params) is enough to
 	// prove dispatch without needing the rest of that handler's mocks.
 	mockOS.On("GetLsps5Webhooks", "01").Return([]*core.Lsps5Webhook{}, nil).Maybe()
-	server := NewHandlers(Config{}, new(MockLndClient), mockNS, mockOS, new(MockLiquidityManager), new(MockNotificationService))
+	server := NewHandlers(Config{}, new(MockLndClient), mockNS, mockOS, new(MockLiquidityManager), new(MockNotificationService), nil)
 
 	tests := []struct {
 		method        string

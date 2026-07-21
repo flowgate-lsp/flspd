@@ -139,6 +139,19 @@ func (m *MockLightningClient) LookupInvoiceState(ctx context.Context, paymentReq
 	return state, args.Error(1)
 }
 
+func (m *MockLightningClient) LookupInvoiceStateByHash(ctx context.Context, paymentHash []byte) (lightning.InvoiceState, error) {
+	args := m.Called(ctx, paymentHash)
+	state, _ := args.Get(0).(lightning.InvoiceState)
+	return state, args.Error(1)
+}
+
+func (m *MockLightningClient) SubscribeSingleInvoice(ctx context.Context, paymentHash []byte) (<-chan *lightning.InvoiceUpdate, <-chan error, error) {
+	args := m.Called(ctx, paymentHash)
+	updates, _ := args.Get(0).(<-chan *lightning.InvoiceUpdate)
+	errs, _ := args.Get(1).(<-chan error)
+	return updates, errs, args.Error(2)
+}
+
 func (m *MockLightningClient) SettleInvoice(ctx context.Context, preimage []byte) error {
 	args := m.Called(ctx, preimage)
 	return args.Error(0)

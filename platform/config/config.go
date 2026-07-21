@@ -32,6 +32,16 @@ type NodeConfig struct {
 	// Number of blocks after which an opened channel is considered confirmed.
 	TargetConf uint32 `json:"targetConf,string" yaml:"targetConf"`
 
+	// ReferenceFeeratePerVByte (loki/vbyte) is the on-chain feerate this
+	// node's opening-fee floor (ChannelMinimumFeeMloki / the fee menu's
+	// MinFeeMloki) is calibrated to safely absorb (Phase 7, F-18). Used
+	// only to decide whether to honor an EXPIRED LSPS2 opening_fee_params
+	// quote: the current live feerate must be at or below this reference
+	// for the LSP to still treat honoring the stale quote as safe. Not a
+	// hard cap on channel-open fees in general -- openChannel's own
+	// TargetConf-based estimate is what actually prices the transaction.
+	ReferenceFeeratePerVByte float64 `json:"referenceFeeratePerVByte,string,omitempty" yaml:"referenceFeeratePerVByte,omitempty"`
+
 	// Minimum number of confirmations inputs for zero conf channel opens should
 	// have.
 	MinConfs *uint32 `json:"minConfs,string" yaml:"minConfs"`

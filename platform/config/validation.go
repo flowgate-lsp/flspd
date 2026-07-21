@@ -38,6 +38,17 @@ func (cfg *NodeConfig) Validate() error {
 		return fmt.Errorf("baseFeeMloki (%d) is too high (max 100000)", cfg.BaseFeeMloki)
 	}
 
+	// Phase 7, F-18: a conservative default so IsCurrentChainFeeCheaper has
+	// something real to compare against even if an operator never sets
+	// this explicitly. Deliberately not derived from ChannelMinimumFeeMloki
+	// automatically -- that's a business fee floor in mloki-per-payment,
+	// not an on-chain feerate, and conflating the two units would be
+	// exactly the kind of silent, wrong "looks calibrated but isn't"
+	// mistake this fix exists to remove.
+	if cfg.ReferenceFeeratePerVByte <= 0 {
+		cfg.ReferenceFeeratePerVByte = 20.0
+	}
+
 	// 3. LSPS1 Validation
 	if err := cfg.ValidateLsps1(); err != nil {
 		return fmt.Errorf("LSPS1 config validation failed: %w", err)

@@ -136,7 +136,7 @@ func verifyLsps1Capacity(t *testing.T, tc matrixScenario, minFloor uint64) {
 	cfg := Config{
 		Lsps1MaxPendingOrders: 5,
 	}
-	s := NewHandlers(cfg, lnd, nodes, nil, liquidity, notif)
+	s := NewHandlers(cfg, lnd, nodes, nil, liquidity, notif, nil)
 	s.openingService = store
 
 	zeroU16 := uint16(0)
@@ -164,11 +164,11 @@ func verifyLsps1Capacity(t *testing.T, tc matrixScenario, minFloor uint64) {
 
 	nodes.On("GetNodes").Return([]*core.Node{{NodeConfig: config.NewNodeConfigRef(nodeConfig)}})
 	nodes.On("GetMinChannelCapacity").Return(minFloor)
-	liquidity.On("CheckOnChainLiquidity", mock.Anything, mock.Anything).Return(nil)
+	mockSufficientLiquidity(liquidity)
 	store.On("GetFeeParamsMenu", mock.Anything, mock.Anything).Return([]*core.OpeningFeeParams{}, nil)
 	store.On("CountLsps1Orders", mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
 	lnd.On("AddHoldInvoice", mock.Anything, mock.Anything).Return(&invoicesrpc.AddHoldInvoiceResp{}, nil)
-	store.On("RegisterLsps1Order", mock.Anything).Return(nil)
+	liquidity.On("ReserveLsps1Order", mock.Anything, mock.Anything).Return(true, nil)
 	notif.On("NotifyOrderStateChanged", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(true, nil)
 
 	req := Lsps1CreateOrderRequest{
@@ -198,7 +198,7 @@ func verifyLsps2Capacity(t *testing.T, tc matrixScenario, minFloor uint64) {
 	store := new(MockOpeningStore)
 
 	cfg := Config{}
-	s := NewHandlers(cfg, nil, nodes, nil, liquidity, nil)
+	s := NewHandlers(cfg, nil, nodes, nil, liquidity, nil, nil)
 	s.openingService = store
 
 	pubkeyBytes := make([]byte, 32)
@@ -217,9 +217,9 @@ func verifyLsps2Capacity(t *testing.T, tc matrixScenario, minFloor uint64) {
 
 	nodes.On("GetNodes").Return([]*core.Node{validNode})
 	nodes.On("GetMinChannelCapacity").Return(minFloor)
-	liquidity.On("CheckOnChainLiquidity", mock.Anything, mock.Anything).Return(nil)
+	mockSufficientLiquidity(liquidity)
 	store.On("ValidateOpeningFeeParams", mock.Anything, mock.Anything).Return(true)
-	store.On("RegisterLsps2Buy", mock.Anything).Return(nil)
+	liquidity.On("ReserveLsps2Buy", mock.Anything, mock.Anything).Return(true, nil)
 
 	req := Lsps2BuyParams{
 		OpeningFeeParams: Lsps2OpeningFeeParams{

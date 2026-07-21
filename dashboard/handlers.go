@@ -42,19 +42,25 @@ type Handlers struct {
 }
 
 type SummaryResponse struct {
-	NodeName         string         `json:"node_name"`
-	NodePubkey       string         `json:"node_pubkey"`
-	Version          string         `json:"version"`
-	Revenue24h       uint64         `json:"revenue_24h"`
-	LiquidityTotal   uint64         `json:"liquidity_total"`
-	LiquidityFree    uint64         `json:"liquidity_free"`
-	LiquidityBlocked uint64         `json:"liquidity_blocked"`
-	ActiveOrders     map[string]int `json:"active_orders"`
-	NodeStatus       string         `json:"node_status"`
-	SyncHeight       uint32         `json:"sync_height"`
-	UptimeScore      float64        `json:"uptime_score"`
-	RevenueTrend     string         `json:"revenue_trend"`
-	VolumeTrend      string         `json:"volume_trend"`
+	NodeName          string         `json:"node_name"`
+	NodePubkey        string         `json:"node_pubkey"`
+	NodeHost          string         `json:"node_host"`
+	Version           string         `json:"version"`
+	Revenue24h        uint64         `json:"revenue_24h"`
+	LiquidityTotal    uint64         `json:"liquidity_total"`
+	LiquidityFree     uint64         `json:"liquidity_free"`
+	LiquidityBlocked  uint64         `json:"liquidity_blocked"`
+	LiquidityOutbound uint64         `json:"liquidity_outbound"`
+	LiquidityInbound  uint64         `json:"liquidity_inbound"`
+	ActiveOrders      map[string]int `json:"active_orders"`
+	NodeStatus        string         `json:"node_status"`
+	SyncedToChain     bool           `json:"synced_to_chain"`
+	SyncHeight        uint32         `json:"sync_height"`
+	PeersConnected    uint32         `json:"peers_connected"`
+	ChannelsActive    uint32         `json:"channels_active"`
+	ChannelsPending   uint32         `json:"channels_pending"`
+	ChannelsInactive  uint32         `json:"channels_inactive"`
+	RevenueTrend      string         `json:"revenue_trend"`
 }
 
 func NewHandlers(
@@ -284,8 +290,6 @@ func (s *Handlers) handleGetSummary(req *lsps.JsonRpcRequest) *lsps.JsonRpcRespo
 	// Real Metrics for Summary
 	var revenue24h int64 = 0
 	var revenuePrev24h int64 = 0
-	var volume24h int64 = 0
-	var volumePrev24h int64 = 0
 
 	orderStates := map[string]int{
 		string(lsps.Lsps1OrderStateCreated):   0,
@@ -304,12 +308,10 @@ func (s *Handlers) handleGetSummary(req *lsps.JsonRpcRequest) *lsps.JsonRpcRespo
 		if o.CreatedAt.After(last24h) {
 			if o.OrderState == string(lsps.Lsps1OrderStateCompleted) || o.OrderState == string(lsps.Lsps1OrderStatePaid) {
 				revenue24h += o.OrderTotalLoki
-				volume24h += o.LspBalanceLoki
 			}
 		} else if o.CreatedAt.After(prev24h) {
 			if o.OrderState == string(lsps.Lsps1OrderStateCompleted) || o.OrderState == string(lsps.Lsps1OrderStatePaid) {
 				revenuePrev24h += o.OrderTotalLoki
-				volumePrev24h += o.LspBalanceLoki
 			}
 		}
 
@@ -336,37 +338,70 @@ func (s *Handlers) handleGetSummary(req *lsps.JsonRpcRequest) *lsps.JsonRpcRespo
 	}
 
 	revenueTrend := calcTrend(revenue24h, revenuePrev24h)
-	volumeTrend := calcTrend(volume24h, volumePrev24h)
 
-	// Fetch Block Height & Uptime
-	syncHeight, _ := mainNode.Client.GetBlockHeight()
-	peers, _ := mainNode.Client.ListPeers()
-	activeCount := 0
-	for _, p := range peers {
-		if p.Active {
-			activeCount++
+	// Node health: a single GetInfo() call replaces the old separate
+	// GetBlockHeight() + ListPeers() calls (the latter's only use was an
+	// "active peer" ratio that was always 100% -- LND's ListPeers RPC only
+	// ever returns already-connected peers).
+	nodeStatus := "unreachable"
+	var syncedToChain bool
+	var syncHeight uint32
+	var peersConnected, channelsActive, channelsPending, channelsInactive uint32
+
+	info, err := mainNode.Client.GetInfo()
+	if err != nil {
+		log.Warn().Err(err).Msg("Dashboard: GetInfo failed for summary")
+	} else {
+		syncedToChain = info.SyncedToChain
+		syncHeight = info.BlockHeight
+		peersConnected = info.NumPeers
+		channelsActive = info.NumActiveChannels
+		channelsPending = info.NumPendingChannels
+		channelsInactive = info.NumInactiveChannels
+		if syncedToChain {
+			nodeStatus = "online"
+		} else {
+			nodeStatus = "syncing"
 		}
 	}
-	uptimeScore := 100.0
-	if len(peers) > 0 {
-		uptimeScore = (float64(activeCount) / float64(len(peers))) * 100
+
+	// Real per-channel outbound/inbound liquidity, summed over currently
+	// active channels only (pending-open and temporarily-inactive channels
+	// aren't usable capacity yet).
+	var outboundLiquidity, inboundLiquidity uint64
+	channels, err := mainNode.Client.ListChannels()
+	if err != nil {
+		log.Warn().Err(err).Msg("Dashboard: ListChannels failed for summary")
+	} else {
+		for _, c := range channels {
+			if c.Active {
+				outboundLiquidity += uint64(c.LocalBalance)
+				inboundLiquidity += uint64(c.RemoteBalance)
+			}
+		}
 	}
 
 	// Create simplified summary
 	summary := SummaryResponse{
-		NodeName:         mainNode.NodeConfig.Load().Name,
-		NodePubkey:       mainNode.NodeConfig.Load().NodePubkey,
-		Version:          build.GetTag(),
-		Revenue24h:       uint64(revenue24h),
-		LiquidityTotal:   totalCapacity,
-		LiquidityFree:    free,
-		LiquidityBlocked: reserved,
-		ActiveOrders:     orderStates,
-		NodeStatus:       "online",
-		SyncHeight:       syncHeight,
-		UptimeScore:      uptimeScore,
-		RevenueTrend:     revenueTrend,
-		VolumeTrend:      volumeTrend,
+		NodeName:          mainNode.NodeConfig.Load().Name,
+		NodePubkey:        mainNode.NodeConfig.Load().NodePubkey,
+		NodeHost:          mainNode.NodeConfig.Load().Host,
+		Version:           build.GetTag(),
+		Revenue24h:        uint64(revenue24h),
+		LiquidityTotal:    totalCapacity,
+		LiquidityFree:     free,
+		LiquidityBlocked:  reserved,
+		LiquidityOutbound: outboundLiquidity,
+		LiquidityInbound:  inboundLiquidity,
+		ActiveOrders:      orderStates,
+		NodeStatus:        nodeStatus,
+		SyncedToChain:     syncedToChain,
+		SyncHeight:        syncHeight,
+		PeersConnected:    peersConnected,
+		ChannelsActive:    channelsActive,
+		ChannelsPending:   channelsPending,
+		ChannelsInactive:  channelsInactive,
+		RevenueTrend:      revenueTrend,
 	}
 
 	return lsps.NewJsonRpcResponse(req.Id, summary)
