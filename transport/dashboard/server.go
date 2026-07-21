@@ -11,12 +11,21 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/flowgate-lsp/flspd/lightning"
 	"github.com/flowgate-lsp/flspd/lsps"
 	"github.com/flowgate-lsp/flspd/platform/build"
+	"github.com/flowgate-lsp/flspd/ports"
 	"github.com/flowgate-lsp/flspd/transport/auth"
 	"github.com/gorilla/websocket"
 	"github.com/rs/zerolog/log"
 )
+
+// nodeReachableTimeout bounds how long /info waits on a single node's
+// GetInfo() before reporting it unreachable. /info is unauthenticated and
+// meant to be safe to poll continuously (the frontend uses it to gate the
+// login form and to show persistent node-status after login too), so a
+// hung LND connection must not be able to stall it.
+const nodeReachableTimeout = 3 * time.Second
 
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
@@ -40,16 +49,18 @@ type Router interface {
 // authorization gate, JSON-RPC dispatch via Router, and the websocket
 // upgrade/event feed. It has no dashboard business logic of its own.
 type Server struct {
-	adminPubKey string // Authorized Nostr pubkey for dashboard access
-	handlers    Router
-	hub         *Hub
+	adminPubKey  string // Authorized Nostr pubkey for dashboard access
+	handlers     Router
+	hub          *Hub
+	nodesService ports.NodesService
 }
 
-func NewServer(adminPubKey string, handlers Router) *Server {
+func NewServer(adminPubKey string, handlers Router, nodesService ports.NodesService) *Server {
 	s := &Server{
-		adminPubKey: adminPubKey,
-		handlers:    handlers,
-		hub:         NewHub(),
+		adminPubKey:  adminPubKey,
+		handlers:     handlers,
+		hub:          NewHub(),
+		nodesService: nodesService,
 	}
 	go s.hub.Run()
 	return s
@@ -122,6 +133,59 @@ func (c *Client) writePump() {
 	}
 }
 
+// NodeStatus reports one configured node's identity and whether its
+// backing LND connection is currently reachable.
+type NodeStatus struct {
+	Name      string `json:"name"`
+	Connected bool   `json:"connected"`
+}
+
+// InfoResponse is /info's body: enough for the frontend to decide whether
+// to show the login form at all, and to keep displaying node status once
+// past it.
+type InfoResponse struct {
+	Version          string       `json:"version"`
+	Commit           string       `json:"commit"`
+	DashboardEnabled bool         `json:"dashboard_enabled"`
+	Nodes            []NodeStatus `json:"nodes"`
+}
+
+func (s *Server) handleInfo(w http.ResponseWriter, _ *http.Request) {
+	configuredNodes := s.nodesService.GetNodes()
+	nodes := make([]NodeStatus, 0, len(configuredNodes))
+	for _, n := range configuredNodes {
+		nodes = append(nodes, NodeStatus{
+			Name:      n.NodeConfig.Load().Name,
+			Connected: nodeReachable(n.Client),
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(InfoResponse{
+		Version:          build.GetTag(),
+		Commit:           build.GetRevision(),
+		DashboardEnabled: s.adminPubKey != "",
+		Nodes:            nodes,
+	})
+}
+
+// nodeReachable calls GetInfo() to check the node's connection is alive,
+// bounded by nodeReachableTimeout so a hung/unreachable node can't stall
+// the (unauthenticated, frequently-polled) /info endpoint.
+func nodeReachable(client lightning.Client) bool {
+	done := make(chan bool, 1)
+	go func() {
+		_, err := client.GetInfo()
+		done <- err == nil
+	}()
+	select {
+	case ok := <-done:
+		return ok
+	case <-time.After(nodeReachableTimeout):
+		return false
+	}
+}
+
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// 0. Handle Health Check (must be before upgrade & auth)
 	if r.URL.Path == "/healthz" {
@@ -131,6 +195,16 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"version": build.GetTag(),
 			"commit":  build.GetRevision(),
 		})
+		return
+	}
+
+	// 0. Handle Info (public, no auth) -- lets the frontend know whether
+	// the dashboard is even usable (adminPubKey configured) and whether
+	// the LSP's own node(s) are reachable, so it can show a real reason
+	// instead of a login form that's guaranteed to fail, and keep showing
+	// that status after login too.
+	if r.URL.Path == "/info" {
+		s.handleInfo(w, r)
 		return
 	}
 

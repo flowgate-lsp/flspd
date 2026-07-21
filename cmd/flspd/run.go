@@ -205,7 +205,7 @@ func runLspd(cliCtx *cli.Context) error {
 		historyStore,
 		os.Getenv("NODES_CONFIG_PATH"),
 	)
-	dashSvc := transdashboard.NewServer(dashboardAdminPubkey, dashHandlers)
+	dashSvc := transdashboard.NewServer(dashboardAdminPubkey, dashHandlers, nodesService)
 
 	// Start dashboard HTTP server
 	go func() {

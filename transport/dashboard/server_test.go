@@ -3,18 +3,49 @@ package dashboard
 import (
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/flowgate-lsp/flspd/core"
+	"github.com/flowgate-lsp/flspd/lightning"
 	"github.com/flowgate-lsp/flspd/lsps"
+	"github.com/flowgate-lsp/flspd/platform/config"
 	"github.com/flowgate-lsp/flspd/transport/auth"
 	"github.com/nbd-wtf/go-nostr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// stubLndClient embeds lightning.Client (nil) so it only needs to
+// implement the one method /info's tests actually exercise; calling
+// anything else on it would nil-panic, which is fine since nothing else is
+// reachable from ServeHTTP's /info path.
+type stubLndClient struct {
+	lightning.Client
+	err error
+}
+
+func (s *stubLndClient) GetInfo() (*lightning.GetInfoResult, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	return &lightning.GetInfoResult{}, nil
+}
+
+// stubNodesService is a minimal ports.NodesService: /info's tests only
+// care about how many nodes come back and their reachability, not real
+// node-lookup or capacity behavior.
+type stubNodesService struct {
+	nodes []*core.Node
+}
+
+func (s *stubNodesService) GetNode(token string) (*core.Node, error) { return nil, nil }
+func (s *stubNodesService) GetNodes() []*core.Node                   { return s.nodes }
+func (s *stubNodesService) GetMinChannelCapacity() uint64            { return 0 }
 
 // buildAuthHeader mirrors transport/auth's own (unexported, so
 // unreachable from here) test helper of the same shape -- constructing a
@@ -63,7 +94,7 @@ func (s *stubRouter) Route(req *lsps.JsonRpcRequest) *lsps.JsonRpcResponse {
 }
 
 func TestServeHTTP_HealthzBypassesAuth(t *testing.T) {
-	srv := NewServer("adminpubkey", &stubRouter{})
+	srv := NewServer("adminpubkey", &stubRouter{}, &stubNodesService{})
 	r := httptest.NewRequest(http.MethodGet, "http://example.com/healthz", nil)
 	w := httptest.NewRecorder()
 
@@ -75,8 +106,32 @@ func TestServeHTTP_HealthzBypassesAuth(t *testing.T) {
 	assert.Equal(t, "ok", body["status"])
 }
 
+// TestServeHTTP_Info_BypassesAuthAndReportsDashboardState covers the one
+// thing the frontend actually needs /info for: knowing without any
+// credentials whether the dashboard is usable at all, plus per-node
+// reachability, so it can disable the login form and show why instead of a
+// login attempt that's guaranteed to fail.
+func TestServeHTTP_Info_BypassesAuthAndReportsDashboardState(t *testing.T) {
+	unreachable := &core.Node{Client: &stubLndClient{err: fmt.Errorf("connection refused")}}
+	unreachable.NodeConfig = config.NewNodeConfigRef(&config.NodeConfig{Name: "offline-node"})
+
+	srv := NewServer("", &stubRouter{}, &stubNodesService{nodes: []*core.Node{unreachable}})
+	r := httptest.NewRequest(http.MethodGet, "http://example.com/info", nil)
+	w := httptest.NewRecorder()
+
+	srv.ServeHTTP(w, r)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	var body InfoResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	assert.False(t, body.DashboardEnabled, "adminPubKey unset -- dashboard should report disabled")
+	require.Len(t, body.Nodes, 1)
+	assert.Equal(t, "offline-node", body.Nodes[0].Name)
+	assert.False(t, body.Nodes[0].Connected)
+}
+
 func TestServeHTTP_MissingAuthHeader_Returns401(t *testing.T) {
-	srv := NewServer("adminpubkey", &stubRouter{})
+	srv := NewServer("adminpubkey", &stubRouter{}, &stubNodesService{})
 	r := httptest.NewRequest(http.MethodPost, "http://example.com/dashboard", nil)
 	w := httptest.NewRecorder()
 
@@ -87,7 +142,7 @@ func TestServeHTTP_MissingAuthHeader_Returns401(t *testing.T) {
 
 func TestServeHTTP_ValidAuth_EmptyAdminPubkey_Returns403(t *testing.T) {
 	sk, _ := newTestKeypair(t)
-	srv := NewServer("", &stubRouter{}) // dashboard "disabled" -- no admin configured
+	srv := NewServer("", &stubRouter{}, &stubNodesService{}) // dashboard "disabled" -- no admin configured
 
 	url := "http://example.com/dashboard"
 	r := httptest.NewRequest(http.MethodGet, url, nil)
@@ -101,7 +156,7 @@ func TestServeHTTP_ValidAuth_EmptyAdminPubkey_Returns403(t *testing.T) {
 
 func TestServeHTTP_ValidAuth_WrongPubkey_Returns403(t *testing.T) {
 	sk, _ := newTestKeypair(t) // signer's pubkey != the configured admin
-	srv := NewServer("someone-elses-pubkey", &stubRouter{})
+	srv := NewServer("someone-elses-pubkey", &stubRouter{}, &stubNodesService{})
 
 	url := "http://example.com/dashboard"
 	r := httptest.NewRequest(http.MethodGet, url, nil)
@@ -121,7 +176,7 @@ func TestServeHTTP_ValidAuth_WrongPubkey_Returns403(t *testing.T) {
 func TestServeHTTP_ValidRequest_DispatchesToRouterAndReturnsResult(t *testing.T) {
 	sk, pk := newTestKeypair(t)
 	router := &stubRouter{resp: lsps.NewJsonRpcResponse(json.RawMessage(`1`), map[string]string{"ok": "true"})}
-	srv := NewServer(pk, router)
+	srv := NewServer(pk, router, &stubNodesService{})
 
 	url := "http://example.com/dashboard"
 	body := `{"jsonrpc":"2.0","method":"get_summary","id":1}`
@@ -144,7 +199,7 @@ func TestServeHTTP_ValidRequest_DispatchesToRouterAndReturnsResult(t *testing.T)
 
 func TestServeHTTP_GetRequest_MethodNotAllowed(t *testing.T) {
 	sk, pk := newTestKeypair(t)
-	srv := NewServer(pk, &stubRouter{})
+	srv := NewServer(pk, &stubRouter{}, &stubNodesService{})
 
 	url := "http://example.com/dashboard"
 	r := httptest.NewRequest(http.MethodGet, url, nil)
@@ -182,7 +237,7 @@ func TestHub_BroadcastDeliversToRegisteredClients(t *testing.T) {
 // own envelope (type/data/ts) on top of Hub.Broadcast, which the test
 // above already covers structurally.
 func TestBroadcastEvent_PublishesThroughHub(t *testing.T) {
-	srv := NewServer("adminpubkey", &stubRouter{})
+	srv := NewServer("adminpubkey", &stubRouter{}, &stubNodesService{})
 	client := &Client{hub: srv.hub, send: make(chan []byte, 1)}
 	srv.hub.register <- client
 
