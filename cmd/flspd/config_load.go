@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/flowgate-lsp/flspd/internal/adapters/lnd"
 	"github.com/flowgate-lsp/flspd/platform/config"
 	"gopkg.in/yaml.v3"
 )
@@ -41,4 +42,46 @@ func loadNodeConfigs() ([]*config.NodeConfig, error) {
 	}
 
 	return nodeConfigs, nil
+}
+
+// announceRelaysEnv names the relays NIP-LSP announcements are published to
+// (and the `r` tags), a comma-separated list (T8-2).
+const announceRelaysEnv = "NOSTR_ANNOUNCE_RELAYS"
+
+// checkAnnounceRequirements checks what announcing needs beyond the announce
+// block itself (which NodeConfig.Validate checks): relays in
+// NOSTR_ANNOUNCE_RELAYS, and for every announcing node a macaroon granting
+// signer:generate, so the node key can sign (T8-1). It returns the parsed
+// relays. A deployment with no announcing node only has the env var's
+// format checked, so nothing changes for it.
+func checkAnnounceRequirements(configs []*config.NodeConfig, relaysEnv string) ([]string, error) {
+	relays, err := config.ParseAnnounceRelays(relaysEnv)
+	if err != nil {
+		return nil, err
+	}
+	for i, cfg := range configs {
+		if err := checkNodeAnnounceRequirements(cfg, relays); err != nil {
+			return nil, fmt.Errorf("node %d (%s): %w", i, nodeLabel(cfg), err)
+		}
+	}
+	return relays, nil
+}
+
+// checkNodeAnnounceRequirements is checkAnnounceRequirements for one node,
+// also run on a dashboard hot-swap that turns announcing on.
+func checkNodeAnnounceRequirements(cfg *config.NodeConfig, relays []string) error {
+	if !cfg.Announcing() {
+		return nil
+	}
+	if len(relays) == 0 {
+		return fmt.Errorf("announcing is on but %s is empty; set it to the relays to publish to, e.g. wss://relay.example.com", announceRelaysEnv)
+	}
+	if cfg.Lnd == nil {
+		return fmt.Errorf("announcing needs an flnd block")
+	}
+	macaroon, err := cfg.Lnd.Macaroon.Resolve()
+	if err != nil {
+		return fmt.Errorf("flnd.macaroon: %w", err)
+	}
+	return lnd.CheckSignerMacaroon(macaroon)
 }

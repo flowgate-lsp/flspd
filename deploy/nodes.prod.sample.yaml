@@ -146,3 +146,26 @@
   # individually if a deployment needs something else, e.g. requiring the
   # LSP side to start with at least 1 loki:
   # lsps1MinInitialLspBalanceLoki: 1
+
+  # --- NIP-LSP announcement (kind 10735) ---
+  # Publishes this node's LSPS offer on Nostr, signed by the node key. Off
+  # by default. Needs NOSTR_ANNOUNCE_RELAYS and a flnd macaroon granting
+  # signer:generate (admin.macaroon has it). Every LSPS value announced
+  # (protocols, LSPS1 options, the LSPS2 fee menu, LSPS5 max_webhooks) comes
+  # from the live LSPS answers, never from here.
+  # announce:
+  #   enabled: true
+  #   title: "My LSP"                     # at most 40 characters, one line
+  #   content: "Inbound and JIT channels." # at most 280 characters
+  #   website: https://lsp.example.com    # https only
+  #   image: https://lsp.example.com/logo.png
+  #   operator:
+  #     pubkey: <64-hex or npub>
+  #     relay: wss://relay.example.com
+  #   languages: [en]
+  #   # Announced exactly as listed, in this order; at least one. host:port
+  #   # with an IPv4, a bracketed IPv6 or a v3 onion host. host above is not
+  #   # added. An onion-only list keeps the node's location private.
+  #   addrs:
+  #     - <56 base32 characters>.onion:9735
+  #     - 203.0.113.7:9735

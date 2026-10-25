@@ -86,6 +86,11 @@ func runLspd(cliCtx *cli.Context) error {
 		log.Fatal().Msgf("failed to load nodes config: %v", err)
 	}
 
+	announceRelays, err := checkAnnounceRequirements(nodeConfigs, os.Getenv(announceRelaysEnv))
+	if err != nil {
+		log.Fatal().Msgf("NIP-LSP announcing: %v", err)
+	}
+
 	nodes, err := initializeNodes(nodeConfigs)
 	if err != nil {
 		log.Fatal().Msgf("failed to initialize nodes: %v", err)
@@ -212,6 +217,14 @@ func runLspd(cliCtx *cli.Context) error {
 		historyStore,
 		os.Getenv("NODES_CONFIG_PATH"),
 	)
+	dashHandlers.SetAnnounce(announceRelays, func(cfg *config.NodeConfig) error {
+		return checkNodeAnnounceRequirements(cfg, announceRelays)
+	})
+	for _, cfg := range nodeConfigs {
+		if cfg.Announcing() {
+			log.Info().Msgf("NIP-LSP announcing on for %s, relays %v (publisher lands in T8-3)", nodeLabel(cfg), announceRelays)
+		}
+	}
 	dashSvc := transdashboard.NewServer(dashboardAdminPubkey, dashHandlers, nodesService)
 
 	// Start dashboard HTTP server

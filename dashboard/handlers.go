@@ -39,6 +39,20 @@ type Handlers struct {
 	openingStore   ports.OpeningStore
 	historyStore   history.Store
 	configPath     string // Path to nodes.yaml for persistence
+
+	// NIP-LSP announcing (T8-2): the relays from NOSTR_ANNOUNCE_RELAYS,
+	// shown read-only, and the check a config update that turns announcing
+	// on must pass (relays set, macaroon grants signer:generate).
+	announceRelays []string
+	announceCheck  func(cfg *config.NodeConfig) error
+}
+
+// SetAnnounce gives the handlers the announce relays and the extra check run
+// on a config update that turns announcing on. Without it, such an update is
+// checked by NodeConfig.Validate only.
+func (s *Handlers) SetAnnounce(relays []string, check func(cfg *config.NodeConfig) error) {
+	s.announceRelays = append([]string(nil), relays...)
+	s.announceCheck = check
 }
 
 type SummaryResponse struct {
@@ -594,8 +608,13 @@ func (s *Handlers) handleGetConfig(req *lsps.JsonRpcRequest) *lsps.JsonRpcRespon
 		log.Error().Err(err).Msg("Dashboard: failed to prepare config for response")
 		return lsps.NewJsonRpcErrorResponse(req.Id, -32603, "Internal error", nil)
 	}
+	relays := s.announceRelays
+	if relays == nil {
+		relays = []string{}
+	}
 	return lsps.NewJsonRpcResponse(req.Id, map[string]interface{}{
-		"config": safeConfig,
+		"config":          safeConfig,
+		"announce_relays": relays,
 	})
 }
 
@@ -630,6 +649,16 @@ func (s *Handlers) handleUpdateConfig(req *lsps.JsonRpcRequest) *lsps.JsonRpcRes
 	newConfig.FlspdPrivateKey = current.FlspdPrivateKey
 	newConfig.Tokens = current.Tokens
 	newConfig.Lnd = current.Lnd
+
+	// Announcing needs more than a valid announce block: relays and a
+	// macaroon that lets the node key sign (T8-1/T8-2). The check reads the
+	// preserved flnd block above, never anything from the request.
+	if s.announceCheck != nil && newConfig.Announcing() {
+		if err := s.announceCheck(&newConfig); err != nil {
+			log.Error().Err(err).Msg("Dashboard: announce requirements not met")
+			return lsps.NewJsonRpcErrorResponse(req.Id, -32602, "Validation failed", err.Error())
+		}
+	}
 
 	// 2. Persist to file first (if configPath is set).
 	// This ensures we don't update memory if persistence fails.

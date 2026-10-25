@@ -647,3 +647,93 @@ func TestNodeConfig_ConcurrentReadWriteNoRace(t *testing.T) {
 	close(stop)
 	wg.Wait()
 }
+
+func announceTestNode() *core.Node {
+	return &core.Node{
+		NodeConfig: config.NewNodeConfigRef(&config.NodeConfig{
+			Name:       "Node A",
+			NodePubkey: "02aaa...",
+			TargetConf: 6,
+			Lnd:        &config.LndConfig{Address: "flnd:10005", Macaroon: config.InlineSecret("0102")},
+		}),
+	}
+}
+
+func updateConfigRequest(t *testing.T, cfg config.NodeConfig) *lsps.JsonRpcRequest {
+	t.Helper()
+	body, err := json.Marshal(struct {
+		Config config.NodeConfig `json:"config"`
+	}{cfg})
+	assert.NoError(t, err)
+	return &lsps.JsonRpcRequest{Id: json.RawMessage(`1`), Method: "update_config", Params: body}
+}
+
+// TestHandleUpdateConfig_AnnounceChecks covers T8-2's hot-swap path: the
+// announce block is validated, and turning announcing on also runs the
+// announce check against the node's preserved flnd block.
+func TestHandleUpdateConfig_AnnounceChecks(t *testing.T) {
+	node := announceTestNode()
+	mockNodes := new(MockNodesService)
+	mockNodes.On("GetNodes").Return([]*core.Node{node})
+	s := NewHandlers(mockNodes, nil, nil, nil, "")
+
+	var checked *config.NodeConfig
+	s.SetAnnounce([]string{"wss://relay.example.com"}, func(cfg *config.NodeConfig) error {
+		checked = cfg
+		return fmt.Errorf("flnd.macaroon lacks signer:generate")
+	})
+
+	// No addr while enabled: refused by Validate, before the check.
+	resp := s.handleUpdateConfig(updateConfigRequest(t, config.NodeConfig{
+		Name: "Node A", TargetConf: 6,
+		Announce: &config.AnnounceConfig{Enabled: true},
+	}))
+	assert.NotNil(t, resp.Error)
+	assert.Nil(t, checked)
+
+	// Valid block, failing check: refused, and the check saw the preserved flnd block.
+	resp = s.handleUpdateConfig(updateConfigRequest(t, config.NodeConfig{
+		Name: "Node A", TargetConf: 6,
+		Announce: &config.AnnounceConfig{Enabled: true, Addrs: []string{"203.0.113.7:9735"}},
+	}))
+	assert.NotNil(t, resp.Error)
+	if assert.NotNil(t, checked) {
+		assert.Equal(t, "flnd:10005", checked.Lnd.Address)
+	}
+	assert.Nil(t, node.NodeConfig.Load().Announce, "refused update must not be applied")
+
+	// Announcing off: the check is not run, update applies.
+	checked = nil
+	resp = s.handleUpdateConfig(updateConfigRequest(t, config.NodeConfig{
+		Name: "Node A", TargetConf: 6,
+		Announce: &config.AnnounceConfig{Enabled: false, Title: "Draft"},
+	}))
+	assert.Nil(t, resp.Error)
+	assert.Nil(t, checked)
+	assert.Equal(t, "Draft", node.NodeConfig.Load().Announce.Title)
+
+	// Check passes: update applies with the addrs exactly as entered.
+	s.SetAnnounce([]string{"wss://relay.example.com"}, func(*config.NodeConfig) error { return nil })
+	addrs := []string{"[2001:db8::1]:9735", "203.0.113.7:9735"}
+	resp = s.handleUpdateConfig(updateConfigRequest(t, config.NodeConfig{
+		Name: "Node A", TargetConf: 6,
+		Announce: &config.AnnounceConfig{Enabled: true, Addrs: addrs},
+	}))
+	assert.Nil(t, resp.Error)
+	assert.Equal(t, addrs, node.NodeConfig.Load().Announce.Addrs)
+}
+
+func TestHandleGetConfig_AnnounceRelays(t *testing.T) {
+	mockNodes := new(MockNodesService)
+	mockNodes.On("GetNodes").Return([]*core.Node{announceTestNode()})
+	s := NewHandlers(mockNodes, nil, nil, nil, "")
+
+	raw, err := json.Marshal(s.handleGetConfig(&lsps.JsonRpcRequest{Id: json.RawMessage(`1`), Method: "get_config"}).Result)
+	assert.NoError(t, err)
+	assert.Contains(t, string(raw), `"announce_relays":[]`)
+
+	s.SetAnnounce([]string{"wss://relay.example.com"}, nil)
+	raw, err = json.Marshal(s.handleGetConfig(&lsps.JsonRpcRequest{Id: json.RawMessage(`1`), Method: "get_config"}).Result)
+	assert.NoError(t, err)
+	assert.Contains(t, string(raw), `"announce_relays":["wss://relay.example.com"]`)
+}

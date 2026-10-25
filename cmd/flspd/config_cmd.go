@@ -64,6 +64,9 @@ var configCheckCommand = cli.Command{
 				}
 			}
 		}
+		if _, err := checkAnnounceRequirements(configs, os.Getenv(announceRelaysEnv)); err != nil {
+			return err
+		}
 		fmt.Fprintf(os.Stdout, "OK: %d node(s) configured, all valid.\n", len(configs))
 		return nil
 	},
