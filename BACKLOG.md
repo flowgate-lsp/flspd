@@ -43,7 +43,7 @@ number-soup and then get reorganized a second time.
 | 5 | Config model + secrets-by-reference | New model shipped behind compat shim | ✅ T5-1..T5-7 done (secrets-by-reference, unit/fee/channel-size model, profiles, CLI tooling, Settings.tsx re-skin — frontend not browser-verified, no automation tooling available) |
 | 6 | Repo structure / arbo migration | Tree matches target layout, build green throughout | ✅ Done. T6-1..T6-3 (format/ folded into common/, internal/adapters/ introduced, common/ split into core/ports/services/); T6-4 (rpc/→api/proto/rpc/, config/→platform/config/, build/→platform/build/, auth/→transport/auth/, notifications/ proto split→api/proto/notifications/, common/logger.go+log_enums.go→platform/logging/, notifications/server.go transport classification resolved "stays put", lsps/→lsps+transport/lsps/ and dashboard/→dashboard+transport/dashboard/ splits both landed on the real transport-vs-logic seam, verified live against devnet for lsps/); T6-5 (configs/examples/, test/itest/, deploy/, web/ — deploy/+web/ landed on explicit user go-ahead, stashed+reapplied someone else's uncommitted dev-tooling edits with re-derived paths) — all sub-items done. |
 | 7 | LSPS1/LSPS2 liquidity & expiration redesign | T7-1..T7-14 merged, F-15..F-24 closed | 🟡 Mostly done (2026-07-21) — T7-1..T7-5, T7-7..T7-9, T7-11, T7-13, T7-14 implemented + unit/integration tested (F-15..F-20, F-22..F-24 closed). Still open: T7-6's retention/archival half, T7-10 (dashboard backend), T7-12 (reconciliation job). See Phase 7 below |
-| 8 | NIP-LSP announcement (kind 10735) | T8-1..T8-5 merged; announcement verifies against the node key and matches the live LSPS answers | 🟡 In progress — T8-1 (node signer) in review. See Phase 8 below |
+| 8 | NIP-LSP announcement (kind 10735) | T8-1..T8-5 merged; announcement verifies against the node key and matches the live LSPS answers | 🟡 In progress — T8-1 (node signer) and T8-2 (announce config) in review. See Phase 8 below |
 | — | Performance backlog (parallel, non-blocking) | — | ✅ P-3 verified as no-op (never called hot), nothing to do; P-4 done — split `Notify`/`NotifyAsync` on the real sync-vs-fire-and-forget seam; P-2 done — cached peer↔scid map off the existing peer/channel-event subscriptions; P-1 done for its `GetChannel` half (`WaitChannelPointActive`, verified live); its `QueryRoutes` half turned into the LSPS2 zero-conf race investigation itself (see Phase 4) — now fully resolved end-to-end (2026-07-16), see Phase 4's entry. All items verified live against the devnet where the code path allowed it. |
 
 ---
@@ -2509,8 +2509,22 @@ builder and checker come from nmilat's `niplsp` package (T8-5).
 
 ### T8-2 — Announce config and dashboard (M)
 
-`NodeConfig.Announce`, its validation at load and on hot-swap,
-`NOSTR_ANNOUNCE_RELAYS`, the macaroon check, and the dashboard fields.
+- `NodeConfig.Announce` (`platform/config/announce.go`): `enabled` (default
+  off), `title` (40 characters, one line), `content` (280), https `website`
+  and `image`, `operator` (`pubkey` hex or npub, `relay`), ISO-639-1
+  `languages`, `addrs`. Addrs are announced exactly as entered and in order
+  (IPv4, bracketed IPv6 or v3 onion `host:port`; never rewritten, `host` not
+  added); at least one while enabled. Checked in `NodeConfig.Validate`, so at
+  load, in `flspd config check` and on every dashboard hot-swap.
+- `NOSTR_ANNOUNCE_RELAYS` (comma list of ws/wss URLs). When any node
+  announces, start-up and `config check` refuse an empty list or a macaroon
+  without `signer:generate`; the dashboard runs the same check on an update
+  that turns announcing on.
+- Dashboard (Settings → Connect): "Announce on Nostr" switch, the fields,
+  the relays read-only, local hints. Not browser-verified.
+- Left for T8-3, since they need the publisher: Pause/Resume and Unlist
+  (`status` `paused`/`closed`), the last published event (id, time,
+  expiry) and per-relay acceptance.
 
 ### T8-3 — Publisher service (M)
 

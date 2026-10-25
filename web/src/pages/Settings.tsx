@@ -4,7 +4,8 @@ import { DualRangeSlider } from '../components/DualRangeSlider';
 import {
     Settings as SettingsIcon, Save, RefreshCw, Zap, Shield, Globe,
     Loader2, AlertCircle, CheckCircle2, HelpCircle, ArrowRightLeft,
-    Network, Clock, Percent, Scale, Activity, SlidersHorizontal, Sparkles
+    Network, Clock, Percent, Scale, Activity, SlidersHorizontal, Sparkles,
+    Megaphone, RadioTower
 } from 'lucide-react';
 import { useSettings } from '../hooks/useSettings';
 import { useUnit, type DisplayUnit } from '../contexts/UnitContext';
@@ -13,6 +14,10 @@ import { computeOpeningFeeLoki } from '../lib/feeCalc';
 import { motion, AnimatePresence } from 'framer-motion';
 import { CurrencyConverterModal } from '../components/CurrencyConverterModal';
 import { InfoModal } from '../components/InfoModal';
+import {
+  toAnnounceForm, fromAnnounceForm, announceHints, charCount,
+  TITLE_MAX, CONTENT_MAX, type AnnounceForm,
+} from '../lib/announce';
 
 type Tab = 'connect' | 'business' | 'advanced';
 
@@ -189,7 +194,8 @@ function withTieredDefaults(cfg: any): any {
 }
 
 export const Settings: React.FC = () => {
-  const { config, loading, saving, error, refreshConfig, updateConfig } = useSettings();
+  const { config, announceRelays, loading, saving, error, refreshConfig, updateConfig } = useSettings();
+  const [announceForm, setAnnounceForm] = useState<AnnounceForm>(toAnnounceForm(null));
   const { unit, setUnit } = useUnit();
   const [activeTab, setActiveTab] = useState<Tab>((localStorage.getItem('settings_tab') as Tab) || 'connect');
   const [formData, setFormData] = useState<any>(null);
@@ -201,6 +207,7 @@ export const Settings: React.FC = () => {
   useEffect(() => {
     if (config) {
       setFormData(withTieredDefaults(config));
+      setAnnounceForm(toAnnounceForm(config.announce));
     }
   }, [config]);
 
@@ -217,6 +224,9 @@ export const Settings: React.FC = () => {
     });
   };
 
+  const setAnnounce = (patch: Partial<AnnounceForm>) =>
+    setAnnounceForm((prev) => ({ ...prev, ...patch }));
+
   const handleProfileChange = (newProfile: string) => {
     setFormData((prev: any) => ({
       ...prev,
@@ -226,7 +236,7 @@ export const Settings: React.FC = () => {
   };
 
   const handleSave = async () => {
-    const success = await updateConfig(formData);
+    const success = await updateConfig({ ...formData, announce: fromAnnounceForm(announceForm) });
     if (success) {
       setShowSuccess(true);
       setTimeout(() => setShowSuccess(false), 3000);
@@ -380,6 +390,77 @@ export const Settings: React.FC = () => {
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-10">
                     <Input label="Display Name" icon={Activity} explanation="The friendly name for your LSP shown in the UI and to clients." value={formData?.name} onChange={(v) => handleInputChange('name', v)} placeholder="e.g. My Flowgate LSP" onInfo={(l, e) => setInfoModal({ label: l, explanation: e })} />
                     <Input label="Public Host" icon={Network} explanation="The public host and port for your LSP node. Must be reachable by clients." value={formData?.host} onChange={(v) => handleInputChange('host', v)} placeholder="e.g. 1.2.3.4:9735" onInfo={(l, e) => setInfoModal({ label: l, explanation: e })} />
+                  </div>
+                </GlassCard>
+
+                <GlassCard className="lg:col-span-2">
+                  <SectionHeader title="Announce on Nostr" subtitle="NIP-LSP announcement, signed by the node key" icon={Megaphone} />
+                  <div className="space-y-10">
+                    <div className="flex items-center justify-between gap-6 p-4 bg-white/5 border border-outline-variant rounded-2xl">
+                      <div>
+                        <p className="text-sm font-black text-white">Announce this node</p>
+                        <p className="text-[11px] text-on-surface-variant mt-1 leading-relaxed">
+                          Publishes the LSPS offer (protocols, LSPS1 options, the LSPS2 fee menu) so wallets can find this LSP. The offer always comes from the live LSPS answers; the fields below only describe the LSP and say where to reach it.
+                        </p>
+                      </div>
+                      <Switch checked={announceForm.enabled} onChange={(v) => setAnnounce({ enabled: v })} />
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-10">
+                      <div>
+                        <Input label="Title" icon={Activity} explanation={`The LSP's name, one line, at most ${TITLE_MAX} characters. Wallets show it as a claim, next to the node id.`} value={announceForm.title} onChange={(v) => setAnnounce({ title: v })} placeholder="e.g. My Flowgate LSP" onInfo={(l, e) => setInfoModal({ label: l, explanation: e })} />
+                        <p className={cn("text-[10px] font-mono mt-2 px-1", charCount(announceForm.title) > TITLE_MAX ? "text-error" : "text-on-surface-variant/60")}>{charCount(announceForm.title)} / {TITLE_MAX}</p>
+                      </div>
+                      <Input label="Website" icon={Globe} explanation="An https URL for the LSP." value={announceForm.website} onChange={(v) => setAnnounce({ website: v })} placeholder="https://lsp.example.com" onInfo={(l, e) => setInfoModal({ label: l, explanation: e })} />
+                      <Input label="Logo URL" icon={Globe} explanation="An https URL of a logo. Wallets load it only when the user asks." value={announceForm.image} onChange={(v) => setAnnounce({ image: v })} placeholder="https://lsp.example.com/logo.png" onInfo={(l, e) => setInfoModal({ label: l, explanation: e })} />
+                      <Input label="Languages" icon={Globe} explanation="ISO-639-1 codes, comma-separated, e.g. en, fr." value={announceForm.languages} onChange={(v) => setAnnounce({ languages: v })} placeholder="en, fr" onInfo={(l, e) => setInfoModal({ label: l, explanation: e })} />
+                      <Input label="Operator Pubkey" icon={Shield} explanation="Your own Nostr pubkey (hex or npub), so buyers can reach the operator." value={announceForm.operatorPubkey} onChange={(v) => setAnnounce({ operatorPubkey: v })} placeholder="npub1... or 64 hex" onInfo={(l, e) => setInfoModal({ label: l, explanation: e })} />
+                      <Input label="Operator Relay" icon={RadioTower} explanation="A wss:// relay where your operator pubkey can be found." value={announceForm.operatorRelay} onChange={(v) => setAnnounce({ operatorRelay: v })} placeholder="wss://relay.example.com" onInfo={(l, e) => setInfoModal({ label: l, explanation: e })} />
+                    </div>
+
+                    <div className="space-y-3">
+                      <label className="text-[10px] font-black text-on-surface-variant uppercase tracking-[0.2em] px-1">Description</label>
+                      <textarea
+                        value={announceForm.content}
+                        onChange={(e) => setAnnounce({ content: e.target.value })}
+                        rows={3}
+                        placeholder="Inbound channels and just-in-time channels."
+                        className="w-full bg-surface-container-lowest/80 border border-outline-variant rounded-2xl p-4 text-sm text-white font-mono placeholder:text-white/10 focus:outline-none focus:border-primary/40 focus:ring-4 focus:ring-primary/5 transition-all duration-500"
+                      />
+                      <p className={cn("text-[10px] font-mono px-1", charCount(announceForm.content) > CONTENT_MAX ? "text-error" : "text-on-surface-variant/60")}>{charCount(announceForm.content)} / {CONTENT_MAX}</p>
+                    </div>
+
+                    <div className="space-y-3">
+                      <label className="text-[10px] font-black text-on-surface-variant uppercase tracking-[0.2em] px-1">Node Addresses</label>
+                      <textarea
+                        value={announceForm.addrs}
+                        onChange={(e) => setAnnounce({ addrs: e.target.value })}
+                        rows={3}
+                        placeholder={"<56 characters>.onion:9735\n203.0.113.7:9735"}
+                        className="w-full bg-surface-container-lowest/80 border border-outline-variant rounded-2xl p-4 text-sm text-white font-mono placeholder:text-white/10 focus:outline-none focus:border-primary/40 focus:ring-4 focus:ring-primary/5 transition-all duration-500"
+                      />
+                      <p className="text-[11px] text-on-surface-variant px-1 leading-relaxed">
+                        One host:port per line: IPv4, bracketed IPv6 or onion. Announced exactly as written, in this order; at least one is needed. Public Host above is not added. An onion-only list keeps the node's location private.
+                      </p>
+                    </div>
+
+                    <div className="p-4 bg-primary/5 border border-primary/20 rounded-2xl flex items-start gap-4">
+                      <RadioTower className="w-6 h-6 text-primary/60 shrink-0" />
+                      <div className="text-[11px] text-on-surface-variant leading-relaxed">
+                        <p className="font-black text-white mb-1">Relays (NOSTR_ANNOUNCE_RELAYS)</p>
+                        {announceRelays.length > 0 ? (
+                          <ul className="font-mono space-y-0.5">{announceRelays.map((r) => <li key={r}>{r}</li>)}</ul>
+                        ) : (
+                          <p>None set. Announcing needs NOSTR_ANNOUNCE_RELAYS in flspd's environment, and an flnd macaroon with signer:generate.</p>
+                        )}
+                      </div>
+                    </div>
+
+                    {announceHints(announceForm).length > 0 && (
+                      <ul className="p-4 rounded-2xl bg-tertiary/10 border border-tertiary/20 text-[11px] text-tertiary space-y-1">
+                        {announceHints(announceForm).map((h) => <li key={h}>{h}</li>)}
+                      </ul>
+                    )}
                   </div>
                 </GlassCard>
 

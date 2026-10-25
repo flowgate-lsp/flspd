@@ -5,6 +5,8 @@ import { DashboardAPI } from '../lib/api';
 export const useSettings = () => {
   const { user, getAuthHeader } = useAuth();
   const [config, setConfig] = useState<any>(null);
+  // NOSTR_ANNOUNCE_RELAYS, read-only (server env), for the announce card.
+  const [announceRelays, setAnnounceRelays] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -19,6 +21,7 @@ export const useSettings = () => {
       setLoading(true);
       const data = await api.getConfig();
       setConfig(data.config);
+      setAnnounceRelays(Array.isArray(data.announce_relays) ? data.announce_relays : []);
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -47,5 +50,5 @@ export const useSettings = () => {
     }
   }, [user]);
 
-  return { config, loading, saving, error, refreshConfig, updateConfig };
+  return { config, announceRelays, loading, saving, error, refreshConfig, updateConfig };
 };
