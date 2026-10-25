@@ -225,6 +225,11 @@ func runLspd(cliCtx *cli.Context) error {
 			log.Info().Msgf("NIP-LSP announcing on for %s, relays %v (publisher lands in T8-3)", nodeLabel(cfg), announceRelays)
 		}
 	}
+	// Pause/Resume/Unlist (T8-2). The publisher (T8-3) replaces this hook
+	// with a republish.
+	dashHandlers.SetAnnounceState(postgres.NewAnnounceStateStore(pool), func(st *core.AnnounceState) {
+		log.Info().Msgf("NIP-LSP announcement status of %x is %s", st.NodeID, st.Status)
+	})
 	dashSvc := transdashboard.NewServer(dashboardAdminPubkey, dashHandlers, nodesService)
 
 	// Start dashboard HTTP server

@@ -7,6 +7,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/flowgate-lsp/flspd/core"
 	"github.com/flowgate-lsp/flspd/history"
 	"github.com/flowgate-lsp/flspd/lightning"
 	"github.com/flowgate-lsp/flspd/lsps"
@@ -45,6 +46,19 @@ type Handlers struct {
 	// on must pass (relays set, macaroon grants signer:generate).
 	announceRelays []string
 	announceCheck  func(cfg *config.NodeConfig) error
+
+	// Pause/Resume/Unlist state (T8-2) and the hook called after every
+	// applied action, changed or not (T8-3's publisher republishes when the
+	// status differs from what it last published).
+	announceState         ports.AnnounceStateStore
+	onAnnounceStateChange func(state *core.AnnounceState)
+}
+
+// SetAnnounceState gives the handlers the announcement status store and an
+// optional hook called after every applied Pause/Resume/Unlist action.
+func (s *Handlers) SetAnnounceState(store ports.AnnounceStateStore, onChange func(state *core.AnnounceState)) {
+	s.announceState = store
+	s.onAnnounceStateChange = onChange
 }
 
 // SetAnnounce gives the handlers the announce relays and the extra check run
@@ -112,6 +126,10 @@ func (s *Handlers) Route(req *lsps.JsonRpcRequest) *lsps.JsonRpcResponse {
 		return s.handleGetConfig(req)
 	case "update_config":
 		return s.handleUpdateConfig(req)
+	case "get_announce_state":
+		return s.handleGetAnnounceState(req)
+	case "set_announce_state":
+		return s.handleSetAnnounceState(req)
 	case "list_peers":
 		return s.handleListPeers(req)
 	case "list_jit_channels":
