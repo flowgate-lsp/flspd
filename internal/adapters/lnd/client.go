@@ -16,6 +16,7 @@ import (
 	"github.com/flokiorg/flnd/lnrpc/chainrpc"
 	"github.com/flokiorg/flnd/lnrpc/invoicesrpc"
 	"github.com/flokiorg/flnd/lnrpc/routerrpc"
+	"github.com/flokiorg/flnd/lnrpc/signrpc"
 	"github.com/flokiorg/go-flokicoin/chaincfg/chainhash"
 	"github.com/flokiorg/go-flokicoin/wire"
 	"github.com/flowgate-lsp/flspd/lightning"
@@ -31,6 +32,7 @@ type LndClient struct {
 	routerClient        routerrpc.RouterClient
 	invoicesClient      invoicesrpc.InvoicesClient
 	chainNotifierClient chainrpc.ChainNotifierClient
+	signerClient        signrpc.SignerClient
 	conn                *grpc.ClientConn
 	listenerCtx         context.Context
 	listenerCancel      context.CancelFunc
@@ -110,11 +112,13 @@ func NewLndClient(conf *config.LndConfig) (*LndClient, error) {
 	routerClient := routerrpc.NewRouterClient(conn)
 	invoicesClient := invoicesrpc.NewInvoicesClient(conn)
 	chainNotifierClient := chainrpc.NewChainNotifierClient(conn)
+	signerClient := signrpc.NewSignerClient(conn)
 	return &LndClient{
 		client:              client,
 		routerClient:        routerClient,
 		invoicesClient:      invoicesClient,
 		chainNotifierClient: chainNotifierClient,
+		signerClient:        signerClient,
 		conn:                conn,
 		peersubs:            make(map[string]map[uint64]chan struct{}),
 		chansubs:            make(map[string]map[uint64]chan struct{}),
