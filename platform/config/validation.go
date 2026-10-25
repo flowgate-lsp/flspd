@@ -59,6 +59,11 @@ func (cfg *NodeConfig) Validate() error {
 		return fmt.Errorf("JIT config validation failed: %w", err)
 	}
 
+	// 4. NIP-LSP announce block (T8-2).
+	if err := cfg.Announce.Validate(); err != nil {
+		return err
+	}
+
 	return nil
 }
 

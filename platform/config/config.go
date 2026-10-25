@@ -166,6 +166,10 @@ type NodeConfig struct {
 	// additionalChannelCapacity, and the LSPS1/JIT min/max balance fields.
 	ChannelSize *ChannelSizeConfig `json:"channel_size,omitempty" yaml:"channel_size,omitempty"`
 
+	// NIP-LSP announcement settings (T8-2). Nil or enabled: false means this
+	// node publishes nothing. See announce.go.
+	Announce *AnnounceConfig `json:"announce,omitempty" yaml:"announce,omitempty"`
+
 	// Set this field to connect to an LND node.
 	Lnd *LndConfig `json:"flnd,omitempty" yaml:"flnd,omitempty"`
 }
