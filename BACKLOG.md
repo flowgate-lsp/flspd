@@ -2522,9 +2522,21 @@ builder and checker come from nmilat's `niplsp` package (T8-5).
   that turns announcing on.
 - Dashboard (Settings → Connect): "Announce on Nostr" switch, the fields,
   the relays read-only, local hints. Not browser-verified.
-- Left for T8-3, since they need the publisher: Pause/Resume and Unlist
-  (`status` `paused`/`closed`), the last published event (id, time,
-  expiry) and per-relay acceptance.
+- `operator.relay` is required whenever `operator.pubkey` is set (NIP-LSP
+  `p` = pubkey then relay hint).
+- Announcement status (open/paused/closed) is runtime state in
+  `public.announce_state` (migration 000009), not YAML; a node with no row is
+  open. `core.NextAnnounceStatus`: pause (refused while closed), resume
+  (re-lists a closed node), unlist. Applied under a row lock. Dashboard API
+  `get_announce_state` / `set_announce_state {action}` and Pause/Resume/
+  Unlist buttons; a change hook that T8-3's publisher replaces with a
+  republish.
+- Protocol list (F8-Q1): `lsps.SupportedProtocols` always lists 1, lists 2
+  only while JIT is enabled and 5 only while an LSPS5 transport is enabled.
+  LSPS0 `list_protocols` answers with it; the announcement's `protocol`
+  tags will too.
+- Left for T8-3, since they need the publisher: the last published event
+  (id, time, expiry) and per-relay acceptance.
 
 ### T8-3 — Publisher service (M)
 
