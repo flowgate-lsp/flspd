@@ -534,6 +534,7 @@ func initializeNodes(configs []*config.NodeConfig) ([]*core.Node, error) {
 			EciesPrivateKey: eciesPrivateKey,
 			EciesPublicKey:  eciesPublicKey,
 			Client:          client,
+			NodeKeySigner:   client,
 			NodeId:          nodeId,
 			Tokens:          cfg.Tokens,
 		}

@@ -43,6 +43,7 @@ number-soup and then get reorganized a second time.
 | 5 | Config model + secrets-by-reference | New model shipped behind compat shim | ✅ T5-1..T5-7 done (secrets-by-reference, unit/fee/channel-size model, profiles, CLI tooling, Settings.tsx re-skin — frontend not browser-verified, no automation tooling available) |
 | 6 | Repo structure / arbo migration | Tree matches target layout, build green throughout | ✅ Done. T6-1..T6-3 (format/ folded into common/, internal/adapters/ introduced, common/ split into core/ports/services/); T6-4 (rpc/→api/proto/rpc/, config/→platform/config/, build/→platform/build/, auth/→transport/auth/, notifications/ proto split→api/proto/notifications/, common/logger.go+log_enums.go→platform/logging/, notifications/server.go transport classification resolved "stays put", lsps/→lsps+transport/lsps/ and dashboard/→dashboard+transport/dashboard/ splits both landed on the real transport-vs-logic seam, verified live against devnet for lsps/); T6-5 (configs/examples/, test/itest/, deploy/, web/ — deploy/+web/ landed on explicit user go-ahead, stashed+reapplied someone else's uncommitted dev-tooling edits with re-derived paths) — all sub-items done. |
 | 7 | LSPS1/LSPS2 liquidity & expiration redesign | T7-1..T7-14 merged, F-15..F-24 closed | 🟡 Mostly done (2026-07-21) — T7-1..T7-5, T7-7..T7-9, T7-11, T7-13, T7-14 implemented + unit/integration tested (F-15..F-20, F-22..F-24 closed). Still open: T7-6's retention/archival half, T7-10 (dashboard backend), T7-12 (reconciliation job). See Phase 7 below |
+| 8 | NIP-LSP announcement (kind 10735) | T8-1..T8-5 merged; announcement verifies against the node key and matches the live LSPS answers | 🟡 In progress — T8-1 (node signer) in review. See Phase 8 below |
 | — | Performance backlog (parallel, non-blocking) | — | ✅ P-3 verified as no-op (never called hot), nothing to do; P-4 done — split `Notify`/`NotifyAsync` on the real sync-vs-fire-and-forget seam; P-2 done — cached peer↔scid map off the existing peer/channel-event subscriptions; P-1 done for its `GetChannel` half (`WaitChannelPointActive`, verified live); its `QueryRoutes` half turned into the LSPS2 zero-conf race investigation itself (see Phase 4) — now fully resolved end-to-end (2026-07-16), see Phase 4's entry. All items verified live against the devnet where the code path allowed it. |
 
 ---
@@ -2472,6 +2473,57 @@ above.
       takes live HTLC traffic (`cmd/flspd/run.go`)
 - [x] T7-14: compute each HTLC's own forward amount outside the
       `payHashGroup` singleflight's shared critical section (F-23)
+
+---
+
+## Phase 8 — NIP-LSP announcement (kind 10735)
+
+**Trigger:** buyers find flspd only through a `pubkey@host` string. NIP-LSP
+(ohstr/nips) lets each node announce its LSPS offer on Nostr in one
+replaceable kind-10735 event signed by the node key; lokihub builds its LSP
+list from these announcements. Only LSPS step data plus reach and display is
+announced, never flspd's own settings. The plan with the source → tag
+mapping lives in `docs/private/SPEC-SYNC-PLAN.md` (not tracked). The event
+builder and checker come from nmilat's `niplsp` package (T8-5).
+
+### T8-1 — Node signer (S)
+
+- `lightning.AnnouncementPayload`: a NIP-01 serialization checked to be the
+  canonical form of a kind-10735 event whose pubkey is the node's x-only key.
+  Only `NewAnnouncementPayload` builds one, and `lightning.NodeKeySigner`
+  takes nothing else, so no other message reaches the node key's Schnorr
+  signer (NIP-LSP §Security Considerations).
+- flnd adapter: `signrpc.SignMessage` with `schnorr_sig`, key family 6 index
+  0, no double hash, no tag: BIP-340 over SHA-256(serialization), the event id.
+- `services.NewAnnouncementSigner(node)` → `ports.AnnouncementSigner`
+  (`PubKey()`, `SignPayload(ctx, payload)`, the shape of niplsp's injected
+  node signer); verifies each signature against the node key before
+  returning it.
+- `lnd.CheckSignerMacaroon`: reads the macaroon's permissions offline and
+  requires `signer:generate` (or `uri:/signrpc.Signer/SignMessage`); wired
+  into config loading for announcing nodes in T8-2.
+- Tests: the NIP-LSP example event's id reproduces; refusals (other kind,
+  other author, non-canonical bytes); fake signer verified with go-nostr for
+  `02` and `03` node ids; request fields; baked test macaroons. The devnet
+  itest (sign on a real flnd, verify with go-nostr) is still to do.
+
+### T8-2 — Announce config and dashboard (M)
+
+`NodeConfig.Announce`, its validation at load and on hot-swap,
+`NOSTR_ANNOUNCE_RELAYS`, the macaroon check, and the dashboard fields.
+
+### T8-3 — Publisher service (M)
+
+Build with `niplsp`, sign (T8-1), publish to `NOSTR_ANNOUNCE_RELAYS`;
+republish on change, Pause/Resume/Unlist and every 7 days.
+
+### T8-4 — Self-check (S)
+
+Parse each published event and compare it with the live LSPS answers.
+
+### T8-5 — Dependency and release (S)
+
+Pin nmilat (`niplsp`), devnet sample with announcing on, release notes.
 
 ---
 
