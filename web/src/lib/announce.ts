@@ -88,3 +88,44 @@ export function announceHints(f: AnnounceForm): string[] {
   }
   return hints;
 }
+
+// --- Announcement status (Pause/Resume/Unlist), stored by the server ---
+
+export type AnnounceStatus = 'open' | 'paused' | 'closed';
+export type AnnounceAction = 'pause' | 'resume' | 'unlist';
+
+export interface AnnounceState {
+  node_pubkey: string;
+  enabled: boolean;
+  status: AnnounceStatus;
+  updated_at: string | null;
+  relays: string[];
+}
+
+/**
+ * The actions the server accepts from each status (core.NextAnnounceStatus):
+ * pause only while open, resume while paused or unlisted (re-listing it),
+ * unlist while not already unlisted.
+ */
+export function availableActions(status: AnnounceStatus): AnnounceAction[] {
+  switch (status) {
+    case 'open':
+      return ['pause', 'unlist'];
+    case 'paused':
+      return ['resume', 'unlist'];
+    case 'closed':
+      return ['resume'];
+  }
+}
+
+export const STATUS_LABEL: Record<AnnounceStatus, string> = {
+  open: 'Open: taking orders',
+  paused: 'Paused: no new orders for now',
+  closed: 'Unlisted: stopped selling',
+};
+
+export const ACTION_LABEL: Record<AnnounceAction, string> = {
+  pause: 'Pause',
+  resume: 'Resume',
+  unlist: 'Unlist',
+};

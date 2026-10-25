@@ -70,6 +70,15 @@ export class DashboardAPI {
     return this.request('update_config', { config });
   }
 
+  // NIP-LSP announcement status (T8-2): open, paused or closed.
+  getAnnounceState() {
+    return this.request('get_announce_state');
+  }
+
+  setAnnounceState(action: 'pause' | 'resume' | 'unlist') {
+    return this.request('set_announce_state', { action });
+  }
+
   getOrderDetail(orderId: string) {
     return this.request('get_order_detail', { order_id: orderId });
   }

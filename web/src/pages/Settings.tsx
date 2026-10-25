@@ -8,6 +8,7 @@ import {
     Megaphone, RadioTower
 } from 'lucide-react';
 import { useSettings } from '../hooks/useSettings';
+import { useAnnounceState } from '../hooks/useAnnounceState';
 import { useUnit, type DisplayUnit } from '../contexts/UnitContext';
 import { formatAmount, formatInput, cn } from '../lib/utils';
 import { computeOpeningFeeLoki } from '../lib/feeCalc';
@@ -17,6 +18,7 @@ import { InfoModal } from '../components/InfoModal';
 import {
   toAnnounceForm, fromAnnounceForm, announceHints, charCount,
   TITLE_MAX, CONTENT_MAX, type AnnounceForm,
+  availableActions, STATUS_LABEL, ACTION_LABEL, type AnnounceAction,
 } from '../lib/announce';
 
 type Tab = 'connect' | 'business' | 'advanced';
@@ -196,6 +198,14 @@ function withTieredDefaults(cfg: any): any {
 export const Settings: React.FC = () => {
   const { config, announceRelays, loading, saving, error, refreshConfig, updateConfig } = useSettings();
   const [announceForm, setAnnounceForm] = useState<AnnounceForm>(toAnnounceForm(null));
+  const announceState = useAnnounceState();
+
+  const handleAnnounceAction = async (action: AnnounceAction) => {
+    if (action === 'unlist' && !window.confirm('Unlist this LSP? Wallets will be told it stopped selling. Resume lists it again.')) {
+      return;
+    }
+    await announceState.act(action);
+  };
   const { unit, setUnit } = useUnit();
   const [activeTab, setActiveTab] = useState<Tab>((localStorage.getItem('settings_tab') as Tab) || 'connect');
   const [formData, setFormData] = useState<any>(null);
@@ -238,6 +248,7 @@ export const Settings: React.FC = () => {
   const handleSave = async () => {
     const success = await updateConfig({ ...formData, announce: fromAnnounceForm(announceForm) });
     if (success) {
+      void announceState.refresh();
       setShowSuccess(true);
       setTimeout(() => setShowSuccess(false), 3000);
     }
@@ -405,6 +416,43 @@ export const Settings: React.FC = () => {
                       </div>
                       <Switch checked={announceForm.enabled} onChange={(v) => setAnnounce({ enabled: v })} />
                     </div>
+
+                    {announceState.state && (
+                      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-4 bg-white/5 border border-outline-variant rounded-2xl">
+                        <div>
+                          <p className="text-[10px] font-black text-on-surface-variant uppercase tracking-[0.2em]">Status</p>
+                          <p className={cn("text-sm font-black mt-1",
+                            announceState.state.status === 'open' ? "text-secondary" : announceState.state.status === 'paused' ? "text-tertiary" : "text-error")}>
+                            {STATUS_LABEL[announceState.state.status]}
+                          </p>
+                          <p className="text-[10px] font-mono text-on-surface-variant/60 mt-1">
+                            {announceState.state.updated_at ? `Changed ${new Date(announceState.state.updated_at).toLocaleString()}` : 'Never changed'}
+                            {!announceState.state.enabled && ' · announcing is off, so nothing is published'}
+                          </p>
+                        </div>
+                        <div className="flex gap-2">
+                          {availableActions(announceState.state.status).map((action) => (
+                            <button
+                              key={action}
+                              type="button"
+                              disabled={announceState.busy}
+                              onClick={() => handleAnnounceAction(action)}
+                              className={cn(
+                                "px-5 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest border transition-all disabled:opacity-40",
+                                action === 'unlist'
+                                  ? "border-error/40 text-error hover:bg-error/10"
+                                  : "border-primary/40 text-primary hover:bg-primary/10"
+                              )}
+                            >
+                              {ACTION_LABEL[action]}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {announceState.error && (
+                      <p className="p-4 rounded-2xl bg-error/10 border border-error/20 text-[11px] text-error">{announceState.error}</p>
+                    )}
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-10">
                       <div>

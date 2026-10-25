@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { toAnnounceForm, fromAnnounceForm, announceHints, charCount } from './announce';
+import { toAnnounceForm, fromAnnounceForm, announceHints, charCount, availableActions } from './announce';
 
 describe('announce form', () => {
   it('round-trips a full block, keeping addrs exactly and in order', () => {
@@ -50,5 +50,13 @@ describe('announce form', () => {
     const f = toAnnounceForm({ enabled: false });
     f.operatorPubkey = 'c6047f9441ed7d6d3045406e95c07cd85c778e4b8cef3ca7abac09b95c709ee5';
     expect(announceHints(f)).toEqual(['An operator pubkey needs a relay (wss://).']);
+  });
+});
+
+describe('announcement status actions', () => {
+  it('mirrors the server transitions', () => {
+    expect(availableActions('open')).toEqual(['pause', 'unlist']);
+    expect(availableActions('paused')).toEqual(['resume', 'unlist']);
+    expect(availableActions('closed')).toEqual(['resume']);
   });
 });
