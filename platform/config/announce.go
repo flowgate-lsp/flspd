@@ -54,6 +54,7 @@ type AnnounceOperator struct {
 	// normalized to hex by Validate.
 	Pubkey string `json:"pubkey" yaml:"pubkey"`
 	// Relay is a ws:// or wss:// relay where the operator can be found.
+	// Required with Pubkey.
 	Relay string `json:"relay,omitempty" yaml:"relay,omitempty"`
 }
 
@@ -159,11 +160,14 @@ func (o *AnnounceOperator) validate() error {
 		return fmt.Errorf("pubkey: not a valid x-only public key")
 	}
 
+	// NIP-LSP's `p` tag is the pubkey then a relay hint, so the hint is
+	// required with the pubkey.
 	o.Relay = strings.TrimSpace(o.Relay)
-	if o.Relay != "" {
-		if err := CheckRelayURL(o.Relay); err != nil {
-			return fmt.Errorf("relay: %w", err)
-		}
+	if o.Relay == "" {
+		return fmt.Errorf("relay: required with pubkey (the p tag is the pubkey then a relay hint)")
+	}
+	if err := CheckRelayURL(o.Relay); err != nil {
+		return fmt.Errorf("relay: %w", err)
 	}
 	return nil
 }

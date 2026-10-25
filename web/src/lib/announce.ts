@@ -82,6 +82,7 @@ export function announceHints(f: AnnounceForm): string[] {
     if (url.trim() && !url.trim().startsWith('https://')) hints.push(`${label} must be an https:// URL.`);
   }
   if (f.operatorRelay.trim() && !f.operatorPubkey.trim()) hints.push('An operator relay needs an operator pubkey.');
+  if (f.operatorPubkey.trim() && !f.operatorRelay.trim()) hints.push('An operator pubkey needs a relay (wss://).');
   if (f.enabled && f.addrs.split('\n').every((l) => l === '')) {
     hints.push('Add at least one address: announcing needs one.');
   }

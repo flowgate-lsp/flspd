@@ -415,7 +415,7 @@ export const Settings: React.FC = () => {
                       <Input label="Logo URL" icon={Globe} explanation="An https URL of a logo. Wallets load it only when the user asks." value={announceForm.image} onChange={(v) => setAnnounce({ image: v })} placeholder="https://lsp.example.com/logo.png" onInfo={(l, e) => setInfoModal({ label: l, explanation: e })} />
                       <Input label="Languages" icon={Globe} explanation="ISO-639-1 codes, comma-separated, e.g. en, fr." value={announceForm.languages} onChange={(v) => setAnnounce({ languages: v })} placeholder="en, fr" onInfo={(l, e) => setInfoModal({ label: l, explanation: e })} />
                       <Input label="Operator Pubkey" icon={Shield} explanation="Your own Nostr pubkey (hex or npub), so buyers can reach the operator." value={announceForm.operatorPubkey} onChange={(v) => setAnnounce({ operatorPubkey: v })} placeholder="npub1... or 64 hex" onInfo={(l, e) => setInfoModal({ label: l, explanation: e })} />
-                      <Input label="Operator Relay" icon={RadioTower} explanation="A wss:// relay where your operator pubkey can be found." value={announceForm.operatorRelay} onChange={(v) => setAnnounce({ operatorRelay: v })} placeholder="wss://relay.example.com" onInfo={(l, e) => setInfoModal({ label: l, explanation: e })} />
+                      <Input label="Operator Relay" icon={RadioTower} explanation="A wss:// relay where your operator pubkey can be found. Required with the pubkey." value={announceForm.operatorRelay} onChange={(v) => setAnnounce({ operatorRelay: v })} placeholder="wss://relay.example.com" onInfo={(l, e) => setInfoModal({ label: l, explanation: e })} />
                     </div>
 
                     <div className="space-y-3">

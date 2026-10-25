@@ -45,4 +45,10 @@ describe('announce form', () => {
     expect(hints).toHaveLength(4);
     expect(hints.join(' ')).toContain('at least one address');
   });
+
+  it('asks for a relay with an operator pubkey', () => {
+    const f = toAnnounceForm({ enabled: false });
+    f.operatorPubkey = 'c6047f9441ed7d6d3045406e95c07cd85c778e4b8cef3ca7abac09b95c709ee5';
+    expect(announceHints(f)).toEqual(['An operator pubkey needs a relay (wss://).']);
+  });
 });

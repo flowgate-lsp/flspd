@@ -161,7 +161,7 @@
   #   image: https://lsp.example.com/logo.png
   #   operator:
   #     pubkey: <64-hex or npub>
-  #     relay: wss://relay.example.com
+  #     relay: wss://relay.example.com    # required with pubkey
   #   languages: [en]
   #   # Announced exactly as listed, in this order; at least one. host:port
   #   # with an IPv4, a bracketed IPv6 or a v3 onion host. host above is not
