@@ -4,21 +4,65 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/flowgate-lsp/flspd/core"
+	"github.com/flowgate-lsp/flspd/platform/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func TestHandleLsps0ListProtocols(t *testing.T) {
-	server := &Handlers{}
+func TestSupportedProtocols(t *testing.T) {
+	jitOn := &config.NodeConfig{JitEnabled: true}
+	jitOff := &config.NodeConfig{JitEnabled: false}
+	https := Config{EnableLsps5Https: true}
+	nostr := Config{EnableLsps5Nostr: true}
+
+	cases := []struct {
+		name string
+		cfg  *config.NodeConfig
+		c    Config
+		want []int
+	}{
+		{"all on", jitOn, Config{EnableLsps5Https: true, EnableLsps5Nostr: true}, []int{1, 2, 5}},
+		{"jit off drops 2", jitOff, https, []int{1, 5}},
+		{"nostr only keeps 5", jitOn, nostr, []int{1, 2, 5}},
+		{"no lsps5 transport drops 5", jitOn, Config{}, []int{1, 2}},
+		{"only lsps1", jitOff, Config{}, []int{1}},
+		{"no node config is jit off", nil, https, []int{1, 5}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, SupportedProtocols(tc.cfg, tc.c))
+		})
+	}
+}
+
+func listProtocols(t *testing.T, server *Handlers) []int {
+	t.Helper()
 	req := &JsonRpcRequest{Id: json.RawMessage(`"list-protocols-id"`), Method: "lsps0.list_protocols"}
-
 	resp := server.handleLsps0ListProtocols(req)
-
 	require.NotNil(t, resp)
 	assert.Nil(t, resp.Error)
 	result, ok := resp.Result.(map[string][]int)
 	require.True(t, ok)
-	assert.Equal(t, []int{1, 2, 5}, result["protocols"])
+	return result["protocols"]
+}
+
+func TestHandleLsps0ListProtocols(t *testing.T) {
+	ref := config.NewNodeConfigRef(&config.NodeConfig{JitEnabled: true})
+	mockNodes := new(MockNodesService)
+	mockNodes.On("GetNodes").Return([]*core.Node{{NodeConfig: ref}})
+	server := &Handlers{nodesService: mockNodes, config: Config{EnableLsps5Https: true}}
+
+	assert.Equal(t, []int{1, 2, 5}, listProtocols(t, server))
+
+	// A hot-swap turning JIT off is seen on the next call.
+	ref.Store(&config.NodeConfig{JitEnabled: false})
+	assert.Equal(t, []int{1, 5}, listProtocols(t, server))
+	assert.Equal(t, server.SupportedProtocols(), listProtocols(t, server))
+}
+
+func TestHandleLsps0ListProtocols_NoNodes(t *testing.T) {
+	assert.Equal(t, []int{1}, listProtocols(t, &Handlers{}))
 }
 
 func TestHandleLsps0GetInfo_WithoutNostrPubkey(t *testing.T) {

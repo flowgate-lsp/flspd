@@ -5,15 +5,15 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// handleLsps0ListProtocols returns the list of supported protocols (2 for now, soon 1 and 5)
+// handleLsps0ListProtocols returns SupportedProtocols: the protocols this
+// node offers right now (F8-Q1).
 func (s *Handlers) handleLsps0ListProtocols(req *JsonRpcRequest) *JsonRpcResponse {
 	log.Trace().
 		Str("component", string(logging.LogComponentLSPS0)).
 		Str("action", string(logging.LogActionRequest)).
 		Msg("LSPS0: Received list_protocols request")
-	// TODO: dynamically update this list as we implement more protocols
 	result := map[string][]int{
-		"protocols": {1, 2, 5},
+		"protocols": s.SupportedProtocols(),
 	}
 	log.Trace().
 		Str("component", string(logging.LogComponentLSPS0)).
