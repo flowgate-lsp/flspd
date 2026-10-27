@@ -18,7 +18,7 @@ import { InfoModal } from '../components/InfoModal';
 import {
   toAnnounceForm, fromAnnounceForm, announceHints, charCount,
   TITLE_MAX, CONTENT_MAX, type AnnounceForm,
-  availableActions, STATUS_LABEL, ACTION_LABEL, type AnnounceAction,
+  availableActions, STATUS_LABEL, STATUS_NOTE, ACTION_LABEL, type AnnounceAction,
 } from '../lib/announce';
 
 type Tab = 'connect' | 'business' | 'advanced';
@@ -201,7 +201,7 @@ export const Settings: React.FC = () => {
   const announceState = useAnnounceState();
 
   const handleAnnounceAction = async (action: AnnounceAction) => {
-    if (action === 'unlist' && !window.confirm('Unlist this LSP? Wallets will be told it stopped selling. Resume lists it again.')) {
+    if (action === 'unlist' && !window.confirm('Unlist this LSP? The announcement will tell wallets it stopped selling; flspd still accepts orders. Resume lists it again.')) {
       return;
     }
     await announceState.act(action);
@@ -429,6 +429,7 @@ export const Settings: React.FC = () => {
                             {announceState.state.updated_at ? `Changed ${new Date(announceState.state.updated_at).toLocaleString()}` : 'Never changed'}
                             {!announceState.state.enabled && ' · announcing is off, so nothing is published'}
                           </p>
+                          <p className="text-[10px] text-on-surface-variant/60 mt-1">{STATUS_NOTE}</p>
                         </div>
                         <div className="flex gap-2">
                           {availableActions(announceState.state.status).map((action) => (
