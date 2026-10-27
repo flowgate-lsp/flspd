@@ -104,6 +104,7 @@ type announceNodeState struct {
 
 	// The current signed event and what it was built from.
 	event       *nostr.Event
+	fields      []byte // the event's Fields as JSON, stored on acceptance
 	fingerprint string
 	signedAt    time.Time
 	eventStatus core.AnnounceStatus
@@ -302,8 +303,12 @@ func (s *AnnounceService) runNode(ctx context.Context, n *announceNodeState) err
 		if err := niplsp.Sign(ctx, ev, n.Signer.SignPayload); err != nil {
 			return fmt.Errorf("signing the announcement: %w", err)
 		}
+		fieldsJSON, err := json.Marshal(fields)
+		if err != nil {
+			return fmt.Errorf("encoding the announced fields: %w", err)
+		}
 		nev := toNostrEvent(ev)
-		n.event, n.fingerprint, n.signedAt = &nev, fp, now
+		n.event, n.fields, n.fingerprint, n.signedAt = &nev, fieldsJSON, fp, now
 		n.eventStatus, n.reason = status, reason
 		n.accepted, n.results, n.recorded = map[string]bool{}, map[string]core.AnnounceRelayResult{}, false
 	}
@@ -320,7 +325,7 @@ func (s *AnnounceService) runNode(ctx context.Context, n *announceNodeState) err
 	s.setError(n, nil)
 	log.Info().Msgf("NIP-LSP: published announcement %s (status %s) to %d/%d relays", n.event.ID, n.eventStatus, len(n.accepted), len(s.cfg.Relays))
 
-	if err := s.cfg.Store.MarkPublished(ctx, n.Node.NodeId, now); err != nil {
+	if err := s.cfg.Store.MarkPublished(ctx, n.Node.NodeId, now, n.fields); err != nil {
 		return fmt.Errorf("recording the publication: %w", err)
 	}
 	switch n.reason {

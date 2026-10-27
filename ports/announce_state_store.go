@@ -20,8 +20,12 @@ type AnnounceStateStore interface {
 	// MarkClosedPublished records that status closed was published, only
 	// while the node is still closed; it reports whether it recorded.
 	MarkClosedPublished(ctx context.Context, nodeID []byte, at time.Time) (bool, error)
-	// MarkPublished records that a relay accepted an announcement.
-	MarkPublished(ctx context.Context, nodeID []byte, at time.Time) error
+	// MarkPublished records that a relay accepted an announcement, and the
+	// values it announced (fields, opaque to the store).
+	MarkPublished(ctx context.Context, nodeID []byte, at time.Time, fields []byte) error
+	// SetLastCreatedAt records the created_at of the newest event signed
+	// for the node, before it is sent.
+	SetLastCreatedAt(ctx context.Context, nodeID []byte, createdAt int64) error
 	// MarkOffClosedPublished records that closed was published because
 	// announcing was switched off; ClearOffClosed forgets it when it is
 	// switched on again.

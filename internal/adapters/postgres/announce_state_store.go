@@ -28,14 +28,15 @@ func (s *AnnounceStateStore) GetAnnounceState(ctx context.Context, nodeID []byte
 	if len(nodeID) == 0 {
 		return nil, fmt.Errorf("node id required")
 	}
-	var status, block string
-	var updatedAt int64
+	var status, block, fields string
+	var updatedAt, createdAt int64
 	var closedAt, publishedAt, offClosedAt *int64
 	err := s.pool.QueryRow(ctx,
-		`SELECT status, updated_at, closed_published_at, last_published_at, off_closed_published_at, self_check_block
+		`SELECT status, updated_at, closed_published_at, last_published_at, off_closed_published_at, self_check_block,
+		        last_created_at, last_fields
 		 FROM public.announce_state WHERE node_id = $1`,
 		nodeID,
-	).Scan(&status, &updatedAt, &closedAt, &publishedAt, &offClosedAt, &block)
+	).Scan(&status, &updatedAt, &closedAt, &publishedAt, &offClosedAt, &block, &createdAt, &fields)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return &core.AnnounceState{NodeID: nodeID, Status: core.AnnounceOpen}, nil
 	}
@@ -47,6 +48,10 @@ func (s *AnnounceStateStore) GetAnnounceState(ctx context.Context, nodeID []byte
 	st.LastPublishedAt = microTime(publishedAt)
 	st.OffClosedPublishedAt = microTime(offClosedAt)
 	st.SelfCheckBlock = block
+	st.LastCreatedAt = createdAt
+	if fields != "" {
+		st.LastFields = []byte(fields)
+	}
 	return st, nil
 }
 
@@ -73,8 +78,22 @@ func (s *AnnounceStateStore) upsertColumn(ctx context.Context, nodeID []byte, co
 	return err
 }
 
-func (s *AnnounceStateStore) MarkPublished(ctx context.Context, nodeID []byte, at time.Time) error {
-	return s.upsertColumn(ctx, nodeID, "last_published_at", at.UnixMicro())
+// MarkPublished sets last_published_at and last_fields together.
+func (s *AnnounceStateStore) MarkPublished(ctx context.Context, nodeID []byte, at time.Time, fields []byte) error {
+	if len(nodeID) == 0 {
+		return fmt.Errorf("node id required")
+	}
+	_, err := s.pool.Exec(ctx,
+		`INSERT INTO public.announce_state (node_id, status, updated_at, last_published_at, last_fields)
+		 VALUES ($1, 'open', 0, $2, $3)
+		 ON CONFLICT (node_id) DO UPDATE SET last_published_at = EXCLUDED.last_published_at, last_fields = EXCLUDED.last_fields`,
+		nodeID, at.UnixMicro(), string(fields),
+	)
+	return err
+}
+
+func (s *AnnounceStateStore) SetLastCreatedAt(ctx context.Context, nodeID []byte, createdAt int64) error {
+	return s.upsertColumn(ctx, nodeID, "last_created_at", createdAt)
 }
 
 func (s *AnnounceStateStore) MarkOffClosedPublished(ctx context.Context, nodeID []byte, at time.Time) error {

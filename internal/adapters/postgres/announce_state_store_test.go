@@ -167,10 +167,16 @@ func TestAnnounceStateStore_PublisherColumns(t *testing.T) {
 	assert.Equal(t, "self-check failed: x", st.SelfCheckBlock)
 	assert.True(t, st.LastPublishedAt.IsZero())
 
-	require.NoError(t, store.MarkPublished(ctx, node, at))
+	assert.Zero(t, st.LastCreatedAt)
+	assert.Nil(t, st.LastFields)
+
+	require.NoError(t, store.SetLastCreatedAt(ctx, node, 1792713601))
+	require.NoError(t, store.MarkPublished(ctx, node, at, []byte(`{"Status":"open"}`)))
 	require.NoError(t, store.MarkOffClosedPublished(ctx, node, at.Add(time.Second)))
 	st, _ = store.GetAnnounceState(ctx, node)
 	assert.Equal(t, at.UnixMicro(), st.LastPublishedAt.UnixMicro())
+	assert.Equal(t, int64(1792713601), st.LastCreatedAt)
+	assert.JSONEq(t, `{"Status":"open"}`, string(st.LastFields))
 	assert.Equal(t, at.Add(time.Second).UnixMicro(), st.OffClosedPublishedAt.UnixMicro())
 	assert.Equal(t, "self-check failed: x", st.SelfCheckBlock, "other columns kept")
 

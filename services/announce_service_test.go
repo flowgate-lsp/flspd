@@ -125,8 +125,14 @@ func (m *memAnnounceStore) update(id []byte, f func(st *core.AnnounceState)) err
 	return nil
 }
 
-func (m *memAnnounceStore) MarkPublished(_ context.Context, id []byte, at time.Time) error {
-	return m.update(id, func(st *core.AnnounceState) { st.LastPublishedAt = at })
+func (m *memAnnounceStore) MarkPublished(_ context.Context, id []byte, at time.Time, fields []byte) error {
+	return m.update(id, func(st *core.AnnounceState) {
+		st.LastPublishedAt, st.LastFields = at, append([]byte(nil), fields...)
+	})
+}
+
+func (m *memAnnounceStore) SetLastCreatedAt(_ context.Context, id []byte, createdAt int64) error {
+	return m.update(id, func(st *core.AnnounceState) { st.LastCreatedAt = createdAt })
 }
 
 func (m *memAnnounceStore) MarkOffClosedPublished(_ context.Context, id []byte, at time.Time) error {

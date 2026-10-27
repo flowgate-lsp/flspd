@@ -54,7 +54,10 @@ func (f *fakeAnnounceStore) MarkClosedPublished(_ context.Context, nodeID []byte
 	return true, nil
 }
 
-func (f *fakeAnnounceStore) MarkPublished(context.Context, []byte, time.Time) error { return nil }
+func (f *fakeAnnounceStore) MarkPublished(context.Context, []byte, time.Time, []byte) error {
+	return nil
+}
+func (f *fakeAnnounceStore) SetLastCreatedAt(context.Context, []byte, int64) error { return nil }
 func (f *fakeAnnounceStore) MarkOffClosedPublished(context.Context, []byte, time.Time) error {
 	return nil
 }

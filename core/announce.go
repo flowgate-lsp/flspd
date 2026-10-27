@@ -79,9 +79,16 @@ type AnnounceState struct {
 	// OffClosedPublishedAt is when status closed was published because
 	// announcing was switched off; zero while on, or not yet published.
 	OffClosedPublishedAt time.Time
-	// SelfCheckBlock is why a failed self-check stopped publishing, or "".
-	// It survives restarts; only a Recheck clears it.
+	// SelfCheckBlock is why a failed self-check paused the announcement,
+	// or "". It survives restarts; only a Recheck clears it.
 	SelfCheckBlock string
+	// LastCreatedAt is the created_at (unix seconds) of the newest event
+	// signed for the node, 0 if none; the next one is signed after it.
+	LastCreatedAt int64
+	// LastFields are the announced values of the last event a relay
+	// accepted, as the publisher encoded them (niplsp Fields as JSON); nil
+	// if none. Closed is built from them when the config no longer can.
+	LastFields []byte
 }
 
 // AnnounceRelayResult is one relay's answer to a published announcement.
