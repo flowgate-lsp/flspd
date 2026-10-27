@@ -64,6 +64,14 @@ func (s *Handlers) handleLsps2GetVersions(req *JsonRpcRequest) *JsonRpcResponse 
 }
 
 func (s *Handlers) lsps2GetInfo(req *JsonRpcRequest) *JsonRpcResponse {
+	return s.lsps2GetInfoMenu(req, false)
+}
+
+// lsps2GetInfoMenu answers get_info. A token whose menu cannot be read is
+// left out for a client (the others still sell); with strict, as the
+// announcement asks (F-L4), it fails the answer instead, so a transient
+// error never publishes a shorter menu.
+func (s *Handlers) lsps2GetInfoMenu(req *JsonRpcRequest, strict bool) *JsonRpcResponse {
 	var params Lsps2GetInfoLegacyParams
 	// params might be empty or null
 	if len(req.Params) > 0 {
@@ -113,6 +121,9 @@ func (s *Handlers) lsps2GetInfo(req *JsonRpcRequest) *JsonRpcResponse {
 					Str("action", string(logging.LogActionFailure)).
 					Str("token", token).
 					Msg("LSPS2: Failed to get fee params for token")
+				if strict {
+					return NewJsonRpcErrorResponse(req.Id, -32603, "Internal error", nil)
+				}
 				continue
 			}
 

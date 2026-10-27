@@ -22,7 +22,9 @@ func (s *Handlers) LSPSAnswers() (*ports.LSPSAnswers, error) {
 		case 1:
 			a.LSPS1Info, err = resultJSON(s.handleLsps1GetInfo(&JsonRpcRequest{Id: json.RawMessage(`"announce"`), Method: "lsps1.get_info"}))
 		case 2:
-			a.LSPS2Info, err = resultJSON(s.lsps2GetInfo(&JsonRpcRequest{Id: json.RawMessage(`"announce"`), Method: "lsps2.get_info"}))
+			// Strict: a token's menu that fails to read fails the answers,
+			// rather than announcing a menu without its rows.
+			a.LSPS2Info, err = resultJSON(s.lsps2GetInfoMenu(&JsonRpcRequest{Id: json.RawMessage(`"announce"`), Method: "lsps2.get_info"}, true))
 		case 5:
 			// What set_webhook and list_webhooks answer as max_webhooks.
 			a.LSPS5, err = json.Marshal(map[string]int{"max_webhooks": s.config.Lsps5MaxWebhooks})

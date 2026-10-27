@@ -2,6 +2,7 @@ package lsps
 
 import (
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/flowgate-lsp/flspd/core"
@@ -72,4 +73,30 @@ func TestLSPSAnswers_JitOff(t *testing.T) {
 	var raw map[string]json.RawMessage
 	require.NoError(t, json.Unmarshal(a.LSPS1Info, &raw))
 	assert.Contains(t, raw, "max_channel_balance_loki")
+}
+
+// F-L4: a token's menu that fails to read fails the announcement's answers
+// (a client's get_info still leaves it out and answers).
+func TestLSPSAnswers_FailWhenATokenMenuFails(t *testing.T) {
+	cfg := &config.NodeConfig{JitEnabled: true, MinPaymentSizeMloki: 20_000_000}
+	require.NoError(t, cfg.Validate())
+	mockNodes := new(MockNodesService)
+	mockNodes.On("GetNodes").Return([]*core.Node{{NodeConfig: config.NewNodeConfigRef(cfg), Tokens: []string{"ok", "down"}}})
+	mockOS := new(MockOpeningService)
+	mockOS.On("GetFeeParamsMenu", "ok", mock.Anything).Return([]*core.OpeningFeeParams{{
+		MinFeeMloki: 2_000_000, Proportional: 4000, ValidUntil: "2026-10-27T12:00:00.000Z",
+		MinLifetime: 43200, MaxClientToSelfDelay: 10080,
+		MinPaymentSizeMloki: 20_000_000, MaxPaymentSizeMloki: 10_000_000_000, Promise: "p",
+	}}, nil)
+	mockOS.On("GetFeeParamsMenu", "down", mock.Anything).Return(([]*core.OpeningFeeParams)(nil), errors.New("db down"))
+	h := &Handlers{nodesService: mockNodes, openingService: mockOS}
+
+	_, err := h.LSPSAnswers()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "LSPS2")
+
+	resp := h.lsps2GetInfo(&JsonRpcRequest{Id: json.RawMessage(`"id"`)})
+	require.Nil(t, resp.Error)
+	menu := resp.Result.(map[string]interface{})["opening_fee_params_menu"].([]*Lsps2OpeningFeeParams)
+	assert.Len(t, menu, 1, "a client still gets the rows that read")
 }
