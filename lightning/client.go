@@ -18,6 +18,11 @@ type GetInfoResult struct {
 	NumPendingChannels  uint32
 	NumInactiveChannels uint32
 	NumPeers            uint32
+	// Chain and Network are the node's chain name (e.g. "flokicoin") and
+	// network (mainnet, testnet, signet, regtest, ...) from GetInfo's
+	// chains; empty when the node reports none.
+	Chain   string
+	Network string
 }
 
 type Peer struct {

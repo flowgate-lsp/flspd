@@ -404,7 +404,15 @@ func (c *LndClient) GetInfo() (*lightning.GetInfoResult, error) {
 		return nil, err
 	}
 
+	var chain, network string
+	if len(info.Chains) > 0 && info.Chains[0] != nil {
+		chain = info.Chains[0].Chain
+		network = info.Chains[0].Network
+	}
+
 	return &lightning.GetInfoResult{
+		Chain:               chain,
+		Network:             network,
 		Alias:               info.Alias,
 		Pubkey:              info.IdentityPubkey,
 		Version:             info.Version,
