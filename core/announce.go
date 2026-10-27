@@ -12,7 +12,8 @@ type AnnounceStatus string
 const (
 	// AnnounceOpen: the LSP takes orders. The state of a node never changed.
 	AnnounceOpen AnnounceStatus = "open"
-	// AnnouncePaused: no new orders for now (dashboard Pause).
+	// AnnouncePaused: no new orders for now (dashboard Pause). Like closed,
+	// it is what the announcement says; flspd does not refuse orders on it.
 	AnnouncePaused AnnounceStatus = "paused"
 	// AnnounceClosed: the LSP has stopped selling (dashboard Unlist). The
 	// publisher announces it once, then stops publishing.

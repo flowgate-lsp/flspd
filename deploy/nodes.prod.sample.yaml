@@ -149,8 +149,18 @@
 
   # --- NIP-LSP announcement (kind 10735) ---
   # Publishes this node's LSPS offer on Nostr, signed by the node key. Off
-  # by default. Needs NOSTR_ANNOUNCE_RELAYS and a flnd macaroon granting
-  # signer:generate (admin.macaroon has it). Every LSPS value announced
+  # by default. Needs NOSTR_ANNOUNCE_RELAYS and a flnd macaroon that may call
+  # signrpc SignMessage. admin.macaroon may, but its signer:generate also
+  # allows SignOutputRaw, ComputeInputScript and MuSig2, so flspd's "sign
+  # only kind 10735" rule is then a check in flspd, not a limit flnd
+  # enforces. Prefer a macaroon baked with the permissions flspd already
+  # uses plus the single method, without signer:generate or macaroon:*:
+  #   flncli bakemacaroon --save_to=flspd.macaroon \
+  #     info:read onchain:read onchain:write offchain:read offchain:write \
+  #     address:read address:write message:read message:write \
+  #     peers:read peers:write invoices:read invoices:write \
+  #     uri:/signrpc.Signer/SignMessage
+  # Every LSPS value announced
   # (protocols, LSPS1 options, the LSPS2 fee menu, LSPS5 max_webhooks) comes
   # from the live LSPS answers, never from here.
   # announce:

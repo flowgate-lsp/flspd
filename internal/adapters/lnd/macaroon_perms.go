@@ -61,8 +61,9 @@ func CheckSignerMacaroon(macaroonHex string) error {
 		return fmt.Errorf("checking flnd.macaroon for signer:generate: %w", err)
 	}
 	if !ok {
-		return fmt.Errorf("flnd.macaroon lacks signer:generate, which announcing on Nostr needs to sign with the node key; " +
-			"use admin.macaroon or bake one with `flncli bakemacaroon signer:generate ...` plus the permissions flspd already uses")
+		return fmt.Errorf("flnd.macaroon cannot call %s, which announcing on Nostr needs to sign with the node key; "+
+			"bake one with `flncli bakemacaroon uri:%s ...` plus the permissions flspd already uses "+
+			"(narrower than signer:generate, which admin.macaroon carries)", SignMessageURI, SignMessageURI)
 	}
 	return nil
 }

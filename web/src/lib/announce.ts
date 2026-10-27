@@ -149,11 +149,16 @@ export function availableActions(status: AnnounceStatus): AnnounceAction[] {
   }
 }
 
+// The status is what the announcement tells wallets. It changes only the
+// announcement: flspd still answers LSPS1 create_order and LSPS2 buy.
 export const STATUS_LABEL: Record<AnnounceStatus, string> = {
-  open: 'Open: taking orders',
-  paused: 'Paused: no new orders for now',
-  closed: 'Unlisted: stopped selling',
+  open: 'Open: announced as taking orders',
+  paused: 'Paused: announced as taking no new orders',
+  closed: 'Unlisted: announced as stopped selling',
 };
+
+export const STATUS_NOTE =
+  'Announcement only: flspd still accepts LSPS1 orders and LSPS2 buys from wallets that reach it.';
 
 export const ACTION_LABEL: Record<AnnounceAction, string> = {
   pause: 'Pause',
