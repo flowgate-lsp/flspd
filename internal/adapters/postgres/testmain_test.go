@@ -23,11 +23,16 @@ func TestMain(m *testing.M) {
 	if os.Getenv("SKIP_POSTGRES_TESTS") != "" {
 		os.Exit(0)
 	}
+	// os.Exit skips deferred calls, so every exit path returns from run
+	// first: the container is removed whatever fails after it started.
+	os.Exit(runWithTestPostgres(m))
+}
 
+func runWithTestPostgres(m *testing.M) int {
 	containerID, hostPort, err := startTestPostgres()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to start test postgres: %v\n", err)
-		os.Exit(1)
+		return 1
 	}
 	defer func() {
 		exec.Command("docker", "rm", "-f", containerID).Run()
@@ -37,23 +42,23 @@ func TestMain(m *testing.M) {
 
 	if err := waitForPostgres(databaseUrl, 30*time.Second); err != nil {
 		fmt.Fprintf(os.Stderr, "test postgres never became ready: %v\n", err)
-		os.Exit(1)
+		return 1
 	}
 
 	if err := Migrate(databaseUrl); err != nil {
 		fmt.Fprintf(os.Stderr, "failed to migrate test postgres: %v\n", err)
-		os.Exit(1)
+		return 1
 	}
 
 	pool, err := pgxpool.New(context.Background(), databaseUrl)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to connect to test postgres: %v\n", err)
-		os.Exit(1)
+		return 1
 	}
 	defer pool.Close()
 	testPool = pool
 
-	os.Exit(m.Run())
+	return m.Run()
 }
 
 // startTestPostgres runs a disposable postgres container on a
