@@ -183,3 +183,14 @@ func (rp *RelayPool) GetOrConnect(ctx context.Context, url string) (*nostr.Relay
 	}
 	return v.(*nostr.Relay), nil
 }
+
+// Publish sends ev to the relay at url through the pool's connection and
+// waits for the relay's OK. It is how NIP-LSP announcements are published
+// (T8-3).
+func (rp *RelayPool) Publish(ctx context.Context, url string, ev nostr.Event) error {
+	relay, err := rp.GetOrConnect(ctx, url)
+	if err != nil {
+		return err
+	}
+	return relay.Publish(ctx, ev)
+}

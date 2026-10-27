@@ -73,3 +73,38 @@ type AnnounceState struct {
 	// Unlist; zero until then, and reset by any later status change.
 	ClosedPublishedAt time.Time
 }
+
+// AnnounceRelayResult is one relay's answer to a published announcement.
+type AnnounceRelayResult struct {
+	Relay    string
+	Accepted bool
+	Error    string
+}
+
+// AnnouncePublication is the last announcement the publisher sent (T8-3).
+type AnnouncePublication struct {
+	EventID    string
+	CreatedAt  time.Time
+	Expiration time.Time
+	Status     AnnounceStatus
+	Relays     []AnnounceRelayResult
+}
+
+// AnnounceSelfCheck is the result of checking a published announcement
+// against the live LSPS answers (T8-4).
+type AnnounceSelfCheck struct {
+	CheckedAt time.Time
+	OK        bool
+	// Problems lists each difference or failed check, empty when OK.
+	Problems []string
+}
+
+// AnnouncePublisherStatus is what the dashboard shows of a node's publisher.
+type AnnouncePublisherStatus struct {
+	Last      *AnnouncePublication
+	SelfCheck *AnnounceSelfCheck
+	// Blocked is why publishing is stopped (a failed self-check), or "".
+	Blocked string
+	// LastError is the last error building, signing or publishing, or "".
+	LastError string
+}
