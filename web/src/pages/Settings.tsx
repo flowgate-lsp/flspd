@@ -499,7 +499,7 @@ export const Settings: React.FC = () => {
                         {announceRelays.length > 0 ? (
                           <ul className="font-mono space-y-0.5">{announceRelays.map((r) => <li key={r}>{r}</li>)}</ul>
                         ) : (
-                          <p>None set. Announcing needs NOSTR_ANNOUNCE_RELAYS in flspd's environment, and an flnd macaroon with signer:generate.</p>
+                          <p>None set. Announcing needs NOSTR_ANNOUNCE_RELAYS in flspd's environment, and an flnd macaroon that may call signrpc SignMessage (see nodes.prod.sample.yaml).</p>
                         )}
                       </div>
                     </div>
