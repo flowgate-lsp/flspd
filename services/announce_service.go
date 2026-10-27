@@ -293,15 +293,12 @@ func (s *AnnounceService) runNode(ctx context.Context, n *announceNodeState) err
 			return nil
 		}
 	}
-	if cfg.Announce == nil {
-		return fmt.Errorf("the announce block is gone, so status %s cannot be announced", status)
+	var fields niplsp.Fields
+	if reason != notClosing {
+		fields, err = s.closedFields(cfg, n, state)
+	} else {
+		fields, err = s.currentFields(cfg, n, status)
 	}
-
-	answers, err := n.Answers.LSPSAnswers()
-	if err != nil {
-		return fmt.Errorf("reading the LSPS answers: %w", err)
-	}
-	fields, err := s.buildFields(cfg, n, status, answers)
 	if err != nil {
 		return err
 	}
@@ -491,6 +488,39 @@ func backoffDelay(failures int, base, max time.Duration) time.Duration {
 		d = max
 	}
 	return d
+}
+
+// currentFields builds the node's Fields from its config and live answers.
+func (s *AnnounceService) currentFields(cfg *config.NodeConfig, n *announceNodeState, status core.AnnounceStatus) (niplsp.Fields, error) {
+	if cfg.Announce == nil {
+		return niplsp.Fields{}, fmt.Errorf("the announce block is gone, so status %s cannot be announced", status)
+	}
+	answers, err := n.Answers.LSPSAnswers()
+	if err != nil {
+		return niplsp.Fields{}, fmt.Errorf("reading the LSPS answers: %w", err)
+	}
+	return s.buildFields(cfg, n, status, answers)
+}
+
+// closedFields are the withdrawal's Fields: the last announced values with
+// status closed. They do not depend on the config or the live answers,
+// which may no longer build an announcement once announcing is switched off
+// (the announce block removed, addrs cleared) or the LSPS answers changed.
+// A node with no stored values (published before they were kept) is built
+// from the current config.
+func (s *AnnounceService) closedFields(cfg *config.NodeConfig, n *announceNodeState, state *core.AnnounceState) (niplsp.Fields, error) {
+	if len(state.LastFields) > 0 {
+		var f niplsp.Fields
+		err := json.Unmarshal(state.LastFields, &f)
+		if err == nil {
+			f.Status = niplsp.StatusClosed
+			f.Expiration = 0
+			f.Relays = s.cfg.Relays
+			return f, nil
+		}
+		log.Warn().Err(err).Msg("NIP-LSP: the stored announcement values do not decode; building closed from the config")
+	}
+	return s.currentFields(cfg, n, core.AnnounceClosed)
 }
 
 // buildFields maps the live answers, the announce block and the status to

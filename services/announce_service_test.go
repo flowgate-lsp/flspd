@@ -774,3 +774,62 @@ func TestAnnounceService_CreatedAtIsMonotonic(t *testing.T) {
 	assert.Equal(t, open.CreatedAt+1, f.relays.last().CreatedAt)
 	assert.Empty(t, restarted.Status(f.node.NodeId).LastError)
 }
+
+// F-M2: switching off withdraws the node even when the config or the live
+// answers can no longer build an announcement: closed is built from the
+// last announced values.
+func TestAnnounceService_SwitchOffWithdrawsFromTheLastAnnouncedValues(t *testing.T) {
+	cases := []struct {
+		name string
+		off  func(f *announceFixture, answers **ports.LSPSAnswers)
+	}{
+		{"announce block removed", func(f *announceFixture, _ **ports.LSPSAnswers) {
+			c := *f.node.NodeConfig.Load()
+			c.Announce = nil
+			f.node.NodeConfig.Store(&c)
+		}},
+		{"disabled with addrs cleared", func(f *announceFixture, _ **ports.LSPSAnswers) {
+			f.setConfig(func(c *config.NodeConfig) { c.Announce.Enabled = false; c.Announce.Addrs = nil })
+		}},
+		{"disabled with an empty LSPS2 menu", func(f *announceFixture, a **ports.LSPSAnswers) {
+			*a = &ports.LSPSAnswers{Protocols: []int{2}}
+			f.setConfig(func(c *config.NodeConfig) { c.Announce.Enabled = false })
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			answers := testAnswers(1, 2, 5)
+			f := newAnnounceFixture(t, &fakeAnswers{next: func(int) (*ports.LSPSAnswers, error) { return answers, nil }})
+			f.run()
+			open := f.relays.last()
+			require.Equal(t, "open", tagValue(open, "status"))
+
+			tc.off(f, &answers)
+			f.run()
+			require.Equal(t, 4, f.relays.count())
+			closed := f.relays.last()
+			assert.Equal(t, "closed", tagValue(closed, "status"))
+			assert.Equal(t, "203.0.113.7:9735", tagValue(closed, "addr"), "the last announced addr")
+			assert.Equal(t, tagValue(open, "lsps2_fee"), tagValue(closed, "lsps2_fee"))
+			ok, err := closed.CheckSignature()
+			require.NoError(t, err)
+			assert.True(t, ok)
+			assert.Empty(t, f.status().LastError)
+			st, _ := f.store.GetAnnounceState(context.Background(), f.node.NodeId)
+			assert.False(t, st.OffClosedPublishedAt.IsZero())
+		})
+	}
+}
+
+// F-M2: an Unlist also withdraws when the live answers no longer build.
+func TestAnnounceService_UnlistWithdrawsFromTheLastAnnouncedValues(t *testing.T) {
+	answers := testAnswers(1, 2, 5)
+	f := newAnnounceFixture(t, &fakeAnswers{next: func(int) (*ports.LSPSAnswers, error) { return answers, nil }})
+	f.run()
+	answers = &ports.LSPSAnswers{Protocols: []int{2}}
+	_, err := f.store.ApplyAnnounceAction(context.Background(), f.node.NodeId, core.AnnounceUnlist)
+	require.NoError(t, err)
+	f.run()
+	require.Equal(t, 4, f.relays.count())
+	assert.Equal(t, "closed", tagValue(f.relays.last(), "status"))
+}
