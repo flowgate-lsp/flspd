@@ -113,6 +113,34 @@ func (m *memAnnounceStore) MarkClosedPublished(_ context.Context, id []byte, at 
 	return true, nil
 }
 
+func (m *memAnnounceStore) update(id []byte, f func(st *core.AnnounceState)) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	st, ok := m.states[string(id)]
+	if !ok {
+		st = core.AnnounceState{NodeID: id, Status: core.AnnounceOpen}
+	}
+	f(&st)
+	m.states[string(id)] = st
+	return nil
+}
+
+func (m *memAnnounceStore) MarkPublished(_ context.Context, id []byte, at time.Time) error {
+	return m.update(id, func(st *core.AnnounceState) { st.LastPublishedAt = at })
+}
+
+func (m *memAnnounceStore) MarkOffClosedPublished(_ context.Context, id []byte, at time.Time) error {
+	return m.update(id, func(st *core.AnnounceState) { st.OffClosedPublishedAt = at })
+}
+
+func (m *memAnnounceStore) ClearOffClosed(_ context.Context, id []byte) error {
+	return m.update(id, func(st *core.AnnounceState) { st.OffClosedPublishedAt = time.Time{} })
+}
+
+func (m *memAnnounceStore) SetSelfCheckBlock(_ context.Context, id []byte, reason string) error {
+	return m.update(id, func(st *core.AnnounceState) { st.SelfCheckBlock = reason })
+}
+
 // fakeRelays records what each relay was sent; reject makes a relay refuse.
 type fakeRelays struct {
 	mu     sync.Mutex

@@ -28,13 +28,14 @@ func (s *AnnounceStateStore) GetAnnounceState(ctx context.Context, nodeID []byte
 	if len(nodeID) == 0 {
 		return nil, fmt.Errorf("node id required")
 	}
-	var status string
+	var status, block string
 	var updatedAt int64
-	var closedAt *int64
+	var closedAt, publishedAt, offClosedAt *int64
 	err := s.pool.QueryRow(ctx,
-		`SELECT status, updated_at, closed_published_at FROM public.announce_state WHERE node_id = $1`,
+		`SELECT status, updated_at, closed_published_at, last_published_at, off_closed_published_at, self_check_block
+		 FROM public.announce_state WHERE node_id = $1`,
 		nodeID,
-	).Scan(&status, &updatedAt, &closedAt)
+	).Scan(&status, &updatedAt, &closedAt, &publishedAt, &offClosedAt, &block)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return &core.AnnounceState{NodeID: nodeID, Status: core.AnnounceOpen}, nil
 	}
@@ -42,10 +43,50 @@ func (s *AnnounceStateStore) GetAnnounceState(ctx context.Context, nodeID []byte
 		return nil, err
 	}
 	st := stateFromRow(nodeID, core.AnnounceStatus(status), updatedAt)
-	if closedAt != nil {
-		st.ClosedPublishedAt = time.UnixMicro(*closedAt)
-	}
+	st.ClosedPublishedAt = microTime(closedAt)
+	st.LastPublishedAt = microTime(publishedAt)
+	st.OffClosedPublishedAt = microTime(offClosedAt)
+	st.SelfCheckBlock = block
 	return st, nil
+}
+
+func microTime(v *int64) time.Time {
+	if v == nil {
+		return time.Time{}
+	}
+	return time.UnixMicro(*v)
+}
+
+// upsertColumn sets one publisher column, creating the node's row as open
+// first when it has none.
+func (s *AnnounceStateStore) upsertColumn(ctx context.Context, nodeID []byte, column string, value any) error {
+	if len(nodeID) == 0 {
+		return fmt.Errorf("node id required")
+	}
+	// column is one of the fixed names below, never caller input.
+	_, err := s.pool.Exec(ctx,
+		`INSERT INTO public.announce_state (node_id, status, updated_at, `+column+`)
+		 VALUES ($1, 'open', 0, $2)
+		 ON CONFLICT (node_id) DO UPDATE SET `+column+` = EXCLUDED.`+column,
+		nodeID, value,
+	)
+	return err
+}
+
+func (s *AnnounceStateStore) MarkPublished(ctx context.Context, nodeID []byte, at time.Time) error {
+	return s.upsertColumn(ctx, nodeID, "last_published_at", at.UnixMicro())
+}
+
+func (s *AnnounceStateStore) MarkOffClosedPublished(ctx context.Context, nodeID []byte, at time.Time) error {
+	return s.upsertColumn(ctx, nodeID, "off_closed_published_at", at.UnixMicro())
+}
+
+func (s *AnnounceStateStore) ClearOffClosed(ctx context.Context, nodeID []byte) error {
+	return s.upsertColumn(ctx, nodeID, "off_closed_published_at", nil)
+}
+
+func (s *AnnounceStateStore) SetSelfCheckBlock(ctx context.Context, nodeID []byte, reason string) error {
+	return s.upsertColumn(ctx, nodeID, "self_check_block", reason)
 }
 
 // ApplyAnnounceAction locks the node's row (creating it as open first, so

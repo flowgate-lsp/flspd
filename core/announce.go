@@ -72,6 +72,15 @@ type AnnounceState struct {
 	// ClosedPublishedAt is when status closed was published for the current
 	// Unlist; zero until then, and reset by any later status change.
 	ClosedPublishedAt time.Time
+	// LastPublishedAt is when a relay last accepted an announcement of the
+	// node; zero if it never published (and so has nothing to withdraw).
+	LastPublishedAt time.Time
+	// OffClosedPublishedAt is when status closed was published because
+	// announcing was switched off; zero while on, or not yet published.
+	OffClosedPublishedAt time.Time
+	// SelfCheckBlock is why a failed self-check stopped publishing, or "".
+	// It survives restarts; only a Recheck clears it.
+	SelfCheckBlock string
 }
 
 // AnnounceRelayResult is one relay's answer to a published announcement.

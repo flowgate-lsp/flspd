@@ -54,6 +54,13 @@ func (f *fakeAnnounceStore) MarkClosedPublished(_ context.Context, nodeID []byte
 	return true, nil
 }
 
+func (f *fakeAnnounceStore) MarkPublished(context.Context, []byte, time.Time) error { return nil }
+func (f *fakeAnnounceStore) MarkOffClosedPublished(context.Context, []byte, time.Time) error {
+	return nil
+}
+func (f *fakeAnnounceStore) ClearOffClosed(context.Context, []byte) error            { return nil }
+func (f *fakeAnnounceStore) SetSelfCheckBlock(context.Context, []byte, string) error { return nil }
+
 func announceStateHandlers(t *testing.T, announcing bool) (*Handlers, *fakeAnnounceStore, *[]*core.AnnounceState) {
 	t.Helper()
 	cfg := &config.NodeConfig{Name: "Node A"}

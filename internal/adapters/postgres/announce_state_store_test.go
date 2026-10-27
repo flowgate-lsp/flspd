@@ -152,3 +152,40 @@ func TestAnnounceStateStore_ClosedPublished(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, ok)
 }
+
+func TestAnnounceStateStore_PublisherColumns(t *testing.T) {
+	ctx := context.Background()
+	store := NewAnnounceStateStore(testPool)
+	node := randomNodeID(t)
+	at := time.UnixMicro(1792713600_000000)
+
+	// Each setter works on a node with no row yet, and leaves it open.
+	require.NoError(t, store.SetSelfCheckBlock(ctx, node, "self-check failed: x"))
+	st, err := store.GetAnnounceState(ctx, node)
+	require.NoError(t, err)
+	assert.Equal(t, core.AnnounceOpen, st.Status)
+	assert.Equal(t, "self-check failed: x", st.SelfCheckBlock)
+	assert.True(t, st.LastPublishedAt.IsZero())
+
+	require.NoError(t, store.MarkPublished(ctx, node, at))
+	require.NoError(t, store.MarkOffClosedPublished(ctx, node, at.Add(time.Second)))
+	st, _ = store.GetAnnounceState(ctx, node)
+	assert.Equal(t, at.UnixMicro(), st.LastPublishedAt.UnixMicro())
+	assert.Equal(t, at.Add(time.Second).UnixMicro(), st.OffClosedPublishedAt.UnixMicro())
+	assert.Equal(t, "self-check failed: x", st.SelfCheckBlock, "other columns kept")
+
+	// A status change does not touch them.
+	_, err = store.ApplyAnnounceAction(ctx, node, core.AnnouncePause)
+	require.NoError(t, err)
+	st, _ = store.GetAnnounceState(ctx, node)
+	assert.Equal(t, core.AnnouncePaused, st.Status)
+	assert.False(t, st.OffClosedPublishedAt.IsZero())
+	assert.NotEmpty(t, st.SelfCheckBlock)
+
+	require.NoError(t, store.ClearOffClosed(ctx, node))
+	require.NoError(t, store.SetSelfCheckBlock(ctx, node, ""))
+	st, _ = store.GetAnnounceState(ctx, node)
+	assert.True(t, st.OffClosedPublishedAt.IsZero())
+	assert.Empty(t, st.SelfCheckBlock)
+	assert.Equal(t, core.AnnouncePaused, st.Status)
+}
