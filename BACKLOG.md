@@ -2557,7 +2557,24 @@ builder and checker come from nmilat's `niplsp` package (T8-5).
   (`off_closed_published_at`, migration 000011); switching it on lists it
   again. The current signed event is resent to each relay that has not
   accepted it; a refusing relay backs off from 30 s, doubling to 30 min,
-  reset on acceptance.
+  reset on acceptance and whenever the announced status changes.
+- Review fixes (2026-10-27):
+  - `closed` counts as published only once every relay accepted it, or
+    after 24 h with at least one acceptance; until then the same event is
+    resent (F-M1). A relay that answers `auth-required:` is reported as
+    needing NIP-42 AUTH, which the node key does not sign, tried every
+    30 min and not waited for (F-L5).
+  - The withdrawal is built from the Fields of the last accepted event
+    (`announce_state.last_fields`, migration 000012), so it still goes out
+    when the announce block, `addrs` or the LSPS answers no longer build
+    (F-M2).
+  - `created_at` is `max(now, last + 1)`, with the last one stored
+    (`last_created_at`) before the event is sent: a same-second status
+    change or a clock that went back never loses a created_at tie (F-M4).
+  - `LSPSAnswers` fails when a token's LSPS2 menu fails to read, rather than
+    announcing a shorter menu (F-L4).
+  - Pause/Resume/Unlist are labelled as announcement-only: flspd still takes
+    LSPS1 and LSPS2 orders whatever the status (F-L1).
 - LSPS2 methods answer Method not found while JIT is off, so the live
   answers match `list_protocols` and the announcement (F8-Q1).
 - Not done: the devnet itest (event on a local relay verifies against the
@@ -2570,9 +2587,14 @@ builder and checker come from nmilat's `niplsp` package (T8-5).
   for the node's chain and network) and `niplsp.CheckLive` against answers
   read again. A difference whose cause is a value that changed in between
   triggers a republish. Any other failure is logged, shown on the dashboard
-  and stops the node's publishing until the operator presses Recheck
+  and blocks the node until the operator presses Recheck
   (`recheck_announcement`). The block is stored (`self_check_block`), so a
-  restart keeps it. A closed withdrawal still goes out while blocked.
+  restart keeps it.
+- While blocked the node is announced as `paused` (the faulty event is
+  replaced at once) and every change, Pause, Unlist and switch-off still
+  goes out; those events are not self-checked. Recheck republishes with the
+  stored status, which is checked. An error reading the live answers is
+  retried on the next run, never stored as a block (review F-M3).
 
 ### T8-5 — Dependency and release (S)
 
@@ -2587,7 +2609,16 @@ image with an nmilat checkout as a second build context
 config, a nodes sample with announcing on, the env sample and the compose
 fragment lokihub merges, with the exact settings in its README. Once go.mod
 pins nmilat, `deploy/Dockerfile` builds the same binary and
-`Dockerfile.regtest` goes.
+`Dockerfile.regtest` goes. The regtest image pins its builder by digest and
+runs as uid 10001; the compose's `flspd-init` bakes a macaroon limited to
+flspd's permissions plus `uri:/signrpc.Signer/SignMessage` and copies
+`nodes.yaml` into a writable config directory, which the dashboard needs to
+save edits (review F-L7..F-L9).
+
+Left from the 2026-10-27 review: the fleet shape (F-L2: the protocol list
+and the dashboard's Pause/Unlist follow `nodes[0]`, and the anonymous LSPS2
+menu covers every node's tokens) and partner pricing in that menu (F-L3).
+Both predate the announcement, which repeats the live answers.
 
 ---
 
