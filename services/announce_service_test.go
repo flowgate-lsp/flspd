@@ -933,3 +933,52 @@ func TestAnnounceService_UnlistWithdrawsFromTheLastAnnouncedValues(t *testing.T)
 	require.Equal(t, 4, f.relays.count())
 	assert.Equal(t, "closed", tagValue(f.relays.last(), "status"))
 }
+
+// F-L6: a relay backing off from an older event gets a new status at once.
+func TestAnnounceService_NewStatusResetsBackoff(t *testing.T) {
+	ctx := context.Background()
+	f := newAnnounceFixture(t, constAnswers(testAnswers(1)))
+	bad := testRelays[0]
+	f.relays.setReject(map[string]bool{bad: true})
+	start := *f.now
+	for d := time.Duration(0); d <= 20*time.Minute; d += 10 * time.Second {
+		*f.now = start.Add(d)
+		f.run()
+	}
+	require.True(t, f.status().Last.Relays[0].RetryAt.After(f.now.Add(time.Minute)), "backing off for a while")
+
+	f.relays.setReject(map[string]bool{})
+	_, err := f.store.ApplyAnnounceAction(ctx, f.node.NodeId, core.AnnouncePause)
+	require.NoError(t, err)
+	tries := f.relays.tries(bad)
+	f.run()
+	assert.Equal(t, tries+1, f.relays.tries(bad), "paused sent at once")
+	assert.True(t, f.status().Last.Relays[0].Accepted)
+}
+
+// F-L5: a relay that wants NIP-42 AUTH is reported as such, tried only
+// every BackoffMax, and not waited for by a withdrawal.
+func TestAnnounceService_AuthRequiredRelay(t *testing.T) {
+	ctx := context.Background()
+	f := newAnnounceFixture(t, constAnswers(testAnswers(1)))
+	authRelay := testRelays[0]
+	pub := f.svc.cfg.Publisher
+	f.svc.cfg.Publisher = publishFunc(func(ctx context.Context, url string, ev nostr.Event) error {
+		if url == authRelay {
+			return errors.New("msg: auth-required: this relay only accepts authenticated users")
+		}
+		return pub.Publish(ctx, url, ev)
+	})
+	f.run()
+	r := f.status().Last.Relays[0]
+	assert.False(t, r.Accepted)
+	assert.Contains(t, r.Error, "requires NIP-42 AUTH")
+	assert.Equal(t, f.now.Add(DefaultAnnounceBackoffMax), r.RetryAt)
+
+	_, err := f.store.ApplyAnnounceAction(ctx, f.node.NodeId, core.AnnounceUnlist)
+	require.NoError(t, err)
+	f.run()
+	assert.Equal(t, "closed", tagValue(f.relays.last(), "status"))
+	st, _ := f.store.GetAnnounceState(ctx, f.node.NodeId)
+	assert.False(t, st.ClosedPublishedAt.IsZero(), "withdrawn from every relay that can take it")
+}

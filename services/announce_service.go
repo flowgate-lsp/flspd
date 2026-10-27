@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -131,6 +132,8 @@ type announceNodeState struct {
 	closingSince time.Time
 
 	backoff map[string]*relayBackoff // per relay, reset on success
+	// authRequired are relays that refused with auth-required: (NIP-42).
+	authRequired map[string]bool
 
 	// lastCreatedAt is the newest created_at signed in this process; the
 	// stored one covers a restart.
@@ -170,7 +173,7 @@ func NewAnnounceService(cfg AnnounceServiceConfig, nodes []AnnounceNode) *Announ
 }
 
 func newNodeState(n AnnounceNode) *announceNodeState {
-	return &announceNodeState{AnnounceNode: n, backoff: map[string]*relayBackoff{}}
+	return &announceNodeState{AnnounceNode: n, backoff: map[string]*relayBackoff{}, authRequired: map[string]bool{}}
 }
 
 // AddNode adds a node to publish for; safe while the service runs.
@@ -335,6 +338,11 @@ func (s *AnnounceService) runNode(ctx context.Context, n *announceNodeState) err
 		if err != nil {
 			return fmt.Errorf("encoding the announced fields: %w", err)
 		}
+		if n.event != nil && status != n.eventStatus {
+			// A new status goes to every relay now, not after a backoff
+			// earned by an older event.
+			n.backoff = map[string]*relayBackoff{}
+		}
 		switch {
 		case reason == notClosing:
 			n.closingSince = time.Time{}
@@ -393,11 +401,12 @@ func (s *AnnounceService) runNode(ctx context.Context, n *announceNodeState) err
 	return nil
 }
 
-// missingRelays are the relays that have not accepted the current event.
+// missingRelays are the relays that have not accepted the current event,
+// leaving out those that require AUTH and so never will.
 func (s *AnnounceService) missingRelays(n *announceNodeState) []string {
 	var missing []string
 	for _, url := range s.cfg.Relays {
-		if !n.accepted[url] {
+		if !n.accepted[url] && !n.authRequired[url] {
 			missing = append(missing, url)
 		}
 	}
@@ -440,6 +449,7 @@ func (s *AnnounceService) send(ctx context.Context, n *announceNodeState, now ti
 		if o.err == nil {
 			n.accepted[o.relay] = true
 			delete(n.backoff, o.relay)
+			delete(n.authRequired, o.relay)
 			n.results[o.relay] = core.AnnounceRelayResult{Relay: o.relay, Accepted: true}
 			continue
 		}
@@ -450,7 +460,16 @@ func (s *AnnounceService) send(ctx context.Context, n *announceNodeState, now ti
 		}
 		b.failures++
 		b.retryAt = now.Add(backoffDelay(b.failures, s.cfg.BackoffBase, s.cfg.BackoffMax))
-		n.results[o.relay] = core.AnnounceRelayResult{Relay: o.relay, Error: o.err.Error(), RetryAt: b.retryAt}
+		msg := o.err.Error()
+		if strings.Contains(msg, "auth-required:") {
+			// flspd answers no NIP-42 AUTH: the node key signs only kind
+			// 10735 (NIP-LSP §Security Considerations). Tried rarely, and
+			// not waited for by a withdrawal.
+			n.authRequired[o.relay] = true
+			b.retryAt = now.Add(s.cfg.BackoffMax)
+			msg = "the relay requires NIP-42 AUTH, which the node key does not sign; remove it from NOSTR_ANNOUNCE_RELAYS (" + msg + ")"
+		}
+		n.results[o.relay] = core.AnnounceRelayResult{Relay: o.relay, Error: msg, RetryAt: b.retryAt}
 		log.Warn().Err(o.err).Str("relay", o.relay).Msgf("NIP-LSP: relay did not accept the announcement; next try at %s", b.retryAt.UTC().Format(time.RFC3339))
 	}
 
