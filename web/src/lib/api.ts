@@ -79,6 +79,11 @@ export class DashboardAPI {
     return this.request('set_announce_state', { action });
   }
 
+  // Lifts a failed self-check's block once its cause is fixed (T8-4).
+  recheckAnnouncement() {
+    return this.request('recheck_announcement');
+  }
+
   getOrderDetail(orderId: string) {
     return this.request('get_order_detail', { order_id: orderId });
   }

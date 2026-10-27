@@ -94,12 +94,41 @@ export function announceHints(f: AnnounceForm): string[] {
 export type AnnounceStatus = 'open' | 'paused' | 'closed';
 export type AnnounceAction = 'pause' | 'resume' | 'unlist';
 
+export interface AnnounceRelayResult {
+  relay: string;
+  accepted: boolean;
+  error?: string;
+}
+
+export interface AnnouncePublisher {
+  last_event: {
+    id: string;
+    created_at: string;
+    expiration: string;
+    status: AnnounceStatus;
+    relays: AnnounceRelayResult[];
+  } | null;
+  self_check: { checked_at: string; ok: boolean; problems: string[] } | null;
+  /** Why publishing is stopped (a failed self-check), or "". */
+  blocked: string;
+  last_error: string;
+}
+
 export interface AnnounceState {
   node_pubkey: string;
   enabled: boolean;
   status: AnnounceStatus;
   updated_at: string | null;
   relays: string[];
+  publisher: AnnouncePublisher | null;
+}
+
+/** "3/4 relays accepted", or null before anything was published. */
+export function relaySummary(p: AnnouncePublisher | null): string | null {
+  const ev = p?.last_event;
+  if (!ev) return null;
+  const ok = ev.relays.filter((r) => r.accepted).length;
+  return `${ok}/${ev.relays.length} relays accepted`;
 }
 
 /**

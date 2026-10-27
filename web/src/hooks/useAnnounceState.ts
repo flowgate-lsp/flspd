@@ -39,11 +39,23 @@ export const useAnnounceState = () => {
     }
   };
 
+  const recheck = async () => {
+    try {
+      setBusy(true);
+      setError(null);
+      setState(await api.recheckAnnouncement());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   useEffect(() => {
     if (user) {
       void refresh();
     }
   }, [user, refresh]);
 
-  return { state, busy, error, refresh, act };
+  return { state, busy, error, refresh, act, recheck };
 };

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { toAnnounceForm, fromAnnounceForm, announceHints, charCount, availableActions } from './announce';
+import { toAnnounceForm, fromAnnounceForm, announceHints, charCount, availableActions, relaySummary } from './announce';
 
 describe('announce form', () => {
   it('round-trips a full block, keeping addrs exactly and in order', () => {
@@ -58,5 +58,17 @@ describe('announcement status actions', () => {
     expect(availableActions('open')).toEqual(['pause', 'unlist']);
     expect(availableActions('paused')).toEqual(['resume', 'unlist']);
     expect(availableActions('closed')).toEqual(['resume']);
+  });
+});
+
+describe('publisher summary', () => {
+  it('counts accepting relays', () => {
+    expect(relaySummary(null)).toBeNull();
+    expect(relaySummary({ last_event: null, self_check: null, blocked: '', last_error: '' })).toBeNull();
+    expect(relaySummary({
+      last_event: { id: 'ab', created_at: '', expiration: '', status: 'open',
+        relays: [{ relay: 'wss://a', accepted: true }, { relay: 'wss://b', accepted: false, error: 'blocked' }] },
+      self_check: null, blocked: '', last_error: '',
+    })).toBe('1/2 relays accepted');
   });
 });

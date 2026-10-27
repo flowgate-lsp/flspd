@@ -18,7 +18,7 @@ import { InfoModal } from '../components/InfoModal';
 import {
   toAnnounceForm, fromAnnounceForm, announceHints, charCount,
   TITLE_MAX, CONTENT_MAX, type AnnounceForm,
-  availableActions, STATUS_LABEL, ACTION_LABEL, type AnnounceAction,
+  availableActions, STATUS_LABEL, ACTION_LABEL, type AnnounceAction, relaySummary,
 } from '../lib/announce';
 
 type Tab = 'connect' | 'business' | 'advanced';
@@ -450,6 +450,59 @@ export const Settings: React.FC = () => {
                         </div>
                       </div>
                     )}
+                    {announceState.state?.publisher && (() => {
+                      const pub = announceState.state.publisher;
+                      const ev = pub.last_event;
+                      return (
+                        <div className="space-y-3">
+                          {pub.blocked && (
+                            <div className="p-4 rounded-2xl bg-error/10 border border-error/20 flex flex-col md:flex-row md:items-center justify-between gap-3">
+                              <div className="text-[11px] text-error">
+                                <p className="font-black">Publishing stopped</p>
+                                <p className="mt-1">{pub.blocked}</p>
+                                <p className="mt-1 text-on-surface-variant">Fix the cause, then recheck: the next announcement is published and checked again.</p>
+                              </div>
+                              <button type="button" disabled={announceState.busy} onClick={() => announceState.recheck()}
+                                className="px-5 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest border border-error/40 text-error hover:bg-error/10 disabled:opacity-40">
+                                Recheck
+                              </button>
+                            </div>
+                          )}
+                          {pub.last_error && (
+                            <p className="p-4 rounded-2xl bg-tertiary/10 border border-tertiary/20 text-[11px] text-tertiary">Last error: {pub.last_error}</p>
+                          )}
+                          <div className="p-4 bg-white/5 border border-outline-variant rounded-2xl text-[11px] text-on-surface-variant space-y-2">
+                            <p className="text-[10px] font-black uppercase tracking-[0.2em]">Last published</p>
+                            {ev ? (
+                              <>
+                                <p className="font-mono break-all text-white">{ev.id}</p>
+                                <p>
+                                  {STATUS_LABEL[ev.status]} · published {new Date(ev.created_at).toLocaleString()} · expires {new Date(ev.expiration).toLocaleString()}
+                                </p>
+                                <p>{relaySummary(pub)}</p>
+                                <ul className="font-mono space-y-0.5">
+                                  {ev.relays.map((r) => (
+                                    <li key={r.relay} className={r.accepted ? "text-secondary" : "text-error"}>
+                                      {r.accepted ? 'accepted' : 'refused'} · {r.relay}{r.error ? ` · ${r.error}` : ''}
+                                    </li>
+                                  ))}
+                                </ul>
+                              </>
+                            ) : (
+                              <p>Nothing published yet.</p>
+                            )}
+                            {pub.self_check && (
+                              <div className={pub.self_check.ok ? "text-secondary" : "text-error"}>
+                                <p className="font-black">Self-check {pub.self_check.ok ? 'passed' : 'found differences'} ({new Date(pub.self_check.checked_at).toLocaleString()})</p>
+                                {pub.self_check.problems.length > 0 && (
+                                  <ul className="list-disc pl-5 space-y-0.5">{pub.self_check.problems.map((p) => <li key={p}>{p}</li>)}</ul>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })()}
                     {announceState.error && (
                       <p className="p-4 rounded-2xl bg-error/10 border border-error/20 text-[11px] text-error">{announceState.error}</p>
                     )}
