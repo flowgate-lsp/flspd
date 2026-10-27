@@ -69,4 +69,7 @@ type AnnounceState struct {
 	Status AnnounceStatus
 	// UpdatedAt is when Status last changed; zero for a node never changed.
 	UpdatedAt time.Time
+	// ClosedPublishedAt is when status closed was published for the current
+	// Unlist; zero until then, and reset by any later status change.
+	ClosedPublishedAt time.Time
 }

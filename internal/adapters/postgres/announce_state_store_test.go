@@ -6,6 +6,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/flowgate-lsp/flspd/core"
 	"github.com/stretchr/testify/assert"
@@ -109,4 +110,45 @@ func TestAnnounceStateStore_ConcurrentActions(t *testing.T) {
 	st, err := store.GetAnnounceState(ctx, node)
 	require.NoError(t, err)
 	assert.Equal(t, core.AnnounceClosed, st.Status)
+}
+
+func TestAnnounceStateStore_ClosedPublished(t *testing.T) {
+	ctx := context.Background()
+	store := NewAnnounceStateStore(testPool)
+	node := randomNodeID(t)
+	at := time.UnixMicro(1792713600_000000)
+
+	ok, err := store.MarkClosedPublished(ctx, node, at)
+	require.NoError(t, err)
+	assert.False(t, ok, "an open node (no row) is not marked")
+
+	_, err = store.ApplyAnnounceAction(ctx, node, core.AnnounceUnlist)
+	require.NoError(t, err)
+	ok, err = store.MarkClosedPublished(ctx, node, at)
+	require.NoError(t, err)
+	assert.True(t, ok)
+	ok, err = store.MarkClosedPublished(ctx, node, at.Add(time.Hour))
+	require.NoError(t, err)
+	assert.False(t, ok, "marked once")
+
+	st, err := store.GetAnnounceState(ctx, node)
+	require.NoError(t, err)
+	assert.Equal(t, at.UnixMicro(), st.ClosedPublishedAt.UnixMicro())
+
+	// A no-op unlist keeps the mark; a resume clears it.
+	st, err = store.ApplyAnnounceAction(ctx, node, core.AnnounceUnlist)
+	require.NoError(t, err)
+	assert.False(t, st.ClosedPublishedAt.IsZero())
+	st, err = store.ApplyAnnounceAction(ctx, node, core.AnnounceResume)
+	require.NoError(t, err)
+	assert.True(t, st.ClosedPublishedAt.IsZero())
+	st, _ = store.GetAnnounceState(ctx, node)
+	assert.True(t, st.ClosedPublishedAt.IsZero())
+
+	// Unlisting again needs a new publish.
+	_, err = store.ApplyAnnounceAction(ctx, node, core.AnnounceUnlist)
+	require.NoError(t, err)
+	ok, err = store.MarkClosedPublished(ctx, node, at)
+	require.NoError(t, err)
+	assert.True(t, ok)
 }

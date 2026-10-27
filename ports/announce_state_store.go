@@ -2,6 +2,7 @@ package ports
 
 import (
 	"context"
+	"time"
 
 	"github.com/flowgate-lsp/flspd/core"
 )
@@ -16,4 +17,7 @@ type AnnounceStateStore interface {
 	// ApplyAnnounceAction applies action atomically (core.NextAnnounceStatus
 	// under a row lock) and returns the new state.
 	ApplyAnnounceAction(ctx context.Context, nodeID []byte, action core.AnnounceAction) (*core.AnnounceState, error)
+	// MarkClosedPublished records that status closed was published, only
+	// while the node is still closed; it reports whether it recorded.
+	MarkClosedPublished(ctx context.Context, nodeID []byte, at time.Time) (bool, error)
 }

@@ -45,6 +45,15 @@ func (f *fakeAnnounceStore) ApplyAnnounceAction(ctx context.Context, nodeID []by
 	return st, nil
 }
 
+func (f *fakeAnnounceStore) MarkClosedPublished(_ context.Context, nodeID []byte, at time.Time) (bool, error) {
+	st, ok := f.states[string(nodeID)]
+	if !ok || st.Status != core.AnnounceClosed || !st.ClosedPublishedAt.IsZero() {
+		return false, nil
+	}
+	st.ClosedPublishedAt = at
+	return true, nil
+}
+
 func announceStateHandlers(t *testing.T, announcing bool) (*Handlers, *fakeAnnounceStore, *[]*core.AnnounceState) {
 	t.Helper()
 	cfg := &config.NodeConfig{Name: "Node A"}
