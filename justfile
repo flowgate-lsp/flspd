@@ -41,6 +41,17 @@ build target="all":
         *) echo "unknown build target: {{target}} (want: backend|cli|frontend|dist|all)" >&2; exit 1 ;;
     esac
 
+# Build the image lokihub's regtest stack runs as its test LSP (LP-13; see
+# deploy/regtest/README.md). Needs an nmilat checkout carrying niplsp until
+# go.mod pins one (BACKLOG T8-5).
+# Usage: just image-regtest /path/to/nmilat [image tag]  (default flspd:regtest)
+[group('build')]
+image-regtest nmilat tag="flspd:regtest":
+    docker build -f deploy/Dockerfile.regtest \
+        --build-context nmilat={{nmilat}} \
+        --build-arg COMMIT=$(git rev-parse --short HEAD) \
+        -t {{tag}} .
+
 # Deploy the frontend to Cloudflare Workers
 [group('build')]
 deploy-frontend: (build "frontend")
