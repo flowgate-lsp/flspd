@@ -222,14 +222,24 @@ func runLspd(cliCtx *cli.Context) error {
 	})
 	for _, cfg := range nodeConfigs {
 		if cfg.Announcing() {
-			log.Info().Msgf("NIP-LSP announcing on for %s, relays %v (publisher lands in T8-3)", nodeLabel(cfg), announceRelays)
+			log.Info().Msgf("NIP-LSP announcing on for %s, relays %v", nodeLabel(cfg), announceRelays)
 		}
 	}
-	// Pause/Resume/Unlist (T8-2). The publisher (T8-3) replaces this hook
-	// with a republish.
-	dashHandlers.SetAnnounceState(postgres.NewAnnounceStateStore(pool), func(st *core.AnnounceState) {
+	// NIP-LSP announcements (T8-3/T8-4). Nodes join below, once their LSPS
+	// handlers exist; a node publishes only while its announce block is on.
+	announceStateStore := postgres.NewAnnounceStateStore(pool)
+	announceSvc := services.NewAnnounceService(services.AnnounceServiceConfig{
+		Relays:    announceRelays,
+		Store:     announceStateStore,
+		Publisher: notifications.NewRelayPool(),
+	}, nil)
+	go announceSvc.Start(ctx)
+	// Pause/Resume/Unlist (T8-2) republish at once.
+	dashHandlers.SetAnnounceState(announceStateStore, func(st *core.AnnounceState) {
 		log.Info().Msgf("NIP-LSP announcement status of %x is %s", st.NodeID, st.Status)
+		announceSvc.Trigger()
 	})
+	dashHandlers.SetAnnouncePublisher(announceSvc)
 	dashSvc := transdashboard.NewServer(dashboardAdminPubkey, dashHandlers, nodesService)
 
 	// Start dashboard HTTP server
@@ -353,6 +363,17 @@ func runLspd(cliCtx *cli.Context) error {
 		liquidityManager := lsps.NewLiquidityManager(client, openingStore)
 		lspsHandlers := lsps.NewHandlers(lspsConfig, client, nodesService, openingService, liquidityManager, dashBridge, orderWatcher)
 		go lspsHandlers.BurstLimiter().StartEvictionLoop(ctx.Done(), BurstLimiterEvictionInterval)
+		if signer, err := services.NewAnnouncementSigner(node); err != nil {
+			log.Error().Err(err).Msg("NIP-LSP: no announcement signer for node; it cannot announce")
+		} else {
+			announceSvc.AddNode(services.AnnounceNode{
+				Node:    node,
+				Signer:  signer,
+				Answers: lspsHandlers,
+				Chain:   node.Chain,
+				Network: node.Network,
+			})
+		}
 		lspsServer := translsps.NewServer(client, lspsHandlers)
 		lspsServer.Start()
 		lspsServers = append(lspsServers, lspsServer)
@@ -555,6 +576,8 @@ func initializeNodes(configs []*config.NodeConfig) ([]*core.Node, error) {
 			NodeKeySigner:   client,
 			NodeId:          nodeId,
 			Tokens:          cfg.Tokens,
+			Chain:           info.Chain,
+			Network:         info.Network,
 		}
 		nodes = append(nodes, node)
 

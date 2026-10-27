@@ -14,6 +14,10 @@ type Node struct {
 	// NodeKeySigner signs NIP-LSP announcements with the node key (T8-1);
 	// the flnd client. Only services.NewAnnouncementSigner uses it.
 	NodeKeySigner lightning.NodeKeySigner
+	// Chain and Network are the node's, from flnd GetInfo at start-up
+	// (the NIP-LSP n and network tags).
+	Chain   string
+	Network string
 	// NodeConfig is held behind an atomic ref (not a raw pointer) so
 	// concurrent readers (e.g. the interceptor's HTLC hot path) and a
 	// concurrent writer (the dashboard's config-update handler) can't
