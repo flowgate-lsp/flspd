@@ -52,6 +52,23 @@ type Handlers struct {
 	// status differs from what it last published).
 	announceState         ports.AnnounceStateStore
 	onAnnounceStateChange func(state *core.AnnounceState)
+
+	// The publisher (T8-3/T8-4): its status is shown, a config update
+	// triggers it, and recheck_announcement lifts a self-check block.
+	announcePublisher AnnouncePublisher
+}
+
+// AnnouncePublisher is what the dashboard needs of the announcement
+// publisher.
+type AnnouncePublisher interface {
+	Status(nodeID []byte) *core.AnnouncePublisherStatus
+	Recheck(nodeID []byte) bool
+	Trigger()
+}
+
+// SetAnnouncePublisher connects the announcement publisher.
+func (s *Handlers) SetAnnouncePublisher(p AnnouncePublisher) {
+	s.announcePublisher = p
 }
 
 // SetAnnounceState gives the handlers the announcement status store and an
@@ -130,6 +147,8 @@ func (s *Handlers) Route(req *lsps.JsonRpcRequest) *lsps.JsonRpcResponse {
 		return s.handleGetAnnounceState(req)
 	case "set_announce_state":
 		return s.handleSetAnnounceState(req)
+	case "recheck_announcement":
+		return s.handleRecheckAnnouncement(req)
 	case "list_peers":
 		return s.handleListPeers(req)
 	case "list_jit_channels":
@@ -722,6 +741,12 @@ func (s *Handlers) handleUpdateConfig(req *lsps.JsonRpcRequest) *lsps.JsonRpcRes
 	// struct in place, so concurrent readers on the HTLC hot path (the
 	// interceptor, the settlement service) never see a torn read (C-3).
 	nodes[0].NodeConfig.Store(&newConfig)
+
+	// An announced value may have changed: let the publisher compare now
+	// rather than at its next poll.
+	if s.announcePublisher != nil {
+		s.announcePublisher.Trigger()
+	}
 
 	return lsps.NewJsonRpcResponse(req.Id, map[string]string{"status": "updated"})
 }

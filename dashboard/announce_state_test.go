@@ -161,3 +161,75 @@ func TestAnnounceState_StoreErrorsAndUnavailable(t *testing.T) {
 	require.NotNil(t, rpcErr)
 	assert.Equal(t, -32000, rpcErr.Code)
 }
+
+type fakePublisher struct {
+	status   *core.AnnouncePublisherStatus
+	rechecks int
+	triggers int
+	known    bool
+}
+
+func (f *fakePublisher) Status([]byte) *core.AnnouncePublisherStatus { return f.status }
+func (f *fakePublisher) Recheck([]byte) bool                         { f.rechecks++; return f.known }
+func (f *fakePublisher) Trigger()                                    { f.triggers++ }
+
+func TestAnnounceState_PublisherView(t *testing.T) {
+	s, _, _ := announceStateHandlers(t, true)
+
+	got, rpcErr := call(t, s, "get_announce_state", "")
+	require.Nil(t, rpcErr)
+	assert.Nil(t, got.Publisher, "no publisher connected")
+
+	created := time.Unix(1792713600, 0)
+	pub := &fakePublisher{known: true, status: &core.AnnouncePublisherStatus{
+		Last: &core.AnnouncePublication{
+			EventID: "ab", CreatedAt: created, Expiration: created.Add(30 * 24 * time.Hour), Status: core.AnnouncePaused,
+			Relays: []core.AnnounceRelayResult{{Relay: "wss://a", Accepted: true}, {Relay: "wss://b", Error: "blocked"}},
+		},
+		SelfCheck: &core.AnnounceSelfCheck{CheckedAt: created, OK: false, Problems: []string{"lsps2_fee[0].min_fee: announced 1, live 2 (worse for the buyer)"}},
+		Blocked:   "self-check failed: lsps2_fee[0].min_fee",
+	}}
+	s.SetAnnouncePublisher(pub)
+
+	got, rpcErr = call(t, s, "get_announce_state", "")
+	require.Nil(t, rpcErr)
+	require.NotNil(t, got.Publisher)
+	ev := got.Publisher.LastEvent
+	require.NotNil(t, ev)
+	assert.Equal(t, "ab", ev.ID)
+	assert.Equal(t, "2026-10-23T00:00:00Z", ev.CreatedAt)
+	assert.Equal(t, "2026-11-22T00:00:00Z", ev.Expiration)
+	assert.Equal(t, "paused", ev.Status)
+	assert.Equal(t, []AnnounceRelayView{{Relay: "wss://a", Accepted: true}, {Relay: "wss://b", Error: "blocked"}}, ev.Relays)
+	assert.False(t, got.Publisher.SelfCheck.OK)
+	assert.Len(t, got.Publisher.SelfCheck.Problems, 1)
+	assert.Contains(t, got.Publisher.Blocked, "self-check failed")
+
+	got, rpcErr = call(t, s, "recheck_announcement", "")
+	require.Nil(t, rpcErr)
+	assert.Equal(t, 1, pub.rechecks)
+	assert.Equal(t, "open", got.Status)
+
+	pub.known = false
+	_, rpcErr = call(t, s, "recheck_announcement", "")
+	require.NotNil(t, rpcErr)
+	assert.Equal(t, -32000, rpcErr.Code)
+}
+
+func TestHandleUpdateConfig_TriggersPublisher(t *testing.T) {
+	node := announceTestNode()
+	mockNodes := new(MockNodesService)
+	mockNodes.On("GetNodes").Return([]*core.Node{node})
+	s := NewHandlers(mockNodes, nil, nil, nil, "")
+	pub := &fakePublisher{}
+	s.SetAnnouncePublisher(pub)
+
+	resp := s.handleUpdateConfig(updateConfigRequest(t, config.NodeConfig{Name: "Node A", TargetConf: 6}))
+	require.Nil(t, resp.Error)
+	assert.Equal(t, 1, pub.triggers)
+
+	resp = s.handleUpdateConfig(updateConfigRequest(t, config.NodeConfig{Name: "Node A", TargetConf: 6,
+		Announce: &config.AnnounceConfig{Enabled: true}}))
+	require.NotNil(t, resp.Error)
+	assert.Equal(t, 1, pub.triggers, "a refused update does not trigger")
+}

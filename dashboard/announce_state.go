@@ -20,6 +20,65 @@ type AnnounceStateResponse struct {
 	Status     string   `json:"status"`
 	UpdatedAt  *string  `json:"updated_at"` // RFC 3339; null while never changed
 	Relays     []string `json:"relays"`
+	// Publisher is null while no publisher runs for the node.
+	Publisher *AnnouncePublisherView `json:"publisher"`
+}
+
+// AnnouncePublisherView is the publisher's status (T8-3/T8-4) as the
+// dashboard shows it.
+type AnnouncePublisherView struct {
+	LastEvent *AnnounceEventView     `json:"last_event"`
+	SelfCheck *AnnounceSelfCheckView `json:"self_check"`
+	Blocked   string                 `json:"blocked"`
+	LastError string                 `json:"last_error"`
+}
+
+type AnnounceEventView struct {
+	ID         string              `json:"id"`
+	CreatedAt  string              `json:"created_at"`
+	Expiration string              `json:"expiration"`
+	Status     string              `json:"status"`
+	Relays     []AnnounceRelayView `json:"relays"`
+}
+
+type AnnounceRelayView struct {
+	Relay    string `json:"relay"`
+	Accepted bool   `json:"accepted"`
+	Error    string `json:"error,omitempty"`
+}
+
+type AnnounceSelfCheckView struct {
+	CheckedAt string   `json:"checked_at"`
+	OK        bool     `json:"ok"`
+	Problems  []string `json:"problems"`
+}
+
+func publisherView(st *core.AnnouncePublisherStatus) *AnnouncePublisherView {
+	if st == nil {
+		return nil
+	}
+	v := &AnnouncePublisherView{Blocked: st.Blocked, LastError: st.LastError}
+	if p := st.Last; p != nil {
+		ev := &AnnounceEventView{
+			ID:         p.EventID,
+			CreatedAt:  p.CreatedAt.UTC().Format(time.RFC3339),
+			Expiration: p.Expiration.UTC().Format(time.RFC3339),
+			Status:     string(p.Status),
+			Relays:     []AnnounceRelayView{},
+		}
+		for _, r := range p.Relays {
+			ev.Relays = append(ev.Relays, AnnounceRelayView{Relay: r.Relay, Accepted: r.Accepted, Error: r.Error})
+		}
+		v.LastEvent = ev
+	}
+	if c := st.SelfCheck; c != nil {
+		v.SelfCheck = &AnnounceSelfCheckView{
+			CheckedAt: c.CheckedAt.UTC().Format(time.RFC3339),
+			OK:        c.OK,
+			Problems:  append([]string{}, c.Problems...),
+		}
+	}
+	return v
 }
 
 func (s *Handlers) announceStateResponse(node *core.Node, st *core.AnnounceState) AnnounceStateResponse {
@@ -35,6 +94,9 @@ func (s *Handlers) announceStateResponse(node *core.Node, st *core.AnnounceState
 	if !st.UpdatedAt.IsZero() {
 		t := st.UpdatedAt.UTC().Format(time.RFC3339)
 		resp.UpdatedAt = &t
+	}
+	if s.announcePublisher != nil {
+		resp.Publisher = publisherView(s.announcePublisher.Status(node.NodeId))
 	}
 	return resp
 }
@@ -96,6 +158,25 @@ func (s *Handlers) handleSetAnnounceState(req *lsps.JsonRpcRequest) *lsps.JsonRp
 	log.Info().Msgf("Dashboard: announcement %s -> %s", action, st.Status)
 	if s.onAnnounceStateChange != nil {
 		s.onAnnounceStateChange(st)
+	}
+	return lsps.NewJsonRpcResponse(req.Id, s.announceStateResponse(node, st))
+}
+
+// handleRecheckAnnouncement lifts a failed self-check's block (T8-4) once
+// the operator has fixed its cause; the publisher then publishes and checks
+// again.
+func (s *Handlers) handleRecheckAnnouncement(req *lsps.JsonRpcRequest) *lsps.JsonRpcResponse {
+	node, errResp := s.announceNode(req)
+	if errResp != nil {
+		return errResp
+	}
+	if s.announcePublisher == nil || !s.announcePublisher.Recheck(node.NodeId) {
+		return lsps.NewJsonRpcErrorResponse(req.Id, -32000, "Announcement publisher not running for this node", nil)
+	}
+	st, err := s.announceState.GetAnnounceState(context.Background(), node.NodeId)
+	if err != nil {
+		log.Error().Err(err).Msg("Dashboard: failed to read announcement state")
+		return lsps.NewJsonRpcErrorResponse(req.Id, -32603, "Internal error", nil)
 	}
 	return lsps.NewJsonRpcResponse(req.Id, s.announceStateResponse(node, st))
 }
