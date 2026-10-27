@@ -22,12 +22,15 @@ import (
 // expiration at most 30 days after created_at; niplsp sets it to exactly 30
 // days when Meta.Expiration is 0). A relay that refuses is tried again after
 // DefaultAnnounceBackoffBase, doubling up to DefaultAnnounceBackoffMax.
+// A closed announcement is sent until every relay accepted it, or for
+// DefaultAnnounceClosedRetryFor.
 const (
 	DefaultAnnouncePollInterval   = 30 * time.Second
 	DefaultAnnounceRepublishEvery = 7 * 24 * time.Hour
 	DefaultAnnouncePublishTimeout = 15 * time.Second
 	DefaultAnnounceBackoffBase    = 30 * time.Second
 	DefaultAnnounceBackoffMax     = 30 * time.Minute
+	DefaultAnnounceClosedRetryFor = 24 * time.Hour
 )
 
 // AnnounceNode is one node the publisher announces.
@@ -56,6 +59,7 @@ type AnnounceServiceConfig struct {
 	PublishTimeout time.Duration
 	BackoffBase    time.Duration
 	BackoffMax     time.Duration
+	ClosedRetryFor time.Duration
 	Now            func() time.Time
 }
 
@@ -73,7 +77,10 @@ type AnnounceServiceConfig struct {
 // Closed is published once, then nothing more: after an Unlist (until a
 // Resume), and when announcing is switched off on a node that published
 // before (until it is switched on again; NIP-LSP: publish closed before it
-// stops selling). A failed self-check stops publishing, across restarts,
+// stops selling). "Once" means until every relay accepted it, or until
+// ClosedRetryFor has passed with at least one acceptance: a relay that was
+// down at the Unlist would otherwise keep the open announcement until it
+// expires. A failed self-check stops publishing, across restarts,
 // until Recheck; a closed withdrawal still goes out.
 type AnnounceService struct {
 	cfg     AnnounceServiceConfig
@@ -112,6 +119,8 @@ type announceNodeState struct {
 	accepted    map[string]bool
 	results     map[string]core.AnnounceRelayResult
 	recorded    bool // the first acceptance's bookkeeping is done
+	// closingSince is when this node's current withdrawal was first signed.
+	closingSince time.Time
 
 	backoff map[string]*relayBackoff // per relay, reset on success
 
@@ -138,6 +147,9 @@ func NewAnnounceService(cfg AnnounceServiceConfig, nodes []AnnounceNode) *Announ
 	}
 	if cfg.BackoffMax <= 0 {
 		cfg.BackoffMax = DefaultAnnounceBackoffMax
+	}
+	if cfg.ClosedRetryFor <= 0 {
+		cfg.ClosedRetryFor = DefaultAnnounceClosedRetryFor
 	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
@@ -317,6 +329,12 @@ func (s *AnnounceService) runNode(ctx context.Context, n *announceNodeState) err
 		if err != nil {
 			return fmt.Errorf("encoding the announced fields: %w", err)
 		}
+		switch {
+		case reason == notClosing:
+			n.closingSince = time.Time{}
+		case reason != n.reason || n.closingSince.IsZero():
+			n.closingSince = now
+		}
 		nev := toNostrEvent(ev)
 		n.event, n.fields, n.fingerprint, n.signedAt = &nev, fieldsJSON, fp, now
 		n.eventStatus, n.reason = status, reason
@@ -328,15 +346,30 @@ func (s *AnnounceService) runNode(ctx context.Context, n *announceNodeState) err
 	if len(n.accepted) == 0 {
 		return fmt.Errorf("no relay accepted announcement %s yet", n.event.ID)
 	}
-	if n.recorded {
+	if !n.recorded {
+		n.recorded = true
+		s.setError(n, nil)
+		log.Info().Msgf("NIP-LSP: published announcement %s (status %s) to %d/%d relays", n.event.ID, n.eventStatus, len(n.accepted), len(s.cfg.Relays))
+		if err := s.cfg.Store.MarkPublished(ctx, n.Node.NodeId, now, n.fields); err != nil {
+			return fmt.Errorf("recording the publication: %w", err)
+		}
+		if n.reason == notClosing {
+			// A closed announcement is not shown by clients: nothing to compare.
+			s.selfCheck(ctx, n, cfg, now)
+		}
+	}
+	if n.reason == notClosing {
 		return nil
 	}
-	n.recorded = true
-	s.setError(n, nil)
-	log.Info().Msgf("NIP-LSP: published announcement %s (status %s) to %d/%d relays", n.event.ID, n.eventStatus, len(n.accepted), len(s.cfg.Relays))
 
-	if err := s.cfg.Store.MarkPublished(ctx, n.Node.NodeId, now, n.fields); err != nil {
-		return fmt.Errorf("recording the publication: %w", err)
+	// A withdrawal is done once every relay has it, or after ClosedRetryFor;
+	// until then the same closed event is resent to the others.
+	missing := s.missingRelays(n)
+	if len(missing) > 0 {
+		if now.Sub(n.closingSince) < s.cfg.ClosedRetryFor {
+			return nil
+		}
+		log.Warn().Msgf("NIP-LSP: closed announcement %s never reached %v in %s; giving up on them", n.event.ID, missing, s.cfg.ClosedRetryFor)
 	}
 	switch n.reason {
 	case closingUnlist:
@@ -347,11 +380,19 @@ func (s *AnnounceService) runNode(ctx context.Context, n *announceNodeState) err
 		if err := s.cfg.Store.MarkOffClosedPublished(ctx, n.Node.NodeId, now); err != nil {
 			return fmt.Errorf("recording the closed announcement: %w", err)
 		}
-	default:
-		// A closed announcement is not shown by clients: nothing to compare.
-		s.selfCheck(ctx, n, cfg, now)
 	}
 	return nil
+}
+
+// missingRelays are the relays that have not accepted the current event.
+func (s *AnnounceService) missingRelays(n *announceNodeState) []string {
+	var missing []string
+	for _, url := range s.cfg.Relays {
+		if !n.accepted[url] {
+			missing = append(missing, url)
+		}
+	}
+	return missing
 }
 
 // send sends the current event to every relay that has not accepted it and

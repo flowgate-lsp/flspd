@@ -375,26 +375,80 @@ func TestAnnounceService_PauseResumeUnlist(t *testing.T) {
 	assert.Equal(t, "open", tagValue(f.relays.last(), "status"))
 }
 
-func TestAnnounceService_ClosedRetriedUntilARelayAccepts(t *testing.T) {
+// F-M1: a closed announcement is resent until every relay accepted it, so
+// a relay that was down at the Unlist does not keep the open one.
+func TestAnnounceService_ClosedRetriedUntilEveryRelayAccepts(t *testing.T) {
+	ctx := context.Background()
 	f := newAnnounceFixture(t, constAnswers(testAnswers(1)))
-	_, _ = f.store.ApplyAnnounceAction(context.Background(), f.node.NodeId, core.AnnounceUnlist)
-	f.relays.reject = map[string]bool{testRelays[0]: true, testRelays[1]: true}
 	f.run()
-	st, _ := f.store.GetAnnounceState(context.Background(), f.node.NodeId)
+	require.Equal(t, "open", tagValue(f.relays.last(), "status"))
+
+	_, _ = f.store.ApplyAnnounceAction(ctx, f.node.NodeId, core.AnnounceUnlist)
+	f.relays.setReject(map[string]bool{testRelays[0]: true, testRelays[1]: true})
+	f.run()
+	st, _ := f.store.GetAnnounceState(ctx, f.node.NodeId)
 	assert.True(t, st.ClosedPublishedAt.IsZero(), "not recorded while no relay accepted")
 	assert.Contains(t, f.status().LastError, "no relay accepted")
 
+	// One relay accepts: still not done, the other is retried.
 	f.relays.setReject(map[string]bool{testRelays[0]: true})
 	*f.now = f.now.Add(time.Minute) // past the first backoff
 	f.run()
-	st, _ = f.store.GetAnnounceState(context.Background(), f.node.NodeId)
-	assert.False(t, st.ClosedPublishedAt.IsZero())
+	st, _ = f.store.GetAnnounceState(ctx, f.node.NodeId)
+	assert.True(t, st.ClosedPublishedAt.IsZero(), "a relay still serves the open announcement")
 	assert.Empty(t, f.status().LastError)
 	rel := f.status().Last.Relays
 	assert.False(t, rel[0].Accepted)
 	assert.Contains(t, rel[0].Error, "blocked")
 	assert.False(t, rel[0].RetryAt.IsZero())
 	assert.True(t, rel[1].Accepted)
+	closedID := f.status().Last.EventID
+
+	// A restart in between keeps withdrawing.
+	f.svc = NewAnnounceService(AnnounceServiceConfig{Relays: testRelays, Store: f.store, Publisher: f.relays, Now: func() time.Time { return *f.now }},
+		[]AnnounceNode{f.svc.nodeList()[0].AnnounceNode})
+
+	// The relay comes back: it gets closed, and only then is it recorded.
+	f.relays.setReject(map[string]bool{})
+	*f.now = f.now.Add(time.Hour)
+	before := f.relays.tries(testRelays[0])
+	f.run()
+	assert.Equal(t, before+1, f.relays.tries(testRelays[0]))
+	assert.Equal(t, "closed", tagValue(f.relays.last(), "status"))
+	assert.NotEqual(t, closedID, f.relays.last().ID, "re-signed after the restart")
+	st, _ = f.store.GetAnnounceState(ctx, f.node.NodeId)
+	assert.False(t, st.ClosedPublishedAt.IsZero())
+
+	// Done: nothing more is sent.
+	sent := f.relays.count()
+	*f.now = f.now.Add(time.Hour)
+	f.run()
+	assert.Equal(t, sent, f.relays.count())
+}
+
+// F-M1: a relay that never accepts the withdrawal is given up on after
+// ClosedRetryFor, so switching off does not retry forever.
+func TestAnnounceService_ClosedGivesUpOnARelayAfterRetryFor(t *testing.T) {
+	ctx := context.Background()
+	f := newAnnounceFixture(t, constAnswers(testAnswers(1)))
+	f.run()
+	f.relays.setReject(map[string]bool{testRelays[0]: true})
+	f.setConfig(func(c *config.NodeConfig) { c.Announce.Enabled = false })
+	start := *f.now
+	for d := time.Duration(0); d < DefaultAnnounceClosedRetryFor; d += 30 * time.Minute {
+		*f.now = start.Add(d)
+		f.run()
+		st, _ := f.store.GetAnnounceState(ctx, f.node.NodeId)
+		require.True(t, st.OffClosedPublishedAt.IsZero(), "still retrying at %s", d)
+	}
+	*f.now = start.Add(DefaultAnnounceClosedRetryFor)
+	f.run()
+	st, _ := f.store.GetAnnounceState(ctx, f.node.NodeId)
+	assert.False(t, st.OffClosedPublishedAt.IsZero(), "given up after %s", DefaultAnnounceClosedRetryFor)
+	tries := f.relays.tries(testRelays[0])
+	*f.now = f.now.Add(time.Hour)
+	f.run()
+	assert.Equal(t, tries, f.relays.tries(testRelays[0]))
 }
 
 func TestAnnounceService_FailedPublishIsRetried(t *testing.T) {
