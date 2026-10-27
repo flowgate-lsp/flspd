@@ -9,7 +9,7 @@ Regtest only. Nothing here brings a stack up; lokihub's compose does.
 |---|---|
 | `../Dockerfile.regtest` | the image (`just image-regtest`) |
 | `flnd-lsp.conf.sample` | the LSP's flnd node |
-| `nodes.regtest.sample.yaml` | flspd's node config, announcing on (`NODES_CONFIG_PATH`) |
+| `nodes.regtest.sample.yaml` | flspd's node config, announcing on (copied to `NODES_CONFIG_PATH`) |
 | `flspd.regtest.env.sample` | flspd's environment |
 | `compose.lokihub.sample.yml` | the services to merge into lokihub's `docker-compose.dev.yml` |
 
@@ -26,8 +26,9 @@ just image-regtest /path/to/nmilat flspd:rc   # another tag
 That runs `docker build -f deploy/Dockerfile.regtest --build-context
 nmilat=<path> --build-arg COMMIT=<short sha> -t <tag> .` from the flspd
 checkout. The nmilat checkout must carry `niplsp` (nmilat
-`spec-sync/parity-1` or later). The image runs `/bin/flspd` and listens on
-9090 (gRPC) and 8080 (dashboard).
+`spec-sync/parity-1` or later). The image runs `/bin/flspd` as uid 10001,
+not root, and listens on 9090 (gRPC) and 8080 (dashboard). The builder
+image is pinned by digest.
 
 ## What lokihub's compose passes
 
@@ -41,14 +42,32 @@ Services (`compose.lokihub.sample.yml`):
   be one the hub's flnd can dial.
 - **`flspd-db`**: Postgres 15 for flspd alone (user, password and database
   `flspd`).
+- **`flspd-init`**: a one-shot run of lokihub's flnd image, once
+  `flnd-lsp` is healthy (its admin macaroon exists). It:
+  - bakes `flspd.macaroon` with flnd-lsp's admin macaroon: the permissions
+    flspd uses plus `uri:/signrpc.Signer/SignMessage`, without
+    `signer:generate` (which also allows `SignOutputRaw`,
+    `ComputeInputScript` and MuSig2) or `macaroon:*`;
+  - copies flnd-lsp's `tls.cert` beside it, into
+    `./data/regtest/flspd-creds`;
+  - copies the nodes sample to `./data/regtest/flspd-config/nodes.yaml`,
+    unless one is there already (it then keeps the dashboard's edits);
+  - gives both directories to uid 10001.
 - **`flspd`**: the image, with:
-  - `NODES_CONFIG_PATH=/flspd/nodes.yaml`, the nodes sample mounted there;
-  - flnd-lsp's data directory mounted read-only at `/flnd-lsp` (the sample
-    reads `/flnd-lsp/tls.cert` and
-    `/flnd-lsp/data/chain/flokicoin/regtest/admin.macaroon`);
+  - `NODES_CONFIG_PATH=/flspd/nodes.yaml`, from
+    `./data/regtest/flspd-config` mounted writable at `/flspd`: the
+    dashboard saves Settings and announce edits by writing a temporary file
+    there and renaming it over `nodes.yaml`, which a read-only or
+    single-file mount refuses;
+  - `./data/regtest/flspd-creds` read-only at `/flnd-creds` (the sample
+    reads `/flnd-creds/tls.cert` and `/flnd-creds/flspd.macaroon`), not
+    flnd-lsp's whole data directory;
   - the environment below;
-  - started after `flnd-lsp` is healthy (its admin macaroon exists),
-    `flspd-db` is healthy and `relay` started.
+  - started after `flspd-init` completed, `flspd-db` is healthy and `relay`
+    started.
+
+To start over from the sample, delete
+`./data/regtest/flspd-config/nodes.yaml` before the next `up`.
 
 Environment (`flspd.regtest.env.sample`):
 
@@ -65,7 +84,7 @@ Environment (`flspd.regtest.env.sample`):
 | `MEMPOOL_API_BASE_URL` | unset | fees then come from flnd |
 
 flspd refuses to start while announcing is on and `NOSTR_ANNOUNCE_RELAYS`
-is empty or the macaroon lacks `signer:generate` (admin.macaroon has it).
+is empty or the macaroon cannot call `signrpc.Signer/SignMessage`.
 
 ## What the stack must do for the LSP to sell
 
@@ -85,5 +104,7 @@ address. The dashboard (host port 8090 in the sample) shows the last
 event, each relay's answer and the self-check.
 
 Pausing, resuming or unlisting from the dashboard republishes with `status`
-`paused`, `open` or `closed`; switching `announce.enabled` off publishes
-`closed` once.
+`paused`, `open` or `closed` (the announcement only: flspd keeps taking
+orders); switching `announce.enabled` off publishes `closed` once, to every
+relay. A failed self-check republishes as `paused` until the dashboard's
+Recheck.
