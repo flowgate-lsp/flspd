@@ -484,53 +484,151 @@ func TestAnnounceService_BuildErrorsAreReported(t *testing.T) {
 	assert.Contains(t, f.status().LastError, "announcement fields")
 }
 
-// T8-4: a published announcement that does not match the live answers,
-// while those answers did not change, blocks publishing until Recheck.
-func TestAnnounceService_SelfCheckBlocksUntilRecheck(t *testing.T) {
-	broken := false
-	src := &fakeAnswers{next: func(call int) (*ports.LSPSAnswers, error) {
-		if broken && call%2 == 0 {
-			// The self-check's read: protocol 2's live answer is unreadable.
-			a := testAnswers(1, 2, 5)
-			a.LSPS2Info = json.RawMessage(`{"opening_fee_params_menu":"oops"}`)
-			return a, nil
-		}
-		return testAnswers(1, 2, 5), nil
-	}}
+// armedAnswers gives good answers, except that the first read after a
+// publish (the self-check's) gets bad() while broken is set.
+type armedAnswers struct {
+	mu     sync.Mutex
+	armed  bool
+	broken bool
+	bad    func() (*ports.LSPSAnswers, error)
+}
+
+func (a *armedAnswers) LSPSAnswers() (*ports.LSPSAnswers, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.armed && a.broken {
+		a.armed = false
+		return a.bad()
+	}
+	return testAnswers(1, 2, 5), nil
+}
+
+func (a *armedAnswers) set(broken bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.broken = broken
+}
+
+func newArmedFixture(t *testing.T, bad func() (*ports.LSPSAnswers, error)) (*announceFixture, *armedAnswers) {
+	src := &armedAnswers{bad: bad}
 	f := newAnnounceFixture(t, src)
-	broken = true
+	pub := f.svc.cfg.Publisher
+	f.svc.cfg.Publisher = publishFunc(func(ctx context.Context, url string, ev nostr.Event) error {
+		src.mu.Lock()
+		src.armed = true
+		src.mu.Unlock()
+		return pub.Publish(ctx, url, ev)
+	})
+	return f, src
+}
+
+func unreadableLSPS2() (*ports.LSPSAnswers, error) {
+	a := testAnswers(1, 2, 5)
+	a.LSPS2Info = json.RawMessage(`{"opening_fee_params_menu":"oops"}`)
+	return a, nil
+}
+
+// T8-4, F-M3: a published announcement that does not match the live
+// answers, while those answers did not change, blocks the node until
+// Recheck. While blocked it is announced as paused and still follows every
+// change, rather than leaving the faulty event live.
+func TestAnnounceService_SelfCheckBlockAnnouncesPausedUntilRecheck(t *testing.T) {
+	ctx := context.Background()
+	f, src := newArmedFixture(t, unreadableLSPS2)
+	src.set(true)
 	f.run()
 	require.Equal(t, 2, f.relays.count())
+	assert.Equal(t, "open", tagValue(f.relays.last(), "status"))
 	st := f.status()
 	require.NotNil(t, st.SelfCheck)
 	assert.False(t, st.SelfCheck.OK)
 	assert.Contains(t, st.Blocked, "self-check failed")
+	select {
+	case <-f.svc.trigger:
+	default:
+		t.Fatal("no run requested to publish paused")
+	}
+	// The answers are good again; the stored block alone keeps it paused.
+	src.set(false)
 
-	// Blocked: a change does not publish.
+	// The next run replaces the faulty event with paused.
+	f.run()
+	require.Equal(t, 4, f.relays.count())
+	assert.Equal(t, "paused", tagValue(f.relays.last(), "status"))
+	stored, _ := f.store.GetAnnounceState(ctx, f.node.NodeId)
+	assert.Equal(t, core.AnnounceOpen, stored.Status, "the stored status is untouched")
+
+	// Blocked: a change still goes out, as paused.
 	f.setConfig(func(c *config.NodeConfig) { c.Announce.Title = "Renamed" })
 	f.run()
-	assert.Equal(t, 2, f.relays.count())
+	require.Equal(t, 6, f.relays.count())
+	assert.Equal(t, "paused", tagValue(f.relays.last(), "status"))
+	assert.Equal(t, "Renamed", tagValue(f.relays.last(), "title"))
 
-	// The block is stored: a restarted publisher stays blocked.
-	st2, _ := f.store.GetAnnounceState(context.Background(), f.node.NodeId)
-	assert.Contains(t, st2.SelfCheckBlock, "self-check failed")
+	// The block is stored: a restarted publisher still announces paused.
+	stored, _ = f.store.GetAnnounceState(ctx, f.node.NodeId)
+	assert.Contains(t, stored.SelfCheckBlock, "self-check failed")
 	restarted := NewAnnounceService(AnnounceServiceConfig{Relays: testRelays, Store: f.store, Publisher: f.relays, Now: func() time.Time { return *f.now }},
 		[]AnnounceNode{f.svc.nodeList()[0].AnnounceNode})
-	restarted.RunOnce(context.Background())
-	assert.Equal(t, 2, f.relays.count(), "still blocked after a restart")
+	restarted.RunOnce(ctx)
+	assert.Equal(t, "paused", tagValue(f.relays.last(), "status"), "still paused after a restart")
 	assert.Contains(t, restarted.Status(f.node.NodeId).Blocked, "self-check failed")
 
-	// Fixed and rechecked: publishing resumes and the check passes.
-	broken = false
-	require.NoError(t, f.svc.Recheck(context.Background(), f.node.NodeId))
-	st2, _ = f.store.GetAnnounceState(context.Background(), f.node.NodeId)
-	assert.Empty(t, st2.SelfCheckBlock)
+	// Rechecked: the stored status is announced and checked again.
+	require.NoError(t, f.svc.Recheck(ctx, f.node.NodeId))
+	stored, _ = f.store.GetAnnounceState(ctx, f.node.NodeId)
+	assert.Empty(t, stored.SelfCheckBlock)
+	sent := f.relays.count()
 	f.run()
-	assert.Equal(t, 4, f.relays.count())
+	assert.Equal(t, sent+2, f.relays.count())
+	assert.Equal(t, "open", tagValue(f.relays.last(), "status"))
 	st = f.status()
 	assert.Empty(t, st.Blocked)
 	assert.True(t, st.SelfCheck.OK, "%v", st.SelfCheck.Problems)
-	assert.Error(t, f.svc.Recheck(context.Background(), []byte{1}), "unknown node")
+	assert.Error(t, f.svc.Recheck(ctx, []byte{1}), "unknown node")
+}
+
+// F-M3: a Pause while blocked is announced; it was withheld before.
+func TestAnnounceService_PauseWhileBlocked(t *testing.T) {
+	ctx := context.Background()
+	f, src := newArmedFixture(t, unreadableLSPS2)
+	src.set(true)
+	f.run()
+	src.set(false)
+	f.run()
+	require.Equal(t, "paused", tagValue(f.relays.last(), "status"))
+	_, err := f.store.ApplyAnnounceAction(ctx, f.node.NodeId, core.AnnouncePause)
+	require.NoError(t, err)
+	f.run()
+	assert.Equal(t, "paused", tagValue(f.relays.last(), "status"))
+
+	// Rechecked while the operator's Pause stands: still paused, and checked.
+	require.NoError(t, f.svc.Recheck(ctx, f.node.NodeId))
+	sent := f.relays.count()
+	f.run()
+	assert.Equal(t, sent+2, f.relays.count(), "republished unblocked, to be checked")
+	assert.Equal(t, "paused", tagValue(f.relays.last(), "status"))
+	assert.True(t, f.status().SelfCheck.OK, "%v", f.status().SelfCheck.Problems)
+}
+
+// F-M3: a self-check that cannot read the live answers is retried on the
+// next run, not stored as a block.
+func TestAnnounceService_SelfCheckReadErrorIsRetried(t *testing.T) {
+	f, src := newArmedFixture(t, func() (*ports.LSPSAnswers, error) { return nil, errors.New("db down") })
+	src.set(true)
+	f.run()
+	st := f.status()
+	assert.Empty(t, st.Blocked)
+	require.NotNil(t, st.SelfCheck)
+	assert.False(t, st.SelfCheck.OK)
+	assert.Contains(t, st.SelfCheck.Problems[0], "checking again")
+	stored, _ := f.store.GetAnnounceState(context.Background(), f.node.NodeId)
+	assert.Empty(t, stored.SelfCheckBlock)
+
+	src.set(false)
+	f.run()
+	assert.Equal(t, 2, f.relays.count(), "the same event, not republished")
+	assert.True(t, f.status().SelfCheck.OK, "%v", f.status().SelfCheck.Problems)
 }
 
 // T8-4: a live value that changed between publishing and the check is a
@@ -660,7 +758,8 @@ func TestAnnounceService_SwitchedOffNeverPublishedSendsNothing(t *testing.T) {
 	assert.Empty(t, f.status().LastError)
 }
 
-// A self-check block stops publishing, but never a withdrawal.
+// A self-check block pauses the announcement, and never holds back a
+// withdrawal.
 func TestAnnounceService_BlockedNodeCanStillWithdraw(t *testing.T) {
 	ctx := context.Background()
 	f := newAnnounceFixture(t, constAnswers(testAnswers(1)))
@@ -668,11 +767,12 @@ func TestAnnounceService_BlockedNodeCanStillWithdraw(t *testing.T) {
 	require.NoError(t, f.store.SetSelfCheckBlock(ctx, f.node.NodeId, "self-check failed: x"))
 	f.setConfig(func(c *config.NodeConfig) { c.Announce.Title = "Renamed" })
 	f.run()
-	require.Equal(t, 2, f.relays.count(), "blocked")
+	require.Equal(t, 4, f.relays.count())
+	assert.Equal(t, "paused", tagValue(f.relays.last(), "status"), "blocked: announced as paused")
 
 	f.setConfig(func(c *config.NodeConfig) { c.Announce.Enabled = false })
 	f.run()
-	require.Equal(t, 4, f.relays.count())
+	require.Equal(t, 6, f.relays.count())
 	assert.Equal(t, "closed", tagValue(f.relays.last(), "status"))
 }
 

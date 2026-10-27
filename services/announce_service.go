@@ -80,8 +80,13 @@ type AnnounceServiceConfig struct {
 // stops selling). "Once" means until every relay accepted it, or until
 // ClosedRetryFor has passed with at least one acceptance: a relay that was
 // down at the Unlist would otherwise keep the open announcement until it
-// expires. A failed self-check stops publishing, across restarts,
-// until Recheck; a closed withdrawal still goes out.
+// expires.
+//
+// A failed self-check pauses the announcement until Recheck, across
+// restarts: the node is announced as paused (clients offer nothing new
+// through it) and keeps republishing changed values, a Pause, an Unlist or
+// a switch-off, instead of leaving the faulty event live. A self-check that
+// cannot read the live answers is tried again on the next run.
 type AnnounceService struct {
 	cfg     AnnounceServiceConfig
 	trigger chan struct{}
@@ -119,6 +124,9 @@ type announceNodeState struct {
 	accepted    map[string]bool
 	results     map[string]core.AnnounceRelayResult
 	recorded    bool // the first acceptance's bookkeeping is done
+	blocked     bool // signed while a self-check block paused the node
+	// checkPending: the event was accepted and still needs its self-check.
+	checkPending bool
 	// closingSince is when this node's current withdrawal was first signed.
 	closingSince time.Time
 
@@ -273,6 +281,7 @@ func (s *AnnounceService) runNode(ctx context.Context, n *announceNodeState) err
 	}
 
 	status, reason := state.Status, notClosing
+	blocked := state.SelfCheckBlock != ""
 	switch {
 	case !announcing:
 		withdrawn := !state.OffClosedPublishedAt.IsZero() ||
@@ -288,10 +297,9 @@ func (s *AnnounceService) runNode(ctx context.Context, n *announceNodeState) err
 			return nil
 		}
 		reason = closingUnlist
-	default:
-		if state.SelfCheckBlock != "" {
-			return nil
-		}
+	case blocked:
+		// The self-check failed: announce paused, not the faulty terms.
+		status = core.AnnouncePaused
 	}
 	var fields niplsp.Fields
 	if reason != notClosing {
@@ -308,7 +316,8 @@ func (s *AnnounceService) runNode(ctx context.Context, n *announceNodeState) err
 	}
 
 	now := s.cfg.Now()
-	if n.event == nil || fp != n.fingerprint || reason != n.reason || now.Sub(n.signedAt) >= s.cfg.RepublishEvery {
+	if n.event == nil || fp != n.fingerprint || reason != n.reason || blocked != n.blocked ||
+		now.Sub(n.signedAt) >= s.cfg.RepublishEvery {
 		createdAt := nextCreatedAt(now.Unix(), state.LastCreatedAt, n.lastCreatedAt)
 		ev, err := niplsp.NewAnnouncement(fields, createdAt)
 		if err != nil {
@@ -334,8 +343,9 @@ func (s *AnnounceService) runNode(ctx context.Context, n *announceNodeState) err
 		}
 		nev := toNostrEvent(ev)
 		n.event, n.fields, n.fingerprint, n.signedAt = &nev, fieldsJSON, fp, now
-		n.eventStatus, n.reason = status, reason
+		n.eventStatus, n.reason, n.blocked = status, reason, blocked
 		n.accepted, n.results, n.recorded = map[string]bool{}, map[string]core.AnnounceRelayResult{}, false
+		n.checkPending = false
 	}
 
 	s.send(ctx, n, now)
@@ -350,12 +360,14 @@ func (s *AnnounceService) runNode(ctx context.Context, n *announceNodeState) err
 		if err := s.cfg.Store.MarkPublished(ctx, n.Node.NodeId, now, n.fields); err != nil {
 			return fmt.Errorf("recording the publication: %w", err)
 		}
-		if n.reason == notClosing {
-			// A closed announcement is not shown by clients: nothing to compare.
-			s.selfCheck(ctx, n, cfg, now)
-		}
+		// A closed announcement is not shown by clients: nothing to compare.
+		// One published while blocked waits for the Recheck's republish.
+		n.checkPending = n.reason == notClosing && !n.blocked
 	}
 	if n.reason == notClosing {
+		if n.checkPending {
+			n.checkPending = !s.selfCheck(ctx, n, cfg, now)
+		}
 		return nil
 	}
 
@@ -555,8 +567,10 @@ func (s *AnnounceService) buildFields(cfg *config.NodeConfig, n *announceNodeSta
 // selfCheck (T8-4) parses the published event as a client would and
 // compares it with the live answers read again now. A difference whose
 // cause is a value that changed since the build is not a fault: it asks for
-// a republish. Any other failure blocks the node's publishing.
-func (s *AnnounceService) selfCheck(ctx context.Context, n *announceNodeState, cfg *config.NodeConfig, now time.Time) {
+// a republish. Any other failure blocks the node, which is then announced
+// as paused until Recheck. It reports whether the check is done: false when
+// the live answers could not be read, to try again on the next run.
+func (s *AnnounceService) selfCheck(ctx context.Context, n *announceNodeState, cfg *config.NodeConfig, now time.Time) bool {
 	ev, publishedFP := fromNostrEvent(*n.event), n.fingerprint
 	check := &core.AnnounceSelfCheck{CheckedAt: now}
 	block := func(problems ...string) {
@@ -570,7 +584,8 @@ func (s *AnnounceService) selfCheck(ctx context.Context, n *announceNodeState, c
 		if err := s.cfg.Store.SetSelfCheckBlock(ctx, n.Node.NodeId, reason); err != nil {
 			log.Error().Err(err).Msg("NIP-LSP: storing the self-check block")
 		}
-		log.Error().Msgf("NIP-LSP: announcement %s failed its self-check, publishing stopped until rechecked: %v", ev.ID, problems)
+		log.Error().Msgf("NIP-LSP: announcement %s failed its self-check, announcing paused until rechecked: %v", ev.ID, problems)
+		s.Trigger() // publish paused now
 	}
 
 	a, err := niplsp.ParseAnnouncement(ev, niplsp.CheckOptions{
@@ -580,13 +595,17 @@ func (s *AnnounceService) selfCheck(ctx context.Context, n *announceNodeState, c
 	})
 	if err != nil {
 		block(fmt.Sprintf("the published event does not pass a client's checks: %v", err))
-		return
+		return true
 	}
 
 	fresh, err := n.Answers.LSPSAnswers()
 	if err != nil {
-		block(fmt.Sprintf("reading the live answers: %v", err))
-		return
+		// Not a fault of the announcement: check again on the next run.
+		check.Problems = []string{fmt.Sprintf("could not read the live answers, checking again: %v", err)}
+		s.mu.Lock()
+		n.status.SelfCheck = check
+		s.mu.Unlock()
+		return false
 	}
 	live := niplsp.Live{Protocols: fresh.Protocols}
 	for _, p := range fresh.Protocols {
@@ -598,7 +617,7 @@ func (s *AnnounceService) selfCheck(ctx context.Context, n *announceNodeState, c
 		}
 		if err != nil {
 			block(fmt.Sprintf("reading the live LSPS%d answer: %v", p, err))
-			return
+			return true
 		}
 	}
 
@@ -608,7 +627,7 @@ func (s *AnnounceService) selfCheck(ctx context.Context, n *announceNodeState, c
 		s.mu.Lock()
 		n.status.SelfCheck = check
 		s.mu.Unlock()
-		return
+		return true
 	}
 
 	var problems []string
@@ -628,10 +647,11 @@ func (s *AnnounceService) selfCheck(ctx context.Context, n *announceNodeState, c
 			n.status.SelfCheck = check
 			s.mu.Unlock()
 			s.Trigger()
-			return
+			return true
 		}
 	}
 	block(problems...)
+	return true
 }
 
 func (s *AnnounceService) setError(n *announceNodeState, err error) {

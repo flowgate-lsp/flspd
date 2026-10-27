@@ -123,7 +123,7 @@ type AnnounceSelfCheck struct {
 type AnnouncePublisherStatus struct {
 	Last      *AnnouncePublication
 	SelfCheck *AnnounceSelfCheck
-	// Blocked is why publishing is stopped (a failed self-check), or "".
+	// Blocked is why the announcement is paused (a failed self-check), or "".
 	Blocked string
 	// LastError is the last error building, signing or publishing, or "".
 	LastError string

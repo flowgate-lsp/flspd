@@ -111,7 +111,7 @@ export interface AnnouncePublisher {
     relays: AnnounceRelayResult[];
   } | null;
   self_check: { checked_at: string; ok: boolean; problems: string[] } | null;
-  /** Why publishing is stopped (a failed self-check), or "". */
+  /** Why the announcement is paused (a failed self-check), or "". */
   blocked: string;
   last_error: string;
 }

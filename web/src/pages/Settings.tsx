@@ -459,9 +459,9 @@ export const Settings: React.FC = () => {
                           {pub.blocked && (
                             <div className="p-4 rounded-2xl bg-error/10 border border-error/20 flex flex-col md:flex-row md:items-center justify-between gap-3">
                               <div className="text-[11px] text-error">
-                                <p className="font-black">Publishing stopped</p>
+                                <p className="font-black">Announced as paused</p>
                                 <p className="mt-1">{pub.blocked}</p>
-                                <p className="mt-1 text-on-surface-variant">Fix the cause, then recheck: the next announcement is published and checked again.</p>
+                                <p className="mt-1 text-on-surface-variant">Until the recheck, the announcement says paused and still follows every change. Fix the cause, then recheck: the next announcement is published with the stored status and checked again.</p>
                               </div>
                               <button type="button" disabled={announceState.busy} onClick={() => announceState.recheck()}
                                 className="px-5 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest border border-error/40 text-error hover:bg-error/10 disabled:opacity-40">
