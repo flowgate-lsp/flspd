@@ -19,7 +19,7 @@ import (
 // (T5-1/T5-4's stated goal), and guards against a repeat of SEC-1 (a real
 // secret once committed to data/nodes.prod.yaml).
 func TestNodesSampleYaml_ParsesAndIsSecretFree(t *testing.T) {
-	for _, name := range []string{"nodes.dev.sample.yaml", "nodes.prod.sample.yaml"} {
+	for _, name := range []string{"nodes.dev.sample.yaml", "nodes.prod.sample.yaml", "regtest/nodes.regtest.sample.yaml"} {
 		t.Run(name, func(t *testing.T) {
 			data, err := os.ReadFile("../../deploy/" + name)
 			require.NoError(t, err)
@@ -37,6 +37,22 @@ func TestNodesSampleYaml_ParsesAndIsSecretFree(t *testing.T) {
 			assert.NoError(t, cfg.Validate(), "the committed sample must be a fully valid config, tiered blocks included, not just syntactically parseable YAML")
 		})
 	}
+}
+
+// The regtest sample (lokihub's test LSP, LP-13) announces: its announce
+// block is on, valid, and gives the node's fixed address.
+func TestNodesRegtestSample_Announces(t *testing.T) {
+	data, err := os.ReadFile("../../deploy/regtest/nodes.regtest.sample.yaml")
+	require.NoError(t, err)
+	var configs []*NodeConfig
+	require.NoError(t, yaml.Unmarshal(data, &configs))
+	require.Len(t, configs, 1)
+	cfg := configs[0]
+	require.NoError(t, cfg.Validate())
+	assert.True(t, cfg.Announcing())
+	assert.True(t, cfg.JitEnabled, "LSPS2 is announced only with JIT on")
+	assert.NotEmpty(t, cfg.Tokens, "LSPS2's fee menu needs a token")
+	assert.Equal(t, []string{cfg.Host}, cfg.Announce.Addrs)
 }
 
 func unmarshalSecretRef(t *testing.T, doc string) SecretRef {

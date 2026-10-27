@@ -2581,6 +2581,14 @@ Until the nmilat rc carrying `niplsp` is tagged, this branch builds only in
 a Go workspace with the nmilat worktree (a local go.work outside the repo);
 go.mod does not require nmilat yet.
 
+Regtest test LSP for lokihub (LP-13): `deploy/Dockerfile.regtest` builds the
+image with an nmilat checkout as a second build context
+(`just image-regtest <nmilat>`); `deploy/regtest/` holds the LSP's flnd
+config, a nodes sample with announcing on, the env sample and the compose
+fragment lokihub merges, with the exact settings in its README. Once go.mod
+pins nmilat, `deploy/Dockerfile` builds the same binary and
+`Dockerfile.regtest` goes.
+
 ---
 
 ## Performance backlog (non-blocking, run in parallel once Phase 1 gate is met)
