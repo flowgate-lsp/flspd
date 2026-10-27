@@ -2552,13 +2552,17 @@ builder and checker come from nmilat's `niplsp` package (T8-5).
   the Fields, checked every 30 s and on a trigger after a config update or a
   Pause/Resume/Unlist), and every 7 days. Unlist publishes `closed` once,
   recorded in `announce_state.closed_published_at` (migration 000010), and
-  nothing after it until a Resume. A publish no relay accepts is retried.
+  nothing after it until a Resume. Switching announcing off on a node that
+  published publishes `closed` once the same way
+  (`off_closed_published_at`, migration 000011); switching it on lists it
+  again. The current signed event is resent to each relay that has not
+  accepted it; a refusing relay backs off from 30 s, doubling to 30 min,
+  reset on acceptance.
 - LSPS2 methods answer Method not found while JIT is off, so the live
   answers match `list_protocols` and the announcement (F8-Q1).
 - Not done: the devnet itest (event on a local relay verifies against the
   node key, `CheckLive` same, a hot-swap republishes, Unlist publishes
-  closed). Turning announcing off publishes nothing more; the last event
-  stays on relays until it expires (30 days). Unlist is the way to withdraw.
+  closed).
 
 ### T8-4 — Self-check (S)
 
@@ -2567,7 +2571,8 @@ builder and checker come from nmilat's `niplsp` package (T8-5).
   read again. A difference whose cause is a value that changed in between
   triggers a republish. Any other failure is logged, shown on the dashboard
   and stops the node's publishing until the operator presses Recheck
-  (`recheck_announcement`). The block is in memory; a restart lifts it.
+  (`recheck_announcement`). The block is stored (`self_check_block`), so a
+  restart keeps it. A closed withdrawal still goes out while blocked.
 
 ### T8-5 — Dependency and release (S)
 
