@@ -98,6 +98,8 @@ export interface AnnounceRelayResult {
   relay: string;
   accepted: boolean;
   error?: string;
+  /** When a refusing relay is tried again (backoff doubling to 30 min). */
+  retry_at?: string;
 }
 
 export interface AnnouncePublisher {

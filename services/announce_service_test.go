@@ -143,14 +143,31 @@ func (m *memAnnounceStore) SetSelfCheckBlock(_ context.Context, id []byte, reaso
 
 // fakeRelays records what each relay was sent; reject makes a relay refuse.
 type fakeRelays struct {
-	mu     sync.Mutex
-	events []nostr.Event
-	reject map[string]bool
+	mu       sync.Mutex
+	events   []nostr.Event
+	reject   map[string]bool
+	attempts map[string]int
+}
+
+func (f *fakeRelays) tries(url string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.attempts[url]
+}
+
+func (f *fakeRelays) setReject(r map[string]bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.reject = r
 }
 
 func (f *fakeRelays) Publish(_ context.Context, url string, ev nostr.Event) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.attempts == nil {
+		f.attempts = map[string]int{}
+	}
+	f.attempts[url]++
 	if f.reject[url] {
 		return errors.New("blocked: no")
 	}
@@ -361,7 +378,8 @@ func TestAnnounceService_ClosedRetriedUntilARelayAccepts(t *testing.T) {
 	assert.True(t, st.ClosedPublishedAt.IsZero(), "not recorded while no relay accepted")
 	assert.Contains(t, f.status().LastError, "no relay accepted")
 
-	f.relays.reject = map[string]bool{testRelays[0]: true}
+	f.relays.setReject(map[string]bool{testRelays[0]: true})
+	*f.now = f.now.Add(time.Minute) // past the first backoff
 	f.run()
 	st, _ = f.store.GetAnnounceState(context.Background(), f.node.NodeId)
 	assert.False(t, st.ClosedPublishedAt.IsZero())
@@ -369,6 +387,7 @@ func TestAnnounceService_ClosedRetriedUntilARelayAccepts(t *testing.T) {
 	rel := f.status().Last.Relays
 	assert.False(t, rel[0].Accepted)
 	assert.Contains(t, rel[0].Error, "blocked")
+	assert.False(t, rel[0].RetryAt.IsZero())
 	assert.True(t, rel[1].Accepted)
 }
 
@@ -379,9 +398,14 @@ func TestAnnounceService_FailedPublishIsRetried(t *testing.T) {
 	assert.Equal(t, 0, f.relays.count())
 	assert.NotEmpty(t, f.status().LastError)
 
-	f.relays.reject = map[string]bool{}
+	firstID := f.status().Last.EventID
+	f.relays.setReject(map[string]bool{})
+	f.run()
+	assert.Equal(t, 0, f.relays.count(), "backing off: not tried again at once")
+	*f.now = f.now.Add(time.Minute)
 	f.run()
 	assert.Equal(t, 2, f.relays.count(), "the unchanged values are published once a relay accepts")
+	assert.Equal(t, firstID, f.relays.last().ID, "the same signed event is resent")
 }
 
 func TestAnnounceService_NotAnnouncing(t *testing.T) {
@@ -427,15 +451,26 @@ func TestAnnounceService_SelfCheckBlocksUntilRecheck(t *testing.T) {
 	f.run()
 	assert.Equal(t, 2, f.relays.count())
 
+	// The block is stored: a restarted publisher stays blocked.
+	st2, _ := f.store.GetAnnounceState(context.Background(), f.node.NodeId)
+	assert.Contains(t, st2.SelfCheckBlock, "self-check failed")
+	restarted := NewAnnounceService(AnnounceServiceConfig{Relays: testRelays, Store: f.store, Publisher: f.relays, Now: func() time.Time { return *f.now }},
+		[]AnnounceNode{f.svc.nodeList()[0].AnnounceNode})
+	restarted.RunOnce(context.Background())
+	assert.Equal(t, 2, f.relays.count(), "still blocked after a restart")
+	assert.Contains(t, restarted.Status(f.node.NodeId).Blocked, "self-check failed")
+
 	// Fixed and rechecked: publishing resumes and the check passes.
 	broken = false
-	assert.True(t, f.svc.Recheck(f.node.NodeId))
+	require.NoError(t, f.svc.Recheck(context.Background(), f.node.NodeId))
+	st2, _ = f.store.GetAnnounceState(context.Background(), f.node.NodeId)
+	assert.Empty(t, st2.SelfCheckBlock)
 	f.run()
 	assert.Equal(t, 4, f.relays.count())
 	st = f.status()
 	assert.Empty(t, st.Blocked)
 	assert.True(t, st.SelfCheck.OK, "%v", st.SelfCheck.Problems)
-	assert.False(t, f.svc.Recheck([]byte{1}), "unknown node")
+	assert.Error(t, f.svc.Recheck(context.Background(), []byte{1}), "unknown node")
 }
 
 // T8-4: a live value that changed between publishing and the check is a
@@ -513,4 +548,127 @@ func TestAnnounceService_AddNodeWhileRunning(t *testing.T) {
 	svc.AddNode(n)
 	require.Eventually(t, func() bool { return f.relays.count() == 2 }, 5*time.Second, 10*time.Millisecond)
 	require.NotNil(t, svc.Status(n.Node.NodeId))
+}
+
+// Switching announcing off withdraws the node like an Unlist: closed is
+// published once (NIP-LSP: publish closed before it stops selling), and
+// switching it on again lists the node again.
+func TestAnnounceService_SwitchedOffPublishesClosedOnce(t *testing.T) {
+	ctx := context.Background()
+	f := newAnnounceFixture(t, constAnswers(testAnswers(1, 2, 5)))
+	f.run()
+	require.Equal(t, "open", tagValue(f.relays.last(), "status"))
+
+	f.setConfig(func(c *config.NodeConfig) { c.Announce.Enabled = false })
+	f.run()
+	require.Equal(t, 4, f.relays.count())
+	assert.Equal(t, "closed", tagValue(f.relays.last(), "status"))
+	st, _ := f.store.GetAnnounceState(ctx, f.node.NodeId)
+	assert.False(t, st.OffClosedPublishedAt.IsZero())
+	assert.Equal(t, core.AnnounceOpen, st.Status, "the stored status is untouched")
+
+	// Once only, also after 8 days and after a restart.
+	*f.now = f.now.Add(8 * 24 * time.Hour)
+	f.run()
+	restarted := NewAnnounceService(AnnounceServiceConfig{Relays: testRelays, Store: f.store, Publisher: f.relays, Now: func() time.Time { return *f.now }},
+		[]AnnounceNode{f.svc.nodeList()[0].AnnounceNode})
+	restarted.RunOnce(ctx)
+	assert.Equal(t, 4, f.relays.count())
+
+	// Switched on again: open again, mark cleared.
+	f.setConfig(func(c *config.NodeConfig) { c.Announce.Enabled = true })
+	f.run()
+	require.Equal(t, 6, f.relays.count())
+	assert.Equal(t, "open", tagValue(f.relays.last(), "status"))
+	st, _ = f.store.GetAnnounceState(ctx, f.node.NodeId)
+	assert.True(t, st.OffClosedPublishedAt.IsZero())
+
+	// Unlisted, then switched off: already withdrawn, nothing more.
+	_, _ = f.store.ApplyAnnounceAction(ctx, f.node.NodeId, core.AnnounceUnlist)
+	f.run()
+	require.Equal(t, 8, f.relays.count())
+	f.setConfig(func(c *config.NodeConfig) { c.Announce.Enabled = false })
+	f.run()
+	assert.Equal(t, 8, f.relays.count())
+}
+
+func TestAnnounceService_SwitchedOffNeverPublishedSendsNothing(t *testing.T) {
+	f := newAnnounceFixture(t, constAnswers(testAnswers(1)))
+	f.setConfig(func(c *config.NodeConfig) { c.Announce.Enabled = false })
+	f.run()
+	assert.Equal(t, 0, f.relays.count())
+	assert.Empty(t, f.status().LastError)
+}
+
+// A self-check block stops publishing, but never a withdrawal.
+func TestAnnounceService_BlockedNodeCanStillWithdraw(t *testing.T) {
+	ctx := context.Background()
+	f := newAnnounceFixture(t, constAnswers(testAnswers(1)))
+	f.run()
+	require.NoError(t, f.store.SetSelfCheckBlock(ctx, f.node.NodeId, "self-check failed: x"))
+	f.setConfig(func(c *config.NodeConfig) { c.Announce.Title = "Renamed" })
+	f.run()
+	require.Equal(t, 2, f.relays.count(), "blocked")
+
+	f.setConfig(func(c *config.NodeConfig) { c.Announce.Enabled = false })
+	f.run()
+	require.Equal(t, 4, f.relays.count())
+	assert.Equal(t, "closed", tagValue(f.relays.last(), "status"))
+}
+
+func TestBackoffDelay(t *testing.T) {
+	base, max := 30*time.Second, 30*time.Minute
+	want := []time.Duration{30 * time.Second, time.Minute, 2 * time.Minute, 4 * time.Minute, 8 * time.Minute, 16 * time.Minute, 30 * time.Minute, 30 * time.Minute}
+	for i, w := range want {
+		assert.Equal(t, w, backoffDelay(i+1, base, max), "failure %d", i+1)
+	}
+	assert.Equal(t, max, backoffDelay(1000, base, max))
+}
+
+// A relay that keeps refusing is tried at 30 s, 1 min, 2 min, ... up to
+// 30 min apart; the others are not held back, and success resets it.
+func TestAnnounceService_RelayBackoff(t *testing.T) {
+	f := newAnnounceFixture(t, constAnswers(testAnswers(1)))
+	bad := testRelays[0]
+	f.relays.setReject(map[string]bool{bad: true})
+	start := *f.now
+
+	f.run() // try 1 at 0
+	require.Equal(t, 1, f.relays.tries(bad))
+	require.Equal(t, 1, f.relays.count(), "the good relay accepted")
+
+	// Run every 10 s for 70 minutes and record when the bad relay is tried.
+	var at []time.Duration
+	last := 1
+	for d := 10 * time.Second; d <= 70*time.Minute; d += 10 * time.Second {
+		*f.now = start.Add(d)
+		f.run()
+		if n := f.relays.tries(bad); n != last {
+			at = append(at, d)
+			last = n
+		}
+	}
+	assert.Equal(t, []time.Duration{
+		30 * time.Second,                  // +30 s
+		90 * time.Second,                  // +1 min
+		210 * time.Second,                 // +2 min
+		450 * time.Second,                 // +4 min
+		930 * time.Second,                 // +8 min
+		1890 * time.Second,                // +16 min
+		1890*time.Second + 30*time.Minute, // capped at +30 min
+	}, at)
+	assert.Equal(t, 1, f.relays.count(), "the good relay got the event once")
+	r := f.status().Last.Relays[0]
+	assert.False(t, r.Accepted)
+	assert.False(t, r.RetryAt.IsZero())
+
+	// It accepts at its next try; its backoff resets.
+	f.relays.setReject(map[string]bool{})
+	*f.now = r.RetryAt
+	f.run()
+	assert.Equal(t, 2, f.relays.count())
+	assert.True(t, f.status().Last.Relays[0].Accepted)
+	assert.True(t, f.status().Last.Relays[0].RetryAt.IsZero())
+	f2 := f.svc.nodeList()[0]
+	assert.Empty(t, f2.backoff, "reset on success")
 }

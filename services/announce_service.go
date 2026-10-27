@@ -20,11 +20,14 @@ import (
 
 // Publisher defaults (NIP-LSP §Publishing: republish at least every 7 days,
 // expiration at most 30 days after created_at; niplsp sets it to exactly 30
-// days when Meta.Expiration is 0).
+// days when Meta.Expiration is 0). A relay that refuses is tried again after
+// DefaultAnnounceBackoffBase, doubling up to DefaultAnnounceBackoffMax.
 const (
 	DefaultAnnouncePollInterval   = 30 * time.Second
 	DefaultAnnounceRepublishEvery = 7 * 24 * time.Hour
 	DefaultAnnouncePublishTimeout = 15 * time.Second
+	DefaultAnnounceBackoffBase    = 30 * time.Second
+	DefaultAnnounceBackoffMax     = 30 * time.Minute
 )
 
 // AnnounceNode is one node the publisher announces.
@@ -51,19 +54,27 @@ type AnnounceServiceConfig struct {
 	PollInterval   time.Duration
 	RepublishEvery time.Duration
 	PublishTimeout time.Duration
+	BackoffBase    time.Duration
+	BackoffMax     time.Duration
 	Now            func() time.Time
 }
 
-// AnnounceService publishes each announcing node's NIP-LSP announcement
-// (T8-3) and checks every published event against the live answers (T8-4).
+// AnnounceService publishes each node's NIP-LSP announcement (T8-3) and
+// checks every published event against the live answers (T8-4).
 //
-// On each run (at start, every PollInterval, and on Trigger) it builds the
-// node's Fields from the live LSPS answers, the announce block and the
-// stored status, and publishes when nothing was published yet, when any
-// announced value differs from the last publication (a hot-swap, a
-// Pause/Resume/Unlist, a JIT switch), or when RepublishEvery has passed.
-// A closed status is published once, then nothing more until a Resume. A
-// failed self-check blocks the node's publishing until Recheck.
+// On each run (at start, every PollInterval, and on Trigger) it works out
+// the status to announce and builds the node's Fields from the live LSPS
+// answers, the announce block and that status. It signs a new event when
+// none is current, when an announced value differs from the current event
+// (a hot-swap, a Pause/Resume/Unlist, a JIT switch), or when RepublishEvery
+// has passed; then it sends the current event to every relay that has not
+// accepted it and is not backing off.
+//
+// Closed is published once, then nothing more: after an Unlist (until a
+// Resume), and when announcing is switched off on a node that published
+// before (until it is switched on again; NIP-LSP: publish closed before it
+// stops selling). A failed self-check stops publishing, across restarts,
+// until Recheck; a closed withdrawal still goes out.
 type AnnounceService struct {
 	cfg     AnnounceServiceConfig
 	trigger chan struct{}
@@ -74,11 +85,36 @@ type AnnounceService struct {
 	nodes   []*announceNodeState
 }
 
+// closeReason is why a closed announcement goes out.
+type closeReason int
+
+const (
+	notClosing closeReason = iota
+	closingUnlist
+	closingOff
+)
+
+type relayBackoff struct {
+	failures int
+	retryAt  time.Time
+}
+
 type announceNodeState struct {
 	AnnounceNode
-	fingerprint string // of the last published Fields
-	lastAt      time.Time
-	status      core.AnnouncePublisherStatus
+
+	// The current signed event and what it was built from.
+	event       *nostr.Event
+	fingerprint string
+	signedAt    time.Time
+	eventStatus core.AnnounceStatus
+	reason      closeReason
+	accepted    map[string]bool
+	results     map[string]core.AnnounceRelayResult
+	recorded    bool // the first acceptance's bookkeeping is done
+
+	backoff map[string]*relayBackoff // per relay, reset on success
+
+	status core.AnnouncePublisherStatus
 }
 
 // NewAnnounceService returns a publisher for nodes.
@@ -92,20 +128,30 @@ func NewAnnounceService(cfg AnnounceServiceConfig, nodes []AnnounceNode) *Announ
 	if cfg.PublishTimeout <= 0 {
 		cfg.PublishTimeout = DefaultAnnouncePublishTimeout
 	}
+	if cfg.BackoffBase <= 0 {
+		cfg.BackoffBase = DefaultAnnounceBackoffBase
+	}
+	if cfg.BackoffMax <= 0 {
+		cfg.BackoffMax = DefaultAnnounceBackoffMax
+	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
 	s := &AnnounceService{cfg: cfg, trigger: make(chan struct{}, 1)}
 	for _, n := range nodes {
-		s.nodes = append(s.nodes, &announceNodeState{AnnounceNode: n})
+		s.nodes = append(s.nodes, newNodeState(n))
 	}
 	return s
+}
+
+func newNodeState(n AnnounceNode) *announceNodeState {
+	return &announceNodeState{AnnounceNode: n, backoff: map[string]*relayBackoff{}}
 }
 
 // AddNode adds a node to publish for; safe while the service runs.
 func (s *AnnounceService) AddNode(n AnnounceNode) {
 	s.nodesMu.Lock()
-	s.nodes = append(s.nodes, &announceNodeState{AnnounceNode: n})
+	s.nodes = append(s.nodes, newNodeState(n))
 	s.nodesMu.Unlock()
 	s.Trigger()
 }
@@ -163,18 +209,22 @@ func (s *AnnounceService) Status(nodeID []byte) *core.AnnouncePublisherStatus {
 	return &st
 }
 
-// Recheck lifts a self-check block on the node and runs it again: the next
-// publication is checked like any other.
-func (s *AnnounceService) Recheck(nodeID []byte) bool {
+// Recheck lifts a self-check block on the node (stored, so it holds across
+// restarts until this) and runs it again: the next publication is checked
+// like any other.
+func (s *AnnounceService) Recheck(ctx context.Context, nodeID []byte) error {
 	n := s.node(nodeID)
 	if n == nil {
-		return false
+		return fmt.Errorf("the publisher does not handle this node")
+	}
+	if err := s.cfg.Store.SetSelfCheckBlock(ctx, nodeID, ""); err != nil {
+		return fmt.Errorf("lifting the self-check block: %w", err)
 	}
 	s.mu.Lock()
 	n.status.Blocked = ""
 	s.mu.Unlock()
 	s.Trigger()
-	return true
+	return nil
 }
 
 func (s *AnnounceService) node(nodeID []byte) *announceNodeState {
@@ -188,29 +238,53 @@ func (s *AnnounceService) node(nodeID []byte) *announceNodeState {
 
 func (s *AnnounceService) runNode(ctx context.Context, n *announceNodeState) error {
 	cfg := n.Node.NodeConfig.Load()
-	if !cfg.Announcing() {
-		return nil
-	}
-	s.mu.Lock()
-	blocked := n.status.Blocked != ""
-	s.mu.Unlock()
-	if blocked {
-		return nil
-	}
-
 	state, err := s.cfg.Store.GetAnnounceState(ctx, n.Node.NodeId)
 	if err != nil {
 		return fmt.Errorf("reading the announcement status: %w", err)
 	}
-	if state.Status == core.AnnounceClosed && !state.ClosedPublishedAt.IsZero() {
-		return nil // unlisted and announced as closed: nothing more
+	s.mu.Lock()
+	n.status.Blocked = state.SelfCheckBlock
+	s.mu.Unlock()
+
+	announcing := cfg.Announcing()
+	if announcing && !state.OffClosedPublishedAt.IsZero() {
+		// Switched on again: list the node again.
+		if err := s.cfg.Store.ClearOffClosed(ctx, n.Node.NodeId); err != nil {
+			return fmt.Errorf("clearing the switched-off mark: %w", err)
+		}
+		state.OffClosedPublishedAt = time.Time{}
+	}
+
+	status, reason := state.Status, notClosing
+	switch {
+	case !announcing:
+		withdrawn := !state.OffClosedPublishedAt.IsZero() ||
+			(state.Status == core.AnnounceClosed && !state.ClosedPublishedAt.IsZero())
+		if state.LastPublishedAt.IsZero() || withdrawn {
+			n.event = nil // nothing (more) to withdraw
+			return nil
+		}
+		status, reason = core.AnnounceClosed, closingOff
+	case state.Status == core.AnnounceClosed:
+		if !state.ClosedPublishedAt.IsZero() {
+			n.event = nil
+			return nil
+		}
+		reason = closingUnlist
+	default:
+		if state.SelfCheckBlock != "" {
+			return nil
+		}
+	}
+	if cfg.Announce == nil {
+		return fmt.Errorf("the announce block is gone, so status %s cannot be announced", status)
 	}
 
 	answers, err := n.Answers.LSPSAnswers()
 	if err != nil {
 		return fmt.Errorf("reading the LSPS answers: %w", err)
 	}
-	fields, err := s.buildFields(cfg, n, state.Status, answers)
+	fields, err := s.buildFields(cfg, n, status, answers)
 	if err != nil {
 		return err
 	}
@@ -220,54 +294,133 @@ func (s *AnnounceService) runNode(ctx context.Context, n *announceNodeState) err
 	}
 
 	now := s.cfg.Now()
-	due := n.fingerprint == "" || fp != n.fingerprint || now.Sub(n.lastAt) >= s.cfg.RepublishEvery ||
-		state.Status == core.AnnounceClosed
-	if !due {
+	if n.event == nil || fp != n.fingerprint || reason != n.reason || now.Sub(n.signedAt) >= s.cfg.RepublishEvery {
+		ev, err := niplsp.NewAnnouncement(fields, now.Unix())
+		if err != nil {
+			return fmt.Errorf("building the announcement: %w", err)
+		}
+		if err := niplsp.Sign(ctx, ev, n.Signer.SignPayload); err != nil {
+			return fmt.Errorf("signing the announcement: %w", err)
+		}
+		nev := toNostrEvent(ev)
+		n.event, n.fingerprint, n.signedAt = &nev, fp, now
+		n.eventStatus, n.reason = status, reason
+		n.accepted, n.results, n.recorded = map[string]bool{}, map[string]core.AnnounceRelayResult{}, false
+	}
+
+	s.send(ctx, n, now)
+
+	if len(n.accepted) == 0 {
+		return fmt.Errorf("no relay accepted announcement %s yet", n.event.ID)
+	}
+	if n.recorded {
 		return nil
 	}
+	n.recorded = true
+	s.setError(n, nil)
+	log.Info().Msgf("NIP-LSP: published announcement %s (status %s) to %d/%d relays", n.event.ID, n.eventStatus, len(n.accepted), len(s.cfg.Relays))
 
-	ev, err := niplsp.NewAnnouncement(fields, now.Unix())
-	if err != nil {
-		return fmt.Errorf("building the announcement: %w", err)
+	if err := s.cfg.Store.MarkPublished(ctx, n.Node.NodeId, now); err != nil {
+		return fmt.Errorf("recording the publication: %w", err)
 	}
-	if err := niplsp.Sign(ctx, ev, n.Signer.SignPayload); err != nil {
-		return fmt.Errorf("signing the announcement: %w", err)
-	}
-
-	results := s.publish(ctx, ev)
-	pub := &core.AnnouncePublication{
-		EventID:   ev.ID,
-		CreatedAt: time.Unix(int64(ev.CreatedAt), 0),
-		// Meta.Expiration is 0, so NewAnnouncement sets created_at + 30 days.
-		Expiration: time.Unix(int64(ev.CreatedAt)+niplsp.MaxExpirySecs, 0),
-		Status:     state.Status,
-		Relays:     results,
-	}
-	accepted := 0
-	for _, r := range results {
-		if r.Accepted {
-			accepted++
+	switch n.reason {
+	case closingUnlist:
+		if _, err := s.cfg.Store.MarkClosedPublished(ctx, n.Node.NodeId, now); err != nil {
+			return fmt.Errorf("recording the closed announcement: %w", err)
 		}
+	case closingOff:
+		if err := s.cfg.Store.MarkOffClosedPublished(ctx, n.Node.NodeId, now); err != nil {
+			return fmt.Errorf("recording the closed announcement: %w", err)
+		}
+	default:
+		// A closed announcement is not shown by clients: nothing to compare.
+		s.selfCheck(ctx, n, cfg, now)
+	}
+	return nil
+}
+
+// send sends the current event to every relay that has not accepted it and
+// is not backing off, and records each answer. A refusal doubles the
+// relay's backoff (BackoffBase up to BackoffMax); an acceptance resets it.
+func (s *AnnounceService) send(ctx context.Context, n *announceNodeState, now time.Time) {
+	type outcome struct {
+		relay string
+		err   error
+	}
+	var due []string
+	for _, url := range s.cfg.Relays {
+		if n.accepted[url] {
+			continue
+		}
+		if b := n.backoff[url]; b != nil && now.Before(b.retryAt) {
+			continue
+		}
+		due = append(due, url)
+	}
+
+	outcomes := make([]outcome, len(due))
+	var wg sync.WaitGroup
+	for i, url := range due {
+		wg.Add(1)
+		go func(i int, url string) {
+			defer wg.Done()
+			pctx, cancel := context.WithTimeout(ctx, s.cfg.PublishTimeout)
+			defer cancel()
+			outcomes[i] = outcome{url, s.cfg.Publisher.Publish(pctx, url, *n.event)}
+		}(i, url)
+	}
+	wg.Wait()
+
+	for _, o := range outcomes {
+		if o.err == nil {
+			n.accepted[o.relay] = true
+			delete(n.backoff, o.relay)
+			n.results[o.relay] = core.AnnounceRelayResult{Relay: o.relay, Accepted: true}
+			continue
+		}
+		b := n.backoff[o.relay]
+		if b == nil {
+			b = &relayBackoff{}
+			n.backoff[o.relay] = b
+		}
+		b.failures++
+		b.retryAt = now.Add(backoffDelay(b.failures, s.cfg.BackoffBase, s.cfg.BackoffMax))
+		n.results[o.relay] = core.AnnounceRelayResult{Relay: o.relay, Error: o.err.Error(), RetryAt: b.retryAt}
+		log.Warn().Err(o.err).Str("relay", o.relay).Msgf("NIP-LSP: relay did not accept the announcement; next try at %s", b.retryAt.UTC().Format(time.RFC3339))
+	}
+
+	// A fresh copy for Status readers.
+	pub := &core.AnnouncePublication{
+		EventID:    n.event.ID,
+		CreatedAt:  n.event.CreatedAt.Time(),
+		Expiration: n.event.CreatedAt.Time().Add(niplsp.MaxExpirySecs * time.Second),
+		Status:     n.eventStatus,
+	}
+	for _, url := range s.cfg.Relays {
+		r, ok := n.results[url]
+		if !ok {
+			r = core.AnnounceRelayResult{Relay: url, Error: "not tried yet: backing off"}
+			if b := n.backoff[url]; b != nil {
+				r.RetryAt = b.retryAt
+			}
+		}
+		pub.Relays = append(pub.Relays, r)
 	}
 	s.mu.Lock()
 	n.status.Last = pub
 	s.mu.Unlock()
-	if accepted == 0 {
-		return fmt.Errorf("no relay accepted announcement %s", ev.ID)
+}
+
+// backoffDelay is base doubled per failure after the first, capped at max.
+func backoffDelay(failures int, base, max time.Duration) time.Duration {
+	d := base
+	for i := 1; i < failures && d < max; i++ {
+		d *= 2
 	}
-
-	n.fingerprint, n.lastAt = fp, now
-	s.setError(n, nil)
-	log.Info().Msgf("NIP-LSP: published announcement %s (status %s) to %d/%d relays", ev.ID, state.Status, accepted, len(results))
-
-	if state.Status == core.AnnounceClosed {
-		if _, err := s.cfg.Store.MarkClosedPublished(ctx, n.Node.NodeId, now); err != nil {
-			return fmt.Errorf("recording the closed announcement: %w", err)
-		}
+	if d > max {
+		d = max
 	}
-
-	s.selfCheck(n, cfg, ev, fp, now)
-	return nil
+	return d
 }
 
 // buildFields maps the live answers, the announce block and the status to
@@ -299,41 +452,24 @@ func (s *AnnounceService) buildFields(cfg *config.NodeConfig, n *announceNodeSta
 	return fields, nil
 }
 
-// publish sends ev to every relay at once and collects their answers.
-func (s *AnnounceService) publish(ctx context.Context, ev *nip01.Event) []core.AnnounceRelayResult {
-	nev := toNostrEvent(ev)
-	results := make([]core.AnnounceRelayResult, len(s.cfg.Relays))
-	var wg sync.WaitGroup
-	for i, url := range s.cfg.Relays {
-		wg.Add(1)
-		go func(i int, url string) {
-			defer wg.Done()
-			pctx, cancel := context.WithTimeout(ctx, s.cfg.PublishTimeout)
-			defer cancel()
-			r := core.AnnounceRelayResult{Relay: url, Accepted: true}
-			if err := s.cfg.Publisher.Publish(pctx, url, nev); err != nil {
-				r.Accepted, r.Error = false, err.Error()
-				log.Warn().Err(err).Str("relay", url).Msg("NIP-LSP: relay did not accept the announcement")
-			}
-			results[i] = r
-		}(i, url)
-	}
-	wg.Wait()
-	return results
-}
-
 // selfCheck (T8-4) parses the published event as a client would and
 // compares it with the live answers read again now. A difference whose
 // cause is a value that changed since the build is not a fault: it asks for
 // a republish. Any other failure blocks the node's publishing.
-func (s *AnnounceService) selfCheck(n *announceNodeState, cfg *config.NodeConfig, ev *nip01.Event, publishedFP string, now time.Time) {
+func (s *AnnounceService) selfCheck(ctx context.Context, n *announceNodeState, cfg *config.NodeConfig, now time.Time) {
+	ev, publishedFP := fromNostrEvent(*n.event), n.fingerprint
 	check := &core.AnnounceSelfCheck{CheckedAt: now}
 	block := func(problems ...string) {
 		check.Problems = problems
+		reason := "self-check failed: " + problems[0]
 		s.mu.Lock()
 		n.status.SelfCheck = check
-		n.status.Blocked = "self-check failed: " + problems[0]
+		n.status.Blocked = reason
 		s.mu.Unlock()
+		// Stored, so a restart does not lift it; only Recheck does.
+		if err := s.cfg.Store.SetSelfCheckBlock(ctx, n.Node.NodeId, reason); err != nil {
+			log.Error().Err(err).Msg("NIP-LSP: storing the self-check block")
+		}
 		log.Error().Msgf("NIP-LSP: announcement %s failed its self-check, publishing stopped until rechecked: %v", ev.ID, problems)
 	}
 
@@ -421,6 +557,22 @@ func fingerprint(f niplsp.Fields) (string, error) {
 	}
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:]), nil
+}
+
+func fromNostrEvent(ev nostr.Event) *nip01.Event {
+	tags := make([][]string, len(ev.Tags))
+	for i, t := range ev.Tags {
+		tags[i] = append([]string(nil), t...)
+	}
+	return &nip01.Event{
+		ID:        ev.ID,
+		PubKey:    ev.PubKey,
+		CreatedAt: uint64(ev.CreatedAt),
+		Kind:      ev.Kind,
+		Tags:      tags,
+		Content:   ev.Content,
+		Sig:       ev.Sig,
+	}
 }
 
 func toNostrEvent(ev *nip01.Event) nostr.Event {

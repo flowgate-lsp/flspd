@@ -62,7 +62,7 @@ type Handlers struct {
 // publisher.
 type AnnouncePublisher interface {
 	Status(nodeID []byte) *core.AnnouncePublisherStatus
-	Recheck(nodeID []byte) bool
+	Recheck(ctx context.Context, nodeID []byte) error
 	Trigger()
 }
 

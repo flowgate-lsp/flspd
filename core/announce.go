@@ -88,6 +88,9 @@ type AnnounceRelayResult struct {
 	Relay    string
 	Accepted bool
 	Error    string
+	// RetryAt is when a relay that refused is tried again (exponential
+	// backoff); zero once it accepted.
+	RetryAt time.Time
 }
 
 // AnnouncePublication is the last announcement the publisher sent (T8-3).

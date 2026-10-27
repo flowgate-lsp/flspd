@@ -483,7 +483,7 @@ export const Settings: React.FC = () => {
                                 <ul className="font-mono space-y-0.5">
                                   {ev.relays.map((r) => (
                                     <li key={r.relay} className={r.accepted ? "text-secondary" : "text-error"}>
-                                      {r.accepted ? 'accepted' : 'refused'} · {r.relay}{r.error ? ` · ${r.error}` : ''}
+                                      {r.accepted ? 'accepted' : 'refused'} · {r.relay}{r.error ? ` · ${r.error}` : ''}{r.retry_at ? ` · next try ${new Date(r.retry_at).toLocaleString()}` : ''}
                                     </li>
                                   ))}
                                 </ul>

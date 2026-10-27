@@ -45,6 +45,8 @@ type AnnounceRelayView struct {
 	Relay    string `json:"relay"`
 	Accepted bool   `json:"accepted"`
 	Error    string `json:"error,omitempty"`
+	// RetryAt is when a refusing relay is tried again (RFC 3339), or "".
+	RetryAt string `json:"retry_at,omitempty"`
 }
 
 type AnnounceSelfCheckView struct {
@@ -67,7 +69,11 @@ func publisherView(st *core.AnnouncePublisherStatus) *AnnouncePublisherView {
 			Relays:     []AnnounceRelayView{},
 		}
 		for _, r := range p.Relays {
-			ev.Relays = append(ev.Relays, AnnounceRelayView{Relay: r.Relay, Accepted: r.Accepted, Error: r.Error})
+			rv := AnnounceRelayView{Relay: r.Relay, Accepted: r.Accepted, Error: r.Error}
+			if !r.RetryAt.IsZero() {
+				rv.RetryAt = r.RetryAt.UTC().Format(time.RFC3339)
+			}
+			ev.Relays = append(ev.Relays, rv)
 		}
 		v.LastEvent = ev
 	}
@@ -170,8 +176,12 @@ func (s *Handlers) handleRecheckAnnouncement(req *lsps.JsonRpcRequest) *lsps.Jso
 	if errResp != nil {
 		return errResp
 	}
-	if s.announcePublisher == nil || !s.announcePublisher.Recheck(node.NodeId) {
+	if s.announcePublisher == nil {
 		return lsps.NewJsonRpcErrorResponse(req.Id, -32000, "Announcement publisher not running for this node", nil)
+	}
+	if err := s.announcePublisher.Recheck(context.Background(), node.NodeId); err != nil {
+		log.Error().Err(err).Msg("Dashboard: recheck failed")
+		return lsps.NewJsonRpcErrorResponse(req.Id, -32000, "Recheck failed", err.Error())
 	}
 	st, err := s.announceState.GetAnnounceState(context.Background(), node.NodeId)
 	if err != nil {

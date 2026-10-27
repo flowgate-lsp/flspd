@@ -177,8 +177,14 @@ type fakePublisher struct {
 }
 
 func (f *fakePublisher) Status([]byte) *core.AnnouncePublisherStatus { return f.status }
-func (f *fakePublisher) Recheck([]byte) bool                         { f.rechecks++; return f.known }
-func (f *fakePublisher) Trigger()                                    { f.triggers++ }
+func (f *fakePublisher) Recheck(context.Context, []byte) error {
+	f.rechecks++
+	if !f.known {
+		return errors.New("the publisher does not handle this node")
+	}
+	return nil
+}
+func (f *fakePublisher) Trigger() { f.triggers++ }
 
 func TestAnnounceState_PublisherView(t *testing.T) {
 	s, _, _ := announceStateHandlers(t, true)
@@ -191,7 +197,7 @@ func TestAnnounceState_PublisherView(t *testing.T) {
 	pub := &fakePublisher{known: true, status: &core.AnnouncePublisherStatus{
 		Last: &core.AnnouncePublication{
 			EventID: "ab", CreatedAt: created, Expiration: created.Add(30 * 24 * time.Hour), Status: core.AnnouncePaused,
-			Relays: []core.AnnounceRelayResult{{Relay: "wss://a", Accepted: true}, {Relay: "wss://b", Error: "blocked"}},
+			Relays: []core.AnnounceRelayResult{{Relay: "wss://a", Accepted: true}, {Relay: "wss://b", Error: "blocked", RetryAt: created.Add(time.Minute)}},
 		},
 		SelfCheck: &core.AnnounceSelfCheck{CheckedAt: created, OK: false, Problems: []string{"lsps2_fee[0].min_fee: announced 1, live 2 (worse for the buyer)"}},
 		Blocked:   "self-check failed: lsps2_fee[0].min_fee",
@@ -207,7 +213,7 @@ func TestAnnounceState_PublisherView(t *testing.T) {
 	assert.Equal(t, "2026-10-23T00:00:00Z", ev.CreatedAt)
 	assert.Equal(t, "2026-11-22T00:00:00Z", ev.Expiration)
 	assert.Equal(t, "paused", ev.Status)
-	assert.Equal(t, []AnnounceRelayView{{Relay: "wss://a", Accepted: true}, {Relay: "wss://b", Error: "blocked"}}, ev.Relays)
+	assert.Equal(t, []AnnounceRelayView{{Relay: "wss://a", Accepted: true}, {Relay: "wss://b", Error: "blocked", RetryAt: "2026-10-23T00:01:00Z"}}, ev.Relays)
 	assert.False(t, got.Publisher.SelfCheck.OK)
 	assert.Len(t, got.Publisher.SelfCheck.Problems, 1)
 	assert.Contains(t, got.Publisher.Blocked, "self-check failed")
