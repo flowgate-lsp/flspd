@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/flokiorg/flnd/lnrpc"
 	"github.com/flokiorg/flnd/lnrpc/invoicesrpc"
@@ -243,6 +244,12 @@ func NewJsonRpcErrorResponse(id interface{}, code int, message string, data inte
 // once it has a *JsonRpcRequest, and does nothing else with the method
 // name itself.
 func (s *Handlers) Route(req *JsonRpcRequest, peer []byte) *JsonRpcResponse {
+	// A protocol this node does not list in list_protocols is not served,
+	// so the live answers match the listed (and announced) protocols: LSPS2
+	// while JIT channels are off (F8-Q1).
+	if strings.HasPrefix(req.Method, "lsps2.") && !s.offers(2) {
+		return NewJsonRpcErrorResponse(req.Id, -32601, "Method not found", nil)
+	}
 	switch req.Method {
 	case "lsps0.list_protocols":
 		return s.handleLsps0ListProtocols(req)
@@ -269,6 +276,16 @@ func (s *Handlers) Route(req *JsonRpcRequest, peer []byte) *JsonRpcResponse {
 	default:
 		return NewJsonRpcErrorResponse(req.Id, -32601, "Method not found", nil)
 	}
+}
+
+// offers reports whether protocol is in SupportedProtocols right now.
+func (s *Handlers) offers(protocol int) bool {
+	for _, p := range s.SupportedProtocols() {
+		if p == protocol {
+			return true
+		}
+	}
+	return false
 }
 
 func generateRandomScid() (uint64, error) {

@@ -90,3 +90,23 @@ func TestHandleLsps0GetInfo_WithNostrPubkey(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, "deadbeef", result.NotificationNostrPubkey)
 }
+
+// TestRoute_Lsps2RefusedWhileJitOff: a protocol not in list_protocols is
+// not served, so a client's live check matches the announced protocols.
+func TestRoute_Lsps2RefusedWhileJitOff(t *testing.T) {
+	ref := config.NewNodeConfigRef(&config.NodeConfig{JitEnabled: false})
+	mockNodes := new(MockNodesService)
+	mockNodes.On("GetNodes").Return([]*core.Node{{NodeConfig: ref}})
+	server := &Handlers{nodesService: mockNodes, config: Config{EnableLsps5Https: true}}
+
+	for _, method := range []string{"lsps2.get_info", "lsps2.buy", "lsps2.get_versions"} {
+		resp := server.Route(&JsonRpcRequest{Id: json.RawMessage(`1`), Method: method, Params: json.RawMessage(`{}`)}, []byte{1})
+		require.NotNil(t, resp.Error, method)
+		assert.Equal(t, -32601, resp.Error.Code, method)
+	}
+
+	// Turning JIT on serves LSPS2 again (get_versions needs no other mocks).
+	ref.Store(&config.NodeConfig{JitEnabled: true})
+	resp := server.Route(&JsonRpcRequest{Id: json.RawMessage(`1`), Method: "lsps2.get_versions"}, []byte{1})
+	assert.Nil(t, resp.Error)
+}

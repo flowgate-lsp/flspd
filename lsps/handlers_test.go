@@ -235,6 +235,7 @@ func TestLsps2Buy(t *testing.T) {
 		Tokens:     []string{"test-token"},
 		NodeConfig: config.NewNodeConfigRef(&config.NodeConfig{
 			TimeLockDelta: 144,
+			JitEnabled:    true, // LSPS2 is served only while JIT is on
 		}),
 	}
 
@@ -313,6 +314,7 @@ func TestLsps2Buy_PaymentSizeValidation(t *testing.T) {
 		Tokens:     []string{"test-token"},
 		NodeConfig: config.NewNodeConfigRef(&config.NodeConfig{
 			TimeLockDelta: 144,
+			JitEnabled:    true, // LSPS2 is served only while JIT is on
 		}),
 	}
 

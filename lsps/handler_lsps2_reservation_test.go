@@ -29,7 +29,7 @@ func newLsps2ReservationTestServer(t *testing.T, minChan uint64) (*Handlers, *Mo
 		PublicKey:  pubKey,
 		PrivateKey: privKey,
 		Tokens:     []string{"test-token"},
-		NodeConfig: config.NewNodeConfigRef(&config.NodeConfig{TimeLockDelta: 144}),
+		NodeConfig: config.NewNodeConfigRef(&config.NodeConfig{TimeLockDelta: 144, JitEnabled: true}),
 	}
 
 	mockNodes.On("GetNodes").Return([]*core.Node{node})

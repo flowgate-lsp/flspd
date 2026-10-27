@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/flowgate-lsp/flspd/core"
+	"github.com/flowgate-lsp/flspd/platform/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -18,7 +19,11 @@ import (
 // by its own dedicated tests elsewhere.
 func TestRoute_DispatchesToCorrectHandler(t *testing.T) {
 	mockNS := new(MockNodesService)
-	mockNS.On("GetNodes").Return([]*core.Node{}).Maybe()
+	// JIT on, so the lsps2.* cases are offered and reach their handlers;
+	// validated, so lsps1.get_info finds its defaults filled in.
+	nodeCfg := &config.NodeConfig{JitEnabled: true, MinPaymentSizeMloki: 20_000_000}
+	require.NoError(t, nodeCfg.Validate())
+	mockNS.On("GetNodes").Return([]*core.Node{{NodeConfig: config.NewNodeConfigRef(nodeCfg)}}).Maybe()
 	mockOS := new(MockOpeningService)
 	// lsps5.list_webhooks has no params to fail validation on, so it always
 	// reaches the store -- unlike every other case here, which is routed

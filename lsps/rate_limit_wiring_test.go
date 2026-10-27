@@ -206,11 +206,13 @@ func TestLsps2Buy_F17_BurstLimitExceeded_RejectsBeforePromiseVerification(t *tes
 	resp := server.Route(req, peer)
 	require.NotNil(t, resp.Error, "the call exceeding the burst allowance must be rejected")
 	require.Equal(t, -32603, resp.Error.Code)
-	// GetNodes is the first thing promise verification does (inside the
-	// Loop that calls ValidateOpeningFeeParams for each node) -- if the
-	// burst-limited call had reached it, this count would be
-	// defaultBurstLimit+1, not defaultBurstLimit.
-	mockNodes.AssertNumberOfCalls(t, "GetNodes", defaultBurstLimit)
+	// GetNodes is called once per call by Route's protocol gate (is LSPS2
+	// offered, F8-Q1) and once more by promise verification (inside the
+	// loop that calls ValidateOpeningFeeParams for each node). The
+	// burst-limited call passes the gate but must not reach verification:
+	// 2 per allowed call plus 1 for the rejected one. Had it reached
+	// verification, the count would be one higher.
+	mockNodes.AssertNumberOfCalls(t, "GetNodes", 2*defaultBurstLimit+1)
 }
 
 // TestLsps2Buy_F17_StandingCapExceeded_Rejected is the regression test for
