@@ -43,7 +43,7 @@ number-soup and then get reorganized a second time.
 | 5 | Config model + secrets-by-reference | New model shipped behind compat shim | ✅ T5-1..T5-7 done (secrets-by-reference, unit/fee/channel-size model, profiles, CLI tooling, Settings.tsx re-skin — frontend not browser-verified, no automation tooling available) |
 | 6 | Repo structure / arbo migration | Tree matches target layout, build green throughout | ✅ Done. T6-1..T6-3 (format/ folded into common/, internal/adapters/ introduced, common/ split into core/ports/services/); T6-4 (rpc/→api/proto/rpc/, config/→platform/config/, build/→platform/build/, auth/→transport/auth/, notifications/ proto split→api/proto/notifications/, common/logger.go+log_enums.go→platform/logging/, notifications/server.go transport classification resolved "stays put", lsps/→lsps+transport/lsps/ and dashboard/→dashboard+transport/dashboard/ splits both landed on the real transport-vs-logic seam, verified live against devnet for lsps/); T6-5 (configs/examples/, test/itest/, deploy/, web/ — deploy/+web/ landed on explicit user go-ahead, stashed+reapplied someone else's uncommitted dev-tooling edits with re-derived paths) — all sub-items done. |
 | 7 | LSPS1/LSPS2 liquidity & expiration redesign | T7-1..T7-14 merged, F-15..F-24 closed | 🟡 Mostly done (2026-07-21) — T7-1..T7-5, T7-7..T7-9, T7-11, T7-13, T7-14 implemented + unit/integration tested (F-15..F-20, F-22..F-24 closed). Still open: T7-6's retention/archival half, T7-10 (dashboard backend), T7-12 (reconciliation job). See Phase 7 below |
-| 8 | NIP-LSP announcement (kind 10735) | T8-1..T8-5 merged; announcement verifies against the node key and matches the live LSPS answers | 🟡 In progress — T8-1 (node signer) and T8-2 (announce config) in review. See Phase 8 below |
+| 8 | NIP-LSP announcement (kind 10735) | T8-1..T8-5 merged; announcement verifies against the node key and matches the live LSPS answers | 🟡 In progress — T8-1..T8-4 implemented (local branches); T8-5 (pin nmilat, release) and the devnet itest open. See Phase 8 below |
 | — | Performance backlog (parallel, non-blocking) | — | ✅ P-3 verified as no-op (never called hot), nothing to do; P-4 done — split `Notify`/`NotifyAsync` on the real sync-vs-fire-and-forget seam; P-2 done — cached peer↔scid map off the existing peer/channel-event subscriptions; P-1 done for its `GetChannel` half (`WaitChannelPointActive`, verified live); its `QueryRoutes` half turned into the LSPS2 zero-conf race investigation itself (see Phase 4) — now fully resolved end-to-end (2026-07-16), see Phase 4's entry. All items verified live against the devnet where the code path allowed it. |
 
 ---
@@ -2540,16 +2540,41 @@ builder and checker come from nmilat's `niplsp` package (T8-5).
 
 ### T8-3 — Publisher service (M)
 
-Build with `niplsp`, sign (T8-1), publish to `NOSTR_ANNOUNCE_RELAYS`;
-republish on change, Pause/Resume/Unlist and every 7 days.
+- `services.AnnounceService`: for each node with announce enabled,
+  `niplsp.FromLSPSInfo` from `Handlers.LSPSAnswers()` (list_protocols, LSPS1
+  and LSPS2 get_info, LSPS5 max_webhooks, all from the handler code clients
+  reach), the announce block, the stored status and the chain/network from
+  flnd `GetInfo`; `NewAnnouncement` (expiration = created_at + 30 days);
+  `niplsp.Sign` through the T8-1 signer; published to every
+  `NOSTR_ANNOUNCE_RELAYS` relay through `notifications.RelayPool`, each
+  relay's answer recorded.
+- Republishes when an announced value changes (compared by a fingerprint of
+  the Fields, checked every 30 s and on a trigger after a config update or a
+  Pause/Resume/Unlist), and every 7 days. Unlist publishes `closed` once,
+  recorded in `announce_state.closed_published_at` (migration 000010), and
+  nothing after it until a Resume. A publish no relay accepts is retried.
+- LSPS2 methods answer Method not found while JIT is off, so the live
+  answers match `list_protocols` and the announcement (F8-Q1).
+- Not done: the devnet itest (event on a local relay verifies against the
+  node key, `CheckLive` same, a hot-swap republishes, Unlist publishes
+  closed). Turning announcing off publishes nothing more; the last event
+  stays on relays until it expires (30 days). Unlist is the way to withdraw.
 
 ### T8-4 — Self-check (S)
 
-Parse each published event and compare it with the live LSPS answers.
+- After each publish: `niplsp.ParseAnnouncement` on the event (as a client,
+  for the node's chain and network) and `niplsp.CheckLive` against answers
+  read again. A difference whose cause is a value that changed in between
+  triggers a republish. Any other failure is logged, shown on the dashboard
+  and stops the node's publishing until the operator presses Recheck
+  (`recheck_announcement`). The block is in memory; a restart lifts it.
 
 ### T8-5 — Dependency and release (S)
 
 Pin nmilat (`niplsp`), devnet sample with announcing on, release notes.
+Until the nmilat rc carrying `niplsp` is tagged, this branch builds only in
+a Go workspace with the nmilat worktree (a local go.work outside the repo);
+go.mod does not require nmilat yet.
 
 ---
 
