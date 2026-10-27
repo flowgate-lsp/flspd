@@ -678,3 +678,45 @@ func TestAnnounceService_RelayBackoff(t *testing.T) {
 	f2 := f.svc.nodeList()[0]
 	assert.Empty(t, f2.backoff, "reset on success")
 }
+
+func TestNextCreatedAt(t *testing.T) {
+	assert.Equal(t, int64(100), nextCreatedAt(100))
+	assert.Equal(t, int64(100), nextCreatedAt(100, 99, 0))
+	assert.Equal(t, int64(101), nextCreatedAt(100, 100, 0), "same second")
+	assert.Equal(t, int64(151), nextCreatedAt(100, 150, 120), "clock went back")
+	assert.Equal(t, int64(151), nextCreatedAt(100, 120, 150))
+}
+
+// F-M4: a status change in the same second as the event before it, and an
+// event signed after a restart with the clock behind, are still newer.
+func TestAnnounceService_CreatedAtIsMonotonic(t *testing.T) {
+	ctx := context.Background()
+	f := newAnnounceFixture(t, constAnswers(testAnswers(1, 2, 5)))
+	f.run()
+	first := f.relays.last()
+	require.Equal(t, f.now.Unix(), int64(first.CreatedAt))
+
+	// Pause and Resume within the same second.
+	_, err := f.store.ApplyAnnounceAction(ctx, f.node.NodeId, core.AnnouncePause)
+	require.NoError(t, err)
+	f.run()
+	paused := f.relays.last()
+	assert.Equal(t, "paused", tagValue(paused, "status"))
+	assert.Equal(t, first.CreatedAt+1, paused.CreatedAt)
+	_, err = f.store.ApplyAnnounceAction(ctx, f.node.NodeId, core.AnnounceResume)
+	require.NoError(t, err)
+	f.run()
+	open := f.relays.last()
+	assert.Equal(t, "open", tagValue(open, "status"))
+	assert.Equal(t, paused.CreatedAt+1, open.CreatedAt)
+	st, _ := f.store.GetAnnounceState(ctx, f.node.NodeId)
+	assert.Equal(t, int64(open.CreatedAt), st.LastCreatedAt, "stored")
+
+	// Restarted with the clock an hour behind: still after the stored one.
+	*f.now = f.now.Add(-time.Hour)
+	restarted := NewAnnounceService(AnnounceServiceConfig{Relays: testRelays, Store: f.store, Publisher: f.relays, Now: func() time.Time { return *f.now }},
+		[]AnnounceNode{f.svc.nodeList()[0].AnnounceNode})
+	restarted.RunOnce(ctx)
+	assert.Equal(t, open.CreatedAt+1, f.relays.last().CreatedAt)
+	assert.Empty(t, restarted.Status(f.node.NodeId).LastError)
+}

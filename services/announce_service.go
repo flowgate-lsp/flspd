@@ -115,6 +115,10 @@ type announceNodeState struct {
 
 	backoff map[string]*relayBackoff // per relay, reset on success
 
+	// lastCreatedAt is the newest created_at signed in this process; the
+	// stored one covers a restart.
+	lastCreatedAt int64
+
 	status core.AnnouncePublisherStatus
 }
 
@@ -296,13 +300,19 @@ func (s *AnnounceService) runNode(ctx context.Context, n *announceNodeState) err
 
 	now := s.cfg.Now()
 	if n.event == nil || fp != n.fingerprint || reason != n.reason || now.Sub(n.signedAt) >= s.cfg.RepublishEvery {
-		ev, err := niplsp.NewAnnouncement(fields, now.Unix())
+		createdAt := nextCreatedAt(now.Unix(), state.LastCreatedAt, n.lastCreatedAt)
+		ev, err := niplsp.NewAnnouncement(fields, createdAt)
 		if err != nil {
 			return fmt.Errorf("building the announcement: %w", err)
 		}
 		if err := niplsp.Sign(ctx, ev, n.Signer.SignPayload); err != nil {
 			return fmt.Errorf("signing the announcement: %w", err)
 		}
+		// Stored before any relay sees the event, so a restart signs after it.
+		if err := s.cfg.Store.SetLastCreatedAt(ctx, n.Node.NodeId, createdAt); err != nil {
+			return fmt.Errorf("recording the announcement's created_at: %w", err)
+		}
+		n.lastCreatedAt = createdAt
 		fieldsJSON, err := json.Marshal(fields)
 		if err != nil {
 			return fmt.Errorf("encoding the announced fields: %w", err)
@@ -414,6 +424,20 @@ func (s *AnnounceService) send(ctx context.Context, n *announceNodeState, now ti
 	s.mu.Lock()
 	n.status.Last = pub
 	s.mu.Unlock()
+}
+
+// nextCreatedAt is now, or one second after the newest created_at already
+// signed when that is not before now. Relays keep the newest event per node
+// and, on a created_at tie, the one with the lowest id (NIP-01), so a status
+// change signed in the same second as the event before it, or after the
+// clock went back, must still be newer.
+func nextCreatedAt(now int64, last ...int64) int64 {
+	for _, l := range last {
+		if now <= l {
+			now = l + 1
+		}
+	}
+	return now
 }
 
 // backoffDelay is base doubled per failure after the first, capped at max.
