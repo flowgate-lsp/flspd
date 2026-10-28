@@ -7,7 +7,7 @@ require (
 	github.com/caddyserver/certmagic v0.11.2
 	github.com/coder/websocket v1.8.14
 	github.com/docker/docker v28.5.2+incompatible
-	github.com/docker/go-connections v0.7.0
+	github.com/docker/go-connections v0.8.2
 	github.com/flokiorg/flnd v0.1.21-beta
 	github.com/flokiorg/go-flokicoin v0.25.13-alpha
 	github.com/flowgate-lsp/nostr-lsps5 v1.0.2
