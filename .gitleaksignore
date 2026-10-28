@@ -1,8 +1,0 @@
-# bLIP-52 spec example coupon code copied verbatim from the spec, not a credential
-a2bf2987f69da15125e9cf5d36aa73e040dea29c:.agents/skills/flspd-lsps-protocol/references/blip-0052.md:generic-api-key:202
-# deliberately invalid nsec test fixture ("nsec1notvalid"), not a key
-d48a2ba47736638963cfcfe26a764da2231836b6:common/validation_test.go:generic-api-key:95
-# same two false positives at their earlier commits on main, for full-history scans
-d719ba6b26af59292e7c50ad7610966cc18f92b1:.agents/skills/flspd-lsps-protocol/references/blip-0052.md:generic-api-key:202
-1b6b6bca1adfd57b99198a6498cf5920e3f310ce:.agent/specs/blip-0052.md:generic-api-key:202
-aa586fa855286e8dcbdfe0a06f18616cf8790016:common/validation_test.go:generic-api-key:95
