@@ -87,7 +87,9 @@ func TestSecretRef_FromEnv_Resolves(t *testing.T) {
 }
 
 func TestSecretRef_FromEnv_MissingVarErrors(t *testing.T) {
-	os.Unsetenv("FLSPD_TEST_SECRET_NOT_SET")
+	if err := os.Unsetenv("FLSPD_TEST_SECRET_NOT_SET"); err != nil {
+		t.Fatal(err)
+	}
 	r := unmarshalSecretRef(t, `from_env: FLSPD_TEST_SECRET_NOT_SET`)
 	_, err := r.Resolve()
 	require.Error(t, err)

@@ -229,7 +229,7 @@ func (p *FlspdProcess) Start() error {
 	cmd.Stderr = logFile
 
 	if err := cmd.Start(); err != nil {
-		logFile.Close()
+		_ = logFile.Close()
 		return fmt.Errorf("starting flspd process: %w", err)
 	}
 	p.cmd = cmd
@@ -243,7 +243,7 @@ func (p *FlspdProcess) waitForListener(timeout time.Duration) error {
 	for time.Now().Before(deadline) {
 		conn, err := net.DialTimeout("tcp", p.listenAddr, time.Second)
 		if err == nil {
-			conn.Close()
+			_ = conn.Close()
 			return nil
 		}
 		time.Sleep(300 * time.Millisecond)

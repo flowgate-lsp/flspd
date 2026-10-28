@@ -40,8 +40,8 @@ func newCountingRelayServer(t *testing.T) *countingRelayServer {
 	require.NoError(t, err)
 	s.addr = ln.Addr().String()
 
-	go s.server.Serve(ln)
-	t.Cleanup(func() { s.server.Close() })
+	go func() { _ = s.server.Serve(ln) }()
+	t.Cleanup(func() { _ = s.server.Close() })
 	return s
 }
 
@@ -51,7 +51,7 @@ func (s *countingRelayServer) handle(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
-	defer conn.Close(websocket.StatusNormalClosure, "")
+	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
 	ctx := r.Context()
 	for {
 		if _, _, err := conn.Read(ctx); err != nil {
@@ -159,8 +159,8 @@ func newAckingRelayServer(t *testing.T, ok bool, reason string) *ackingRelayServ
 	require.NoError(t, err)
 	s.addr = ln.Addr().String()
 
-	go s.server.Serve(ln)
-	t.Cleanup(func() { s.server.Close() })
+	go func() { _ = s.server.Serve(ln) }()
+	t.Cleanup(func() { _ = s.server.Close() })
 	return s
 }
 
@@ -169,7 +169,7 @@ func (s *ackingRelayServer) handle(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
-	defer conn.Close(websocket.StatusNormalClosure, "")
+	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
 	ctx := r.Context()
 	parser := nostr.NewMessageParser()
 	for {

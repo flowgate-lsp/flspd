@@ -24,11 +24,19 @@ func TestLsps1OrderSettleAndOpen(t *testing.T) {
 	pg, err := NewPostgresContainer(t.TempDir() + "/postgres.log")
 	require.NoError(t, err)
 	require.NoError(t, pg.Start(ctx))
-	t.Cleanup(func() { pg.Stop(ctx) })
+	t.Cleanup(func() {
+		if err := pg.Stop(ctx); err != nil {
+			t.Logf("stopping postgres: %v", err)
+		}
+	})
 
 	flspd := NewFlspdProcess(t, d, pg, FlspdProcessOptions{})
 	require.NoError(t, flspd.Start())
-	t.Cleanup(func() { flspd.Stop() })
+	t.Cleanup(func() {
+		if err := flspd.Stop(); err != nil {
+			t.Logf("stopping flspd: %v", err)
+		}
+	})
 
 	lspClient, err := d.LightningClient("lsp")
 	require.NoError(t, err)

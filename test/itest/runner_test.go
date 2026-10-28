@@ -31,7 +31,11 @@ func TestScenarios(t *testing.T) {
 			pg, err := NewPostgresContainer(t.TempDir() + "/postgres.log")
 			require.NoError(t, err)
 			require.NoError(t, pg.Start(ctx))
-			t.Cleanup(func() { pg.Stop(ctx) })
+			t.Cleanup(func() {
+				if err := pg.Stop(ctx); err != nil {
+					t.Logf("stopping postgres: %v", err)
+				}
+			})
 
 			// The fake mempool server is always available on sc.Mempool for
 			// steps to use, but flspd is only pointed at it (via
@@ -49,7 +53,11 @@ func TestScenarios(t *testing.T) {
 			}
 			flspd := NewFlspdProcess(t, d, pg, opts)
 			require.NoError(t, flspd.Start())
-			t.Cleanup(func() { flspd.Stop() })
+			t.Cleanup(func() {
+				if err := flspd.Stop(); err != nil {
+					t.Logf("stopping flspd: %v", err)
+				}
+			})
 
 			sc := newScenarioContext(t, ctx, d, pg, flspd, mempool)
 

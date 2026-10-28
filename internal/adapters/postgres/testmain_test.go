@@ -35,7 +35,7 @@ func runWithTestPostgres(m *testing.M) int {
 		return 1
 	}
 	defer func() {
-		exec.Command("docker", "rm", "-f", containerID).Run()
+		_ = exec.Command("docker", "rm", "-f", containerID).Run()
 	}()
 
 	databaseUrl := fmt.Sprintf("postgres://postgres:postgres@localhost:%s/postgres?sslmode=disable", hostPort)
@@ -77,7 +77,7 @@ func startTestPostgres() (containerID string, hostPort string, err error) {
 
 	portOut, err := exec.Command("docker", "port", containerID, "5432/tcp").Output()
 	if err != nil {
-		exec.Command("docker", "rm", "-f", containerID).Run()
+		_ = exec.Command("docker", "rm", "-f", containerID).Run()
 		return "", "", fmt.Errorf("docker port: %w", err)
 	}
 	// portOut looks like "127.0.0.1:54321"

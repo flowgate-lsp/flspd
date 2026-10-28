@@ -160,7 +160,9 @@ func TestConfigCheckCommand_UnresolvableSecretFails(t *testing.T) {
 	path := writeTempConfig(t, validSampleConfig)
 	t.Setenv("NODES_CONFIG_PATH", path)
 	t.Setenv("NODES_JSON", "")
-	os.Unsetenv("TEST_FLSPD_PK") // deliberately not set
+	if err := os.Unsetenv("TEST_FLSPD_PK"); err != nil { // deliberately not set
+		t.Fatal(err)
+	}
 	t.Setenv("TEST_FLND_CERT", "cafe")
 	t.Setenv("TEST_FLND_MAC", "babe")
 

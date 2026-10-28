@@ -492,7 +492,7 @@ func TestDashboardService_RPC(t *testing.T) {
 		configPath := "/tmp/nodes.test.yaml"
 		err := os.WriteFile(configPath, []byte("nodes:\n  - name: Test Node\n"), 0644)
 		assert.NoError(t, err)
-		defer os.Remove(configPath)
+		defer func() { _ = os.Remove(configPath) }()
 
 		req := &lsps.JsonRpcRequest{
 			Id:     json.RawMessage(`4`),
@@ -571,7 +571,7 @@ func TestHandleUpdateConfig_PreservesOtherNodes(t *testing.T) {
 	mockNodes.On("GetNodes").Return([]*core.Node{nodeA, nodeB})
 
 	configPath := "/tmp/nodes-c2-test.yaml"
-	defer os.Remove(configPath)
+	defer func() { _ = os.Remove(configPath) }()
 
 	s := NewHandlers(mockNodes, nil, nil, nil, configPath)
 
