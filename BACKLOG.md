@@ -2575,6 +2575,15 @@ builder and checker come from nmilat's `niplsp` package (T8-5).
     announcing a shorter menu (F-L4).
   - Pause/Resume/Unlist are labelled as announcement-only: flspd still takes
     LSPS1 and LSPS2 orders whatever the status (F-L1).
+- Review fixes, round 2 (2026-10-28):
+  - `last_fields` now holds the accepted event itself, read back with
+    `niplsp.ParseAnnouncement`, so a later nmilat that reshapes `Fields`
+    still reads it. Rows from before keep their Fields JSON. Stored values
+    that no longer read or build an announcement fall back to the config
+    rather than failing every run (R2-F1).
+  - A stored `created_at` more than 10 minutes ahead of the clock is logged
+    and not followed: the event is signed at the clock, and the stored value
+    heals (R2-F2).
 - LSPS2 methods answer Method not found while JIT is off, so the live
   answers match `list_protocols` and the announcement (F8-Q1).
 - Not done: the devnet itest (event on a local relay verifies against the
