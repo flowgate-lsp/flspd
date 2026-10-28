@@ -2590,6 +2590,10 @@ builder and checker come from nmilat's `niplsp` package (T8-5).
     without re-signing. A switch-off before the write lands still sends
     `closed` once, built from the event accepted in this process when the
     store has none, and a retried closed-write clears its error (A3-FL-1).
+  - The announcement, and `closed`, also go to the write relays (`write` or
+    unmarked) of the node key's NIP-65 relay list, read from
+    `NOSTR_ANNOUNCE_RELAYS` at each signing; the `r` tags stay that list,
+    and a failed read leaves it alone (A3-FL-2).
 - LSPS2 methods answer Method not found while JIT is off, so the live
   answers match `list_protocols` and the announcement (F8-Q1).
 - Not done: the devnet itest (event on a local relay verifies against the

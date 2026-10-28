@@ -1235,3 +1235,104 @@ func TestAnnounceService_FailedClosedWriteIsRetried(t *testing.T) {
 		assert.Empty(t, f.status().LastError)
 	}
 }
+
+// fakeRelayList returns ev (or err) and records each call.
+type fakeRelayList struct {
+	mu     sync.Mutex
+	ev     *nostr.Event
+	err    error
+	calls  int
+	relays []string
+	pubkey string
+}
+
+func (f *fakeRelayList) RelayList(_ context.Context, relays []string, pubkey string) (*nostr.Event, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls++
+	f.relays, f.pubkey = relays, pubkey
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.ev, nil
+}
+
+func (f *announceFixture) withRelayList(tags ...nostr.Tag) *fakeRelayList {
+	src := &fakeRelayList{ev: &nostr.Event{Kind: nostr.KindRelayListMetadata, PubKey: f.svc.nodeList()[0].Signer.PubKey(), Tags: tags}}
+	f.svc.cfg.RelayList = src
+	return src
+}
+
+func rTags(ev nostr.Event) []string {
+	var out []string
+	for _, t := range ev.Tags {
+		if t[0] == "r" {
+			out = append(out, t[1])
+		}
+	}
+	return out
+}
+
+// A3-FL-2: the node key's NIP-65 write relays get the announcement too.
+func TestAnnounceService_PublishesToTheNodeKeyWriteRelays(t *testing.T) {
+	f := newAnnounceFixture(t, constAnswers(testAnswers(1, 2, 5)))
+	src := f.withRelayList(
+		nostr.Tag{"r", "wss://w.example", "write"},
+		nostr.Tag{"r", "wss://r.example", "read"},
+		nostr.Tag{"r", "wss://both.example"},
+	)
+	f.run()
+	assert.Equal(t, testRelays, src.relays, "read from the announce relays")
+	assert.Equal(t, f.svc.nodeList()[0].Signer.PubKey(), src.pubkey)
+	for _, u := range append(append([]string(nil), testRelays...), "wss://w.example", "wss://both.example") {
+		assert.Equal(t, 1, f.relays.tries(u), u)
+	}
+	assert.Equal(t, 0, f.relays.tries("wss://r.example"), "read-only relay left out")
+	assert.Equal(t, testRelays, rTags(f.relays.last()), "r tags stay the configured relays")
+	assert.Len(t, f.status().Last.Relays, 4)
+	assert.Empty(t, f.status().LastError)
+}
+
+// A3-FL-2: each relay once, however it is written.
+func TestAnnounceService_WriteRelaysAreDeduplicated(t *testing.T) {
+	f := newAnnounceFixture(t, constAnswers(testAnswers(1, 2, 5)))
+	f.withRelayList(
+		nostr.Tag{"r", "wss://a.example/"},
+		nostr.Tag{"r", "WSS://A.EXAMPLE"},
+		nostr.Tag{"r", "wss://w.example"},
+		nostr.Tag{"r", "wss://w.example/", "write"},
+		nostr.Tag{"r", "https://h.example"},
+	)
+	f.run()
+	assert.Equal(t, []string{"wss://a.example", "wss://b.example", "wss://w.example"}, f.svc.nodeList()[0].publishTo)
+	assert.Equal(t, 3, f.relays.count())
+}
+
+// A3-FL-2: no relay list, or none readable, leaves the configured relays.
+func TestAnnounceService_RelayListFailureIsNotFatal(t *testing.T) {
+	for name, src := range map[string]*fakeRelayList{
+		"fetch error": {err: errors.New("no relay answered")},
+		"no 10002":    {},
+	} {
+		f := newAnnounceFixture(t, constAnswers(testAnswers(1, 2, 5)))
+		f.svc.cfg.RelayList = src
+		f.run()
+		assert.Equal(t, testRelays, f.svc.nodeList()[0].publishTo, name)
+		assert.Equal(t, 2, f.relays.count(), name)
+		assert.Empty(t, f.status().LastError, name)
+	}
+}
+
+// A3-FL-2: closed goes to the same relays as the open announcement.
+func TestAnnounceService_ClosedGoesToTheWriteRelays(t *testing.T) {
+	f := newAnnounceFixture(t, constAnswers(testAnswers(1, 2, 5)))
+	f.withRelayList(nostr.Tag{"r", "wss://w.example"})
+	f.run()
+	f.setConfig(func(c *config.NodeConfig) { c.Announce.Enabled = false })
+	f.run()
+	assert.Equal(t, 2, f.relays.tries("wss://w.example"), "open, then closed")
+	assert.Equal(t, 3, f.relays.statusCount("closed"))
+	assert.Equal(t, testRelays, rTags(f.relays.last()))
+	st, _ := f.store.GetAnnounceState(context.Background(), f.node.NodeId)
+	assert.False(t, st.OffClosedPublishedAt.IsZero(), "withdrawn once every relay has it")
+}

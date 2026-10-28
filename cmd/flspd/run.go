@@ -228,10 +228,12 @@ func runLspd(cliCtx *cli.Context) error {
 	// NIP-LSP announcements (T8-3/T8-4). Nodes join below, once their LSPS
 	// handlers exist; a node publishes only while its announce block is on.
 	announceStateStore := postgres.NewAnnounceStateStore(pool)
+	announcePool := notifications.NewRelayPool()
 	announceSvc := services.NewAnnounceService(services.AnnounceServiceConfig{
 		Relays:    announceRelays,
 		Store:     announceStateStore,
-		Publisher: notifications.NewRelayPool(),
+		Publisher: announcePool,
+		RelayList: announcePool,
 	}, nil)
 	go announceSvc.Start(ctx)
 	// Pause/Resume/Unlist (T8-2) republish at once.

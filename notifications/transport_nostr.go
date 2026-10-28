@@ -2,6 +2,7 @@ package notifications
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -193,4 +194,52 @@ func (rp *RelayPool) Publish(ctx context.Context, url string, ev nostr.Event) er
 		return err
 	}
 	return relay.Publish(ctx, ev)
+}
+
+// RelayList asks each relay for pubkey's NIP-65 relay list (kind 10002) and
+// returns the newest validly signed one, or nil when none has one. It fails
+// only when no relay answered.
+func (rp *RelayPool) RelayList(ctx context.Context, relays []string, pubkey string) (*nostr.Event, error) {
+	filter := nostr.Filter{Kinds: []int{nostr.KindRelayListMetadata}, Authors: []string{pubkey}, Limit: 1}
+	var (
+		mu       sync.Mutex
+		wg       sync.WaitGroup
+		newest   *nostr.Event
+		answered bool
+		errs     []error
+	)
+	for _, url := range relays {
+		wg.Add(1)
+		go func(url string) {
+			defer wg.Done()
+			relay, err := rp.GetOrConnect(ctx, url)
+			var evs []*nostr.Event
+			if err == nil {
+				evs, err = relay.QuerySync(ctx, filter)
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			if err != nil {
+				errs = append(errs, fmt.Errorf("%s: %w", url, err))
+				return
+			}
+			answered = true
+			for _, ev := range evs {
+				if ev.Kind != nostr.KindRelayListMetadata || ev.PubKey != pubkey {
+					continue
+				}
+				if ok, err := ev.CheckSignature(); err != nil || !ok {
+					continue
+				}
+				if newest == nil || ev.CreatedAt > newest.CreatedAt {
+					newest = ev
+				}
+			}
+		}(url)
+	}
+	wg.Wait()
+	if !answered && len(errs) > 0 {
+		return nil, errors.Join(errs...)
+	}
+	return newest, nil
 }

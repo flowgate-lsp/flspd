@@ -49,12 +49,26 @@ type RelayPublisher interface {
 	Publish(ctx context.Context, relayURL string, ev nostr.Event) error
 }
 
+// RelayListSource fetches a pubkey's NIP-65 relay list.
+type RelayListSource interface {
+	// RelayList returns the newest validly signed kind 10002 of pubkey found
+	// on relays, nil when none has one, and an error when no relay answered.
+	RelayList(ctx context.Context, relays []string, pubkey string) (*nostr.Event, error)
+}
+
+// maxWriteRelays caps the relays taken from a node's relay list.
+const maxWriteRelays = 16
+
 // AnnounceServiceConfig configures the publisher. Zero durations take the
 // defaults above; Now defaults to time.Now.
 type AnnounceServiceConfig struct {
-	Relays         []string
-	Store          ports.AnnounceStateStore
-	Publisher      RelayPublisher
+	Relays    []string
+	Store     ports.AnnounceStateStore
+	Publisher RelayPublisher
+	// RelayList, when set, adds the node key's NIP-65 write relays (read
+	// from Relays at each signing) to the relays the event is sent to. The
+	// event's r tags stay Relays.
+	RelayList      RelayListSource
 	PollInterval   time.Duration
 	RepublishEvery time.Duration
 	PublishTimeout time.Duration
@@ -123,13 +137,16 @@ type announceNodeState struct {
 	eventStatus core.AnnounceStatus
 	reason      closeReason
 	accepted    map[string]bool
-	results     map[string]core.AnnounceRelayResult
-	recorded    bool // the first acceptance was stored (MarkPublished)
+	// publishTo is Relays plus the node key's NIP-65 write relays, read when
+	// the current event was signed.
+	publishTo []string
+	results   map[string]core.AnnounceRelayResult
+	recorded  bool // the first acceptance was stored (MarkPublished)
 	// acceptedFields is the last event any relay accepted in this process,
 	// stored or not: a switch-off can still withdraw it when MarkPublished
 	// failed after the relays took it.
 	acceptedFields []byte
-	blocked     bool // signed while a self-check block paused the node
+	blocked        bool // signed while a self-check block paused the node
 	// checkPending: the event was accepted and still needs its self-check.
 	checkPending bool
 	// closingSince is when this node's current withdrawal was first signed.
@@ -359,6 +376,7 @@ func (s *AnnounceService) runNode(ctx context.Context, n *announceNodeState) err
 		case reason != n.reason || n.closingSince.IsZero():
 			n.closingSince = now
 		}
+		n.publishTo = s.publishRelays(ctx, n)
 		nev := toNostrEvent(ev)
 		n.event, n.fields, n.fingerprint, n.signedAt = &nev, fieldsJSON, fp, now
 		n.eventStatus, n.reason, n.blocked = status, reason, blocked
@@ -381,7 +399,7 @@ func (s *AnnounceService) runNode(ctx context.Context, n *announceNodeState) err
 		}
 		n.recorded = true
 		s.setError(n, nil)
-		log.Info().Msgf("NIP-LSP: published announcement %s (status %s) to %d/%d relays", n.event.ID, n.eventStatus, len(n.accepted), len(s.cfg.Relays))
+		log.Info().Msgf("NIP-LSP: published announcement %s (status %s) to %d/%d relays", n.event.ID, n.eventStatus, len(n.accepted), len(n.publishTo))
 		// A closed announcement is not shown by clients: nothing to compare.
 		// One published while blocked waits for the Recheck's republish.
 		n.checkPending = n.reason == notClosing && !n.blocked
@@ -420,7 +438,7 @@ func (s *AnnounceService) runNode(ctx context.Context, n *announceNodeState) err
 // leaving out those that require AUTH and so never will.
 func (s *AnnounceService) missingRelays(n *announceNodeState) []string {
 	var missing []string
-	for _, url := range s.cfg.Relays {
+	for _, url := range n.publishTo {
 		if !n.accepted[url] && !n.authRequired[url] {
 			missing = append(missing, url)
 		}
@@ -437,7 +455,7 @@ func (s *AnnounceService) send(ctx context.Context, n *announceNodeState, now ti
 		err   error
 	}
 	var due []string
-	for _, url := range s.cfg.Relays {
+	for _, url := range n.publishTo {
 		if n.accepted[url] {
 			continue
 		}
@@ -495,7 +513,7 @@ func (s *AnnounceService) send(ctx context.Context, n *announceNodeState, now ti
 		Expiration: n.event.CreatedAt.Time().Add(niplsp.MaxExpirySecs * time.Second),
 		Status:     n.eventStatus,
 	}
-	for _, url := range s.cfg.Relays {
+	for _, url := range n.publishTo {
 		r, ok := n.results[url]
 		if !ok {
 			r = core.AnnounceRelayResult{Relay: url, Error: "not tried yet: backing off"}
@@ -508,6 +526,76 @@ func (s *AnnounceService) send(ctx context.Context, n *announceNodeState, now ti
 	s.mu.Lock()
 	n.status.Last = pub
 	s.mu.Unlock()
+}
+
+// publishRelays is Relays plus the write relays of the node key's NIP-65
+// relay list, each once. A failed fetch is logged, not fatal: Relays alone.
+func (s *AnnounceService) publishRelays(ctx context.Context, n *announceNodeState) []string {
+	if s.cfg.RelayList == nil {
+		return s.cfg.Relays
+	}
+	pubkey := n.Signer.PubKey()
+	fctx, cancel := context.WithTimeout(ctx, s.cfg.PublishTimeout)
+	defer cancel()
+	ev, err := s.cfg.RelayList.RelayList(fctx, s.cfg.Relays, pubkey)
+	if err != nil {
+		log.Warn().Err(err).Msg("NIP-LSP: reading the node key's relay list (kind 10002); publishing to NOSTR_ANNOUNCE_RELAYS only")
+		return s.cfg.Relays
+	}
+	if ev == nil || ev.Kind != nostr.KindRelayListMetadata || ev.PubKey != pubkey {
+		return s.cfg.Relays
+	}
+	return mergeRelays(s.cfg.Relays, writeRelays(ev))
+}
+
+// writeRelays are the relay list's r tags marked write or unmarked (NIP-65:
+// both read and write); read-only ones are left out.
+func writeRelays(ev *nostr.Event) []string {
+	var out []string
+	for _, t := range ev.Tags {
+		if len(t) < 2 || t[0] != "r" {
+			continue
+		}
+		if len(t) >= 3 && t[2] != "" && t[2] != "write" {
+			continue
+		}
+		out = append(out, t[1])
+	}
+	return out
+}
+
+// mergeRelays is base (as given) then each extra ws(s) relay, normalised,
+// that base does not already hold; at most maxWriteRelays extras.
+func mergeRelays(base, extra []string) []string {
+	out := append([]string(nil), base...)
+	seen := map[string]bool{}
+	for _, u := range base {
+		seen[normalizeRelay(u)] = true
+	}
+	added := 0
+	for _, u := range extra {
+		lower := strings.ToLower(strings.TrimSpace(u))
+		if !strings.HasPrefix(lower, "wss://") && !strings.HasPrefix(lower, "ws://") {
+			continue
+		}
+		norm := normalizeRelay(u)
+		if norm == "" || seen[norm] || added >= maxWriteRelays {
+			continue
+		}
+		seen[norm] = true
+		out = append(out, norm)
+		added++
+	}
+	return out
+}
+
+// normalizeRelay is nostr.NormalizeURL with the scheme lowercased too.
+func normalizeRelay(u string) string {
+	u = strings.TrimSpace(u)
+	if i := strings.Index(u, "://"); i > 0 {
+		u = strings.ToLower(u[:i]) + u[i:]
+	}
+	return nostr.NormalizeURL(u)
 }
 
 // maxCreatedAtLead is how far, in seconds, a stored created_at may be ahead

@@ -86,6 +86,11 @@ Environment (`flspd.regtest.env.sample`):
 flspd refuses to start while announcing is on and `NOSTR_ANNOUNCE_RELAYS`
 is empty or the macaroon cannot call `signrpc.Signer/SignMessage`.
 
+The announcement lists `NOSTR_ANNOUNCE_RELAYS` as its `r` tags and is also
+sent to the write relays of the node key's NIP-65 relay list (kind 10002),
+read from those relays at each signing. No list, or none readable, leaves
+`NOSTR_ANNOUNCE_RELAYS` alone.
+
 ## What the stack must do for the LSP to sell
 
 - Fund flnd-lsp's on-chain wallet (LSPS1 orders and JIT channels open from
