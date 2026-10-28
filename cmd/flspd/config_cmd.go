@@ -67,8 +67,8 @@ var configCheckCommand = cli.Command{
 		if _, err := checkAnnounceRequirements(configs, os.Getenv(announceRelaysEnv)); err != nil {
 			return err
 		}
-		fmt.Fprintf(os.Stdout, "OK: %d node(s) configured, all valid.\n", len(configs))
-		return nil
+		_, err = fmt.Fprintf(os.Stdout, "OK: %d node(s) configured, all valid.\n", len(configs))
+		return err
 	},
 }
 
@@ -97,8 +97,8 @@ var configShowCommand = cli.Command{
 		if err != nil {
 			return fmt.Errorf("marshaling effective config: %w", err)
 		}
-		fmt.Fprint(os.Stdout, string(out))
-		return nil
+		_, err = fmt.Fprint(os.Stdout, string(out))
+		return err
 	},
 }
 
@@ -143,11 +143,11 @@ var configExplainFeesCommand = cli.Command{
 		feeLoki := feeMloki / 1000
 		ratePercent := float64(cfg.ChannelFeePermyriad) / 100
 
-		fmt.Fprintf(os.Stdout,
+		_, err = fmt.Fprintf(os.Stdout,
 			"For a payment of %d loki, the opening fee would be %d loki (%.4g%% proportional, %d loki floor).\n",
 			paymentLoki, feeLoki, ratePercent, minFeeMloki/1000,
 		)
-		return nil
+		return err
 	},
 }
 

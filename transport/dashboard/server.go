@@ -123,7 +123,7 @@ type Client struct {
 
 func (c *Client) writePump() {
 	defer func() {
-		c.conn.Close()
+		_ = c.conn.Close() // teardown; the peer is already gone or done
 	}()
 	for message := range c.send {
 		err := c.conn.WriteMessage(websocket.TextMessage, message)
@@ -161,7 +161,7 @@ func (s *Server) handleInfo(w http.ResponseWriter, _ *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(InfoResponse{
+	writeJSON(w, InfoResponse{
 		Version:          build.GetTag(),
 		Commit:           build.GetRevision(),
 		DashboardEnabled: s.adminPubKey != "",
@@ -190,7 +190,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// 0. Handle Health Check (must be before upgrade & auth)
 	if r.URL.Path == "/healthz" {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{
+		writeJSON(w, map[string]string{
 			"status":  "ok",
 			"version": build.GetTag(),
 			"commit":  build.GetRevision(),
@@ -249,7 +249,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	resp := s.handlers.Route(&req)
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	writeJSON(w, resp)
 }
 
 func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
@@ -287,4 +287,12 @@ func (s *Server) BroadcastEvent(event string, data interface{}) {
 		"ts":   time.Now().Unix(),
 	}
 	s.hub.Broadcast(msg)
+}
+
+// writeJSON encodes v as the response body, logging a failed write since the
+// status line has already gone out and nothing else can be reported.
+func writeJSON(w http.ResponseWriter, v any) {
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		log.Warn().Err(err).Msg("Dashboard: failed to write JSON response")
+	}
 }

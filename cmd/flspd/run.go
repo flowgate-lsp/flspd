@@ -406,7 +406,9 @@ func runLspd(cliCtx *cli.Context) error {
 	stopInterceptors := func() {
 		stopOnce.Do(func() {
 			for _, interceptor := range interceptors {
-				interceptor.Stop()
+				if err := interceptor.Stop(); err != nil {
+					log.Error().Err(err).Msg("Failed to stop interceptor")
+				}
 			}
 
 			for _, lspsServer := range lspsServers {
