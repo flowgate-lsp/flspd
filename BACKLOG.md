@@ -2584,6 +2584,12 @@ builder and checker come from nmilat's `niplsp` package (T8-5).
   - A stored `created_at` more than 10 minutes ahead of the clock is logged
     and not followed: the event is signed at the clock, and the stored value
     heals (R2-F2).
+- Audit fixes, round 3 (2026-10-28):
+  - A publication counts as recorded, and is self-checked, only once
+    `MarkPublished` succeeds; a failed write is retried on the next run
+    without re-signing. A switch-off before the write lands still sends
+    `closed` once, built from the event accepted in this process when the
+    store has none, and a retried closed-write clears its error (A3-FL-1).
 - LSPS2 methods answer Method not found while JIT is off, so the live
   answers match `list_protocols` and the announcement (F8-Q1).
 - Not done: the devnet itest (event on a local relay verifies against the

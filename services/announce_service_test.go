@@ -71,6 +71,32 @@ func constAnswers(a *ports.LSPSAnswers) *fakeAnswers {
 type memAnnounceStore struct {
 	mu     sync.Mutex
 	states map[string]core.AnnounceState
+	// failPublished makes the next n MarkPublished calls fail (-1: all);
+	// failClosed does the same for MarkClosedPublished/MarkOffClosedPublished.
+	failPublished int
+	failClosed    int
+	published     int // MarkPublished calls that succeeded
+}
+
+var errStoreDown = errors.New("store down")
+
+// fail consumes one failure from *n.
+func (m *memAnnounceStore) fail(n *int) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if *n == 0 {
+		return false
+	}
+	if *n > 0 {
+		*n--
+	}
+	return true
+}
+
+func (m *memAnnounceStore) setFail(n *int, v int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	*n = v
 }
 
 func newMemAnnounceStore() *memAnnounceStore {
@@ -103,6 +129,9 @@ func (m *memAnnounceStore) ApplyAnnounceAction(ctx context.Context, id []byte, a
 }
 
 func (m *memAnnounceStore) MarkClosedPublished(_ context.Context, id []byte, at time.Time) (bool, error) {
+	if m.fail(&m.failClosed) {
+		return false, errStoreDown
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	st, ok := m.states[string(id)]
@@ -127,7 +156,11 @@ func (m *memAnnounceStore) update(id []byte, f func(st *core.AnnounceState)) err
 }
 
 func (m *memAnnounceStore) MarkPublished(_ context.Context, id []byte, at time.Time, fields []byte) error {
+	if m.fail(&m.failPublished) {
+		return errStoreDown
+	}
 	return m.update(id, func(st *core.AnnounceState) {
+		m.published++
 		st.LastPublishedAt, st.LastFields = at, append([]byte(nil), fields...)
 	})
 }
@@ -137,6 +170,9 @@ func (m *memAnnounceStore) SetLastCreatedAt(_ context.Context, id []byte, create
 }
 
 func (m *memAnnounceStore) MarkOffClosedPublished(_ context.Context, id []byte, at time.Time) error {
+	if m.fail(&m.failClosed) {
+		return errStoreDown
+	}
 	return m.update(id, func(st *core.AnnounceState) { st.OffClosedPublishedAt = at })
 }
 
@@ -1068,4 +1104,134 @@ func TestAnnounceService_AuthRequiredRelay(t *testing.T) {
 	assert.Equal(t, "closed", tagValue(f.relays.last(), "status"))
 	st, _ := f.store.GetAnnounceState(ctx, f.node.NodeId)
 	assert.False(t, st.ClosedPublishedAt.IsZero(), "withdrawn from every relay that can take it")
+}
+
+// statusCount counts the events sent with status.
+func (f *fakeRelays) statusCount(status string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n := 0
+	for _, ev := range f.events {
+		if tagValue(ev, "status") == status {
+			n++
+		}
+	}
+	return n
+}
+
+func (f *announceFixture) restart() *AnnounceService {
+	return NewAnnounceService(AnnounceServiceConfig{Relays: testRelays, Store: f.store, Publisher: f.relays, Now: func() time.Time { return *f.now }},
+		[]AnnounceNode{f.svc.nodeList()[0].AnnounceNode})
+}
+
+// A3-FL-1: relays accepted the event but the store write failed: the write
+// is retried on the next run, without signing or sending again.
+func TestAnnounceService_FailedPublishWriteIsRetried(t *testing.T) {
+	ctx := context.Background()
+	f := newAnnounceFixture(t, constAnswers(testAnswers(1, 2, 5)))
+	f.store.setFail(&f.store.failPublished, 1)
+	f.run()
+	require.Equal(t, 2, f.relays.count())
+	assert.Contains(t, f.status().LastError, "recording the publication")
+	st, _ := f.store.GetAnnounceState(ctx, f.node.NodeId)
+	assert.True(t, st.LastPublishedAt.IsZero())
+
+	f.run()
+	assert.Equal(t, 2, f.relays.count(), "not re-signed or resent")
+	st, _ = f.store.GetAnnounceState(ctx, f.node.NodeId)
+	assert.False(t, st.LastPublishedAt.IsZero(), "the write was retried")
+	assert.Equal(t, f.relays.last().ID, mustEventID(t, st.LastFields))
+	assert.Empty(t, f.status().LastError)
+}
+
+func mustEventID(t *testing.T, raw []byte) string {
+	t.Helper()
+	var ev nip01.Event
+	require.NoError(t, json.Unmarshal(raw, &ev))
+	return ev.ID
+}
+
+// A3-FL-1: a switch-off after a failed write still withdraws, once.
+func TestAnnounceService_SwitchOffAfterFailedWriteSendsClosedOnce(t *testing.T) {
+	f := newAnnounceFixture(t, constAnswers(testAnswers(1, 2, 5)))
+	f.store.setFail(&f.store.failPublished, 1)
+	f.run()
+	f.setConfig(func(c *config.NodeConfig) { c.Announce.Enabled = false })
+	f.run()
+	f.run()
+	*f.now = f.now.Add(8 * 24 * time.Hour)
+	f.run()
+	assert.Equal(t, 2, f.relays.statusCount("closed"), "closed once per relay")
+	assert.Empty(t, f.status().LastError)
+	f.restart().RunOnce(context.Background())
+	assert.Equal(t, 2, f.relays.statusCount("closed"))
+}
+
+// A3-FL-1: once the retried write landed, a restarted process still knows
+// there is something to withdraw.
+func TestAnnounceService_RestartAfterRetriedWriteWithdraws(t *testing.T) {
+	f := newAnnounceFixture(t, constAnswers(testAnswers(1, 2, 5)))
+	f.store.setFail(&f.store.failPublished, 1)
+	f.run()
+	f.run()
+	f.setConfig(func(c *config.NodeConfig) { c.Announce.Enabled = false })
+	f.restart().RunOnce(context.Background())
+	assert.Equal(t, 2, f.relays.statusCount("closed"))
+	assert.Equal(t, "203.0.113.7:9735", tagValue(f.relays.last(), "addr"))
+}
+
+// A3-FL-1: the store never takes the write. Best effort: the withdrawal is
+// built from the event accepted in this process and sent once; it is lost
+// on a restart, as the store never knew of the publication.
+func TestAnnounceService_SwitchOffWhileStoreFailsWithdrawsFromMemory(t *testing.T) {
+	f := newAnnounceFixture(t, constAnswers(testAnswers(1, 2, 5)))
+	f.store.setFail(&f.store.failPublished, -1)
+	f.run()
+	f.setConfig(func(c *config.NodeConfig) { c.Announce.Enabled = false })
+	f.run()
+	f.run()
+	assert.Equal(t, 2, f.relays.statusCount("closed"))
+	closed := f.relays.last()
+	assert.Equal(t, "closed", tagValue(closed, "status"))
+	assert.Equal(t, "203.0.113.7:9735", tagValue(closed, "addr"))
+	assert.Equal(t, 4, f.relays.count())
+}
+
+// A3-FL-1: the self-check runs only after the publication was recorded.
+func TestAnnounceService_SelfCheckWaitsForTheRecordedPublish(t *testing.T) {
+	f := newAnnounceFixture(t, constAnswers(testAnswers(1, 2, 5)))
+	f.store.setFail(&f.store.failPublished, 1)
+	f.run()
+	assert.Nil(t, f.status().SelfCheck, "no self-check before the write")
+	assert.False(t, f.svc.nodeList()[0].checkPending)
+	f.run()
+	require.NotNil(t, f.status().SelfCheck)
+	assert.True(t, f.status().SelfCheck.OK)
+}
+
+// A failing closed-write is retried without sending closed again.
+func TestAnnounceService_FailedClosedWriteIsRetried(t *testing.T) {
+	ctx := context.Background()
+	for _, unlist := range []bool{false, true} {
+		f := newAnnounceFixture(t, constAnswers(testAnswers(1, 2, 5)))
+		f.run()
+		f.store.setFail(&f.store.failClosed, 1)
+		if unlist {
+			_, _ = f.store.ApplyAnnounceAction(ctx, f.node.NodeId, core.AnnounceUnlist)
+		} else {
+			f.setConfig(func(c *config.NodeConfig) { c.Announce.Enabled = false })
+		}
+		f.run()
+		assert.NotEmpty(t, f.status().LastError, "unlist=%v", unlist)
+		f.run()
+		f.run()
+		assert.Equal(t, 2, f.relays.statusCount("closed"), "unlist=%v", unlist)
+		st, _ := f.store.GetAnnounceState(ctx, f.node.NodeId)
+		if unlist {
+			assert.False(t, st.ClosedPublishedAt.IsZero())
+		} else {
+			assert.False(t, st.OffClosedPublishedAt.IsZero())
+		}
+		assert.Empty(t, f.status().LastError)
+	}
 }

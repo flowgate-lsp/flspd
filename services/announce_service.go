@@ -124,7 +124,11 @@ type announceNodeState struct {
 	reason      closeReason
 	accepted    map[string]bool
 	results     map[string]core.AnnounceRelayResult
-	recorded    bool // the first acceptance's bookkeeping is done
+	recorded    bool // the first acceptance was stored (MarkPublished)
+	// acceptedFields is the last event any relay accepted in this process,
+	// stored or not: a switch-off can still withdraw it when MarkPublished
+	// failed after the relays took it.
+	acceptedFields []byte
 	blocked     bool // signed while a self-check block paused the node
 	// checkPending: the event was accepted and still needs its self-check.
 	checkPending bool
@@ -289,7 +293,8 @@ func (s *AnnounceService) runNode(ctx context.Context, n *announceNodeState) err
 	case !announcing:
 		withdrawn := !state.OffClosedPublishedAt.IsZero() ||
 			(state.Status == core.AnnounceClosed && !state.ClosedPublishedAt.IsZero())
-		if state.LastPublishedAt.IsZero() || withdrawn {
+		published := !state.LastPublishedAt.IsZero() || n.acceptedFields != nil
+		if !published || withdrawn {
 			n.event = nil // nothing (more) to withdraw
 			return nil
 		}
@@ -367,12 +372,16 @@ func (s *AnnounceService) runNode(ctx context.Context, n *announceNodeState) err
 		return fmt.Errorf("no relay accepted announcement %s yet", n.event.ID)
 	}
 	if !n.recorded {
-		n.recorded = true
-		s.setError(n, nil)
-		log.Info().Msgf("NIP-LSP: published announcement %s (status %s) to %d/%d relays", n.event.ID, n.eventStatus, len(n.accepted), len(s.cfg.Relays))
+		n.acceptedFields = n.fields
+		// recorded (and the self-check) only once the store has it: a failed
+		// write is retried on the next run, so a restart still knows there
+		// is something to withdraw.
 		if err := s.cfg.Store.MarkPublished(ctx, n.Node.NodeId, now, n.fields); err != nil {
 			return fmt.Errorf("recording the publication: %w", err)
 		}
+		n.recorded = true
+		s.setError(n, nil)
+		log.Info().Msgf("NIP-LSP: published announcement %s (status %s) to %d/%d relays", n.event.ID, n.eventStatus, len(n.accepted), len(s.cfg.Relays))
 		// A closed announcement is not shown by clients: nothing to compare.
 		// One published while blocked waits for the Recheck's republish.
 		n.checkPending = n.reason == notClosing && !n.blocked
@@ -403,6 +412,7 @@ func (s *AnnounceService) runNode(ctx context.Context, n *announceNodeState) err
 			return fmt.Errorf("recording the closed announcement: %w", err)
 		}
 	}
+	s.setError(n, nil) // a retried write clears its error
 	return nil
 }
 
@@ -561,9 +571,15 @@ func (s *AnnounceService) currentFields(cfg *config.NodeConfig, n *announceNodeS
 // (the announce block removed, addrs cleared) or the LSPS answers changed.
 // A node with no stored values (published before they were kept), or whose
 // stored values no longer read or build an announcement, is built from the
-// current config.
+// current config. The stored event comes first (it survives restarts); the
+// one accepted in this process is used when the store has none, which is
+// when MarkPublished failed after the relays took it.
 func (s *AnnounceService) closedFields(cfg *config.NodeConfig, n *announceNodeState, state *core.AnnounceState) (niplsp.Fields, error) {
-	if f, ok := storedFields(state.LastFields); ok {
+	last := state.LastFields
+	if len(last) == 0 {
+		last = n.acceptedFields
+	}
+	if f, ok := storedFields(last); ok {
 		f.Status = niplsp.StatusClosed
 		f.Expiration = 0
 		f.Relays = s.cfg.Relays
