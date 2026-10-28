@@ -406,7 +406,7 @@ func (c *LndClient) GetInfo() (*lightning.GetInfoResult, error) {
 
 	var chain, network string
 	if len(info.Chains) > 0 && info.Chains[0] != nil {
-		chain = info.Chains[0].Chain
+		chain = info.Chains[0].Chain //nolint:staticcheck // SA1019: lnrpc has no replacement field and flnd still fills it
 		network = info.Chains[0].Network
 	}
 

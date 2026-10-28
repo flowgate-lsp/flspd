@@ -87,7 +87,7 @@ func TestAnnounceValidate_Refusals(t *testing.T) {
 	cases := map[string]func(a *AnnounceConfig){
 		"title too long":         func(a *AnnounceConfig) { a.Title = strings.Repeat("a", 41) },
 		"title newline":          func(a *AnnounceConfig) { a.Title = "a\nb" },
-		"title zero width":       func(a *AnnounceConfig) { a.Title = "a​b" },
+		"title zero width":       func(a *AnnounceConfig) { a.Title = "a\u200bb" },
 		"content 281":            func(a *AnnounceConfig) { a.Content = strings.Repeat("é", 281) },
 		"content control":        func(a *AnnounceConfig) { a.Content = "a\x07b" },
 		"content bad utf8":       func(a *AnnounceConfig) { a.Content = "\xff" },

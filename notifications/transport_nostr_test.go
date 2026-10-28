@@ -185,7 +185,7 @@ func (s *ackingRelayServer) handle(w http.ResponseWriter, r *http.Request) {
 		if !isEvent {
 			continue
 		}
-		reply, _ := json.Marshal([]interface{}{"OK", evEnv.Event.ID, s.ok, s.reason})
+		reply, _ := json.Marshal([]interface{}{"OK", evEnv.ID, s.ok, s.reason})
 		if err := conn.Write(ctx, websocket.MessageText, reply); err != nil {
 			return
 		}
