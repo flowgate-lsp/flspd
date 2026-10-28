@@ -5,6 +5,14 @@ run:
 
 linters:
   default: standard
+  settings:
+    errcheck:
+      exclude-functions:
+        # Deferred after Commit, where it returns ErrTxClosed by design.
+        - (github.com/jackc/pgx/v5.Tx).Rollback
+        # Fire-and-forget from goroutines; implementations log their own failures.
+        - (github.com/flowgate-lsp/flspd/notifications.Notifier).NotifyOrderStateChanged
+        - (github.com/flowgate-lsp/flspd/lsps.NotificationService).NotifyOrderStateChanged
   exclusions:
     paths:
       - ^web/
