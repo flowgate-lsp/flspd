@@ -217,7 +217,7 @@ func isOnionV3(host string) bool {
 		return false
 	}
 	for _, r := range label {
-		if !((r >= 'a' && r <= 'z') || (r >= '2' && r <= '7')) {
+		if (r < 'a' || r > 'z') && (r < '2' || r > '7') {
 			return false
 		}
 	}
