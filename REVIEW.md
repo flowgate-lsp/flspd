@@ -737,7 +737,7 @@ fixes, not before).
 
 After landing H-1..H-9/H-13/H-14/H-15, ran an 8-angle multi-agent review
 (line-by-line diff scan, removed-behavior audit, cross-file caller/callee
-trace, reuse, simplification, efficiency, altitude, CLAUDE.md conventions)
+trace, reuse, simplification, efficiency, altitude, repo conventions)
 against the fix diff itself, to catch bugs the fixes introduced or gaps they
 left. IDs are `S-1`..`S-10`, most-severe first. `S-1`..`S-4` were fixed;
 `S-5`..`S-10` were judged lower-priority/pre-existing and left as

@@ -2190,9 +2190,7 @@ longer needed — that's a separate call for whoever owns the WIP.
 **Trigger:** LSPS1 orders and LSPS2 JIT buy registrations each grew their own
 partial notion of "how long is this promise good for" and "how much capital
 does it commit" — LSPS1's got finished, LSPS2's didn't. Full review + unified
-redesign: https://claude.ai/code/artifact/2663a979-05c3-433d-8b97-9beb6ea0e353
 Operator dashboard mockup for T7-10:
-https://claude.ai/code/artifact/083f56f9-bf37-436d-9a68-e63543388958
 
 **Second pass (2026-07-21, same day):** the design was reviewed independently
 by a security auditor, a senior Go developer, and an accounting reviewer, each
@@ -2751,8 +2749,5 @@ is the actual deliverable here, given what's already fragile in this area.
 ## Cross-reference to source reports
 
 - Test/architecture audit (F-1…F-8, coverage matrix, itest design):
-  https://claude.ai/code/artifact/5566942a-9b66-42d2-beda-c4bacc8f39f4
 - Repo structure / config UX review (SEC-1, C-1…C-3, config + arbo redesign):
-  https://claude.ai/code/artifact/cd741dd7-ba77-4126-9fbf-48e9756f6621
 - LSPS1/LSPS2 liquidity & expiration review + redesign (F-15…F-21, T7-1…T7-10):
-  https://claude.ai/code/artifact/2663a979-05c3-433d-8b97-9beb6ea0e353
