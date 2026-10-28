@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/flowgate-lsp/flspd/common"
+	"github.com/flowgate-lsp/flspd/core"
+	"github.com/flowgate-lsp/flspd/platform/logging"
 	lsps5 "github.com/flowgate-lsp/nostr-lsps5"
 	"github.com/rs/zerolog/log"
 )
@@ -39,19 +41,19 @@ type Lsps5SetWebhookResponse struct {
 	NoChange    bool `json:"no_change"`
 }
 
-func (s *Server) handleLsps5SetWebhook(req *JsonRpcRequest, peer []byte) *JsonRpcResponse {
+func (s *Handlers) handleLsps5SetWebhook(req *JsonRpcRequest, peer []byte) *JsonRpcResponse {
 	var params Lsps5SetWebhookRequest
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		log.Trace().
 			Err(err).
-			Str("component", string(common.LogComponentLSPS5)).
-			Str("action", string(common.LogActionValidate)).
+			Str("component", string(logging.LogComponentLSPS5)).
+			Str("action", string(logging.LogActionValidate)).
 			Msg("LSPS5: set_webhook invalid params")
 		return NewJsonRpcErrorResponse(req.Id, -32602, "Invalid params", nil)
 	}
 	log.Trace().
-		Str("component", string(common.LogComponentLSPS5)).
-		Str("action", string(common.LogActionRequest)).
+		Str("component", string(logging.LogComponentLSPS5)).
+		Str("action", string(logging.LogActionRequest)).
 		Interface("params", params).
 		Msg("LSPS5: Received set_webhook request")
 
@@ -62,8 +64,8 @@ func (s *Server) handleLsps5SetWebhook(req *JsonRpcRequest, peer []byte) *JsonRp
 	// bLIP-55: app_name must be <= 64 bytes UTF-8
 	if len(params.AppName) > Lsps5MaxAppNameBytes {
 		log.Warn().
-			Str("component", string(common.LogComponentLSPS5)).
-			Str("action", string(common.LogActionReject)).
+			Str("component", string(logging.LogComponentLSPS5)).
+			Str("action", string(logging.LogActionReject)).
 			Int("app_name_length", len(params.AppName)).
 			Msg("LSPS5: set_webhook rejected - app_name too long")
 		return NewJsonRpcErrorResponse(req.Id, Lsps5ErrorTooLong, "too_long: app_name exceeds 64 bytes", nil)
@@ -72,8 +74,8 @@ func (s *Server) handleLsps5SetWebhook(req *JsonRpcRequest, peer []byte) *JsonRp
 	// bLIP-55: webhook must be <= 1024 ASCII characters
 	if len(params.Webhook) > Lsps5MaxWebhookChars {
 		log.Warn().
-			Str("component", string(common.LogComponentLSPS5)).
-			Str("action", string(common.LogActionReject)).
+			Str("component", string(logging.LogComponentLSPS5)).
+			Str("action", string(logging.LogActionReject)).
 			Int("webhook_length", len(params.Webhook)).
 			Msg("LSPS5: set_webhook rejected - webhook too long")
 		return NewJsonRpcErrorResponse(req.Id, Lsps5ErrorTooLong, "too_long: webhook exceeds 1024 characters", nil)
@@ -84,8 +86,8 @@ func (s *Server) handleLsps5SetWebhook(req *JsonRpcRequest, peer []byte) *JsonRp
 		transport = "push"
 	}
 	log.Trace().
-		Str("component", string(common.LogComponentLSPS5)).
-		Str("action", string(common.LogActionValidate)).
+		Str("component", string(logging.LogComponentLSPS5)).
+		Str("action", string(logging.LogActionValidate)).
 		Str("transport", transport).
 		Msg("LSPS5: set_webhook transport selection")
 
@@ -97,8 +99,8 @@ func (s *Server) handleLsps5SetWebhook(req *JsonRpcRequest, peer []byte) *JsonRp
 		if err := common.ValidateWebhookUrl(params.Webhook); err != nil {
 			log.Warn().
 				Err(err).
-				Str("component", string(common.LogComponentLSPS5)).
-				Str("action", string(common.LogActionReject)).
+				Str("component", string(logging.LogComponentLSPS5)).
+				Str("action", string(logging.LogActionReject)).
 				Str("url", params.Webhook).
 				Msg("LSPS5: set_webhook rejected - invalid URL")
 
@@ -117,16 +119,16 @@ func (s *Server) handleLsps5SetWebhook(req *JsonRpcRequest, peer []byte) *JsonRp
 		if _, _, err := lsps5.ParseLsp5Uri(params.Webhook); err != nil {
 			log.Debug().
 				Err(err).
-				Str("component", string(common.LogComponentLSPS5)).
-				Str("action", string(common.LogActionValidate)).
+				Str("component", string(logging.LogComponentLSPS5)).
+				Str("action", string(logging.LogActionValidate)).
 				Str("uri", params.Webhook).
 				Msg("LSPS5: set_webhook invalid nostr URI")
 			return NewJsonRpcErrorResponse(req.Id, Lsps5ErrorUrlParseError, fmt.Sprintf("invalid_nostr_uri: %v", err), nil)
 		}
 	} else {
 		log.Warn().
-			Str("component", string(common.LogComponentLSPS5)).
-			Str("action", string(common.LogActionReject)).
+			Str("component", string(logging.LogComponentLSPS5)).
+			Str("action", string(logging.LogActionReject)).
 			Str("transport", transport).
 			Msg("LSPS5: set_webhook unsupported transport")
 		return NewJsonRpcErrorResponse(req.Id, -32602, "unsupported_transport", nil)
@@ -138,13 +140,13 @@ func (s *Server) handleLsps5SetWebhook(req *JsonRpcRequest, peer []byte) *JsonRp
 	if err != nil {
 		log.Error().
 			Err(err).
-			Str("component", string(common.LogComponentLSPS5)).
-			Str("action", string(common.LogActionFailure)).
+			Str("component", string(logging.LogComponentLSPS5)).
+			Str("action", string(logging.LogActionFailure)).
 			Msg("LSPS5: Failed to fetch existing webhooks")
 		return NewJsonRpcErrorResponse(req.Id, -32603, "Internal error", nil)
 	}
 	log.Trace().
-		Str("component", string(common.LogComponentLSPS5)).
+		Str("component", string(logging.LogComponentLSPS5)).
 		Int("existing_count", len(existingWebhooks)).
 		Msg("LSPS5: set_webhook fetched existing webhooks")
 
@@ -164,7 +166,7 @@ func (s *Server) handleLsps5SetWebhook(req *JsonRpcRequest, peer []byte) *JsonRp
 		return NewJsonRpcErrorResponse(req.Id, Lsps5ErrorTooManyWebhooks, "too_many_webhooks", map[string]int{"max_webhooks": s.config.Lsps5MaxWebhooks})
 	}
 
-	webhook := &common.Lsps5Webhook{
+	webhook := &core.Lsps5Webhook{
 		ClientNodeId: peerId,
 		AppName:      params.AppName,
 		Url:          params.Webhook,
@@ -173,7 +175,7 @@ func (s *Server) handleLsps5SetWebhook(req *JsonRpcRequest, peer []byte) *JsonRp
 	}
 
 	log.Trace().
-		Str("component", string(common.LogComponentLSPS5)).
+		Str("component", string(logging.LogComponentLSPS5)).
 		Str("action", "registering").
 		Str("transport", transport).
 		Str("url", params.Webhook).
@@ -186,8 +188,8 @@ func (s *Server) handleLsps5SetWebhook(req *JsonRpcRequest, peer []byte) *JsonRp
 		if err != nil {
 			log.Error().
 				Err(err).
-				Str("component", string(common.LogComponentLSPS5)).
-				Str("action", string(common.LogActionFailure)).
+				Str("component", string(logging.LogComponentLSPS5)).
+				Str("action", string(logging.LogActionFailure)).
 				Msg("LSPS5: Failed to persist webhook in database")
 			return NewJsonRpcErrorResponse(req.Id, -32603, "Internal error", nil)
 		}
@@ -198,7 +200,7 @@ func (s *Server) handleLsps5SetWebhook(req *JsonRpcRequest, peer []byte) *JsonRp
 		}
 
 		log.Info().
-			Str("component", string(common.LogComponentLSPS5)).
+			Str("component", string(logging.LogComponentLSPS5)).
 			Str("peer_id", peerId).
 			Str("app_name", params.AppName).
 			Str("transport", transport).
@@ -224,19 +226,19 @@ type Lsps5ListWebhooksResponse struct {
 	MaxWebhooks int      `json:"max_webhooks"`
 }
 
-func (s *Server) handleLsps5ListWebhooks(req *JsonRpcRequest, peer []byte) *JsonRpcResponse {
+func (s *Handlers) handleLsps5ListWebhooks(req *JsonRpcRequest, peer []byte) *JsonRpcResponse {
 	peerId := hex.EncodeToString(peer)
 	log.Trace().
-		Str("component", string(common.LogComponentLSPS5)).
-		Str("action", string(common.LogActionRequest)).
+		Str("component", string(logging.LogComponentLSPS5)).
+		Str("action", string(logging.LogActionRequest)).
 		Str("peer_id", peerId).
 		Msg("LSPS5: Received list_webhooks request")
 	webhooks, err := s.openingService.GetLsps5Webhooks(peerId)
 	if err != nil {
 		log.Error().
 			Err(err).
-			Str("component", string(common.LogComponentLSPS5)).
-			Str("action", string(common.LogActionFailure)).
+			Str("component", string(logging.LogComponentLSPS5)).
+			Str("action", string(logging.LogActionFailure)).
 			Str("peer_id", peerId).
 			Msg("LSPS5: Failed to list webhooks from database")
 		return NewJsonRpcErrorResponse(req.Id, -32603, "Internal error", nil)
@@ -252,8 +254,8 @@ func (s *Server) handleLsps5ListWebhooks(req *JsonRpcRequest, peer []byte) *Json
 		MaxWebhooks: s.config.Lsps5MaxWebhooks,
 	}
 	log.Trace().
-		Str("component", string(common.LogComponentLSPS5)).
-		Str("action", string(common.LogActionResponse)).
+		Str("component", string(logging.LogComponentLSPS5)).
+		Str("action", string(logging.LogActionResponse)).
 		Msgf("LSPS5: list_webhooks success, count=%d", len(appNames))
 	return NewJsonRpcResponse(req.Id, resp)
 }
@@ -262,19 +264,19 @@ type Lsps5RemoveWebhookRequest struct {
 	AppName string `json:"app_name"`
 }
 
-func (s *Server) handleLsps5RemoveWebhook(req *JsonRpcRequest, peer []byte) *JsonRpcResponse {
+func (s *Handlers) handleLsps5RemoveWebhook(req *JsonRpcRequest, peer []byte) *JsonRpcResponse {
 	var params Lsps5RemoveWebhookRequest
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		log.Trace().
 			Err(err).
-			Str("component", string(common.LogComponentLSPS5)).
-			Str("action", string(common.LogActionValidate)).
+			Str("component", string(logging.LogComponentLSPS5)).
+			Str("action", string(logging.LogActionValidate)).
 			Msg("LSPS5: remove_webhook invalid params")
 		return NewJsonRpcErrorResponse(req.Id, -32602, "Invalid params", nil)
 	}
 	log.Trace().
-		Str("component", string(common.LogComponentLSPS5)).
-		Str("action", string(common.LogActionRequest)).
+		Str("component", string(logging.LogComponentLSPS5)).
+		Str("action", string(logging.LogActionRequest)).
 		Interface("params", params).
 		Msg("LSPS5: Received remove_webhook request")
 
@@ -287,16 +289,16 @@ func (s *Server) handleLsps5RemoveWebhook(req *JsonRpcRequest, peer []byte) *Jso
 	if err != nil {
 		log.Error().
 			Err(err).
-			Str("component", string(common.LogComponentLSPS5)).
-			Str("action", string(common.LogActionFailure)).
+			Str("component", string(logging.LogComponentLSPS5)).
+			Str("action", string(logging.LogActionFailure)).
 			Msg("LSPS5: Failed to remove webhook from database")
 		// bLIP-55: Return app_name_not_found if not found (we could check error type)
 		return NewJsonRpcErrorResponse(req.Id, Lsps5ErrorAppNameNotFound, "app_name_not_found", nil)
 	}
 
 	log.Trace().
-		Str("component", string(common.LogComponentLSPS5)).
-		Str("action", string(common.LogActionResponse)).
+		Str("component", string(logging.LogComponentLSPS5)).
+		Str("action", string(logging.LogActionResponse)).
 		Msg("LSPS5: remove_webhook success")
 	return NewJsonRpcResponse(req.Id, map[string]interface{}{})
 }

@@ -4,15 +4,30 @@
 
 # Build artifacts
 bin/
+dist/
+tmp/
 flspd
 flspd_revenue_cli
+*.test
 
 # Docker
-Dockerfile
-docker-compose.yml
+deploy/
 .dockerignore
 
-# Data
+# Ephemeral runtime data (flnd wallet/state, postgres data dir, logs) --
+# never belongs in an image layer. See justfile's `clean` recipe, which
+# also deliberately never touches this.
 data/
 *.db
 *.log
+
+# Node/frontend -- irrelevant to the Go image, and web/node_modules alone
+# is 400MB+ of host-specific artifacts that must never end up in a layer.
+node_modules/
+web/node_modules/
+web/dist/
+
+# Editor/agent-local, not needed in the image
+.vscode
+.agents/
+.env

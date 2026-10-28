@@ -12,7 +12,7 @@ import (
 
 	"github.com/rs/zerolog/log"
 
-	"github.com/flowgate-lsp/flspd/postgresql"
+	"github.com/flowgate-lsp/flspd/internal/adapters/postgres"
 	"github.com/urfave/cli"
 )
 
@@ -76,7 +76,7 @@ func revenue(ctx *cli.Context) error {
 		return err
 	}
 
-	forwardsSortedOut := append([]*postgresql.RevenueForward(nil), forwardsSortedIn...)
+	forwardsSortedOut := append([]*postgres.RevenueForward(nil), forwardsSortedIn...)
 	sort.SliceStable(forwardsSortedOut, func(i, j int) bool {
 		first := forwardsSortedOut[i]
 		second := forwardsSortedOut[j]
@@ -212,7 +212,7 @@ func readForwards(fileName string, startNs, endNs uint64) ([]*importedForward, e
 		return nil, fmt.Errorf("failed to read %s: %w", fileName, err)
 	}
 
-	var exported []*postgresql.ExportedForward
+	var exported []*postgres.ExportedForward
 	err = json.Unmarshal(b, &exported)
 	if err != nil {
 		return nil, fmt.Errorf("failed to unmarshal %s: %w", fileName, err)
@@ -246,7 +246,7 @@ func readForwards(fileName string, startNs, endNs uint64) ([]*importedForward, e
 
 // Matches imported forwards to local forwards, in order to isolate the token used. The token is then set on the
 // corresponding local forward. This function sets the token used by the sender.
-func matchImportedForwardsSend(forwardsSortedIn []*postgresql.RevenueForward, importedForwards []*importedForward) {
+func matchImportedForwardsSend(forwardsSortedIn []*postgres.RevenueForward, importedForwards []*importedForward) {
 	forwardIndex := 0
 	importedIndex := 0
 	for {
@@ -295,7 +295,7 @@ func matchImportedForwardsSend(forwardsSortedIn []*postgresql.RevenueForward, im
 
 // Matches imported forwards to local forwards, in order to isolate the token used. The token is then set on the
 // corresponding local forward. This function sets the token used by the recipient.
-func matchImportedForwardsReceive(forwardsSortedOut []*postgresql.RevenueForward, importedForwards []*importedForward) {
+func matchImportedForwardsReceive(forwardsSortedOut []*postgres.RevenueForward, importedForwards []*importedForward) {
 	forwardIndex := 0
 	importedIndex := 0
 	for {
@@ -342,7 +342,7 @@ func matchImportedForwardsReceive(forwardsSortedOut []*postgresql.RevenueForward
 	}
 }
 
-func compare(forward *postgresql.RevenueForward, importedForward *importedForward) int {
+func compare(forward *postgres.RevenueForward, importedForward *importedForward) int {
 	nodeCompare := bytes.Compare(importedForward.nodeid, forward.Nodeid)
 	if nodeCompare > 0 {
 		return FirstBehind
@@ -372,7 +372,7 @@ func compare(forward *postgresql.RevenueForward, importedForward *importedForwar
 // Matches forwards from internal nodes in order to isolate the token used for sending/receiving.
 // This function will match forwards for a single outgoing forward to a single incoming forward from
 // the other node.
-func matchInternalForwards(forwardsSortedIn, forwardsSortedOut []*postgresql.RevenueForward) {
+func matchInternalForwards(forwardsSortedIn, forwardsSortedOut []*postgres.RevenueForward) {
 	outIndex := 0
 	inIndex := 0
 
@@ -421,8 +421,8 @@ func matchInternalForwards(forwardsSortedIn, forwardsSortedOut []*postgresql.Rev
 	}
 }
 
-func matchOpenChannelHtlcs(forwardsSortedOut []*postgresql.RevenueForward, openChannelHtlcs []*postgresql.OpenChannelHtlc) {
-	forwards := append([]*postgresql.RevenueForward(nil), forwardsSortedOut...)
+func matchOpenChannelHtlcs(forwardsSortedOut []*postgres.RevenueForward, openChannelHtlcs []*postgres.OpenChannelHtlc) {
+	forwards := append([]*postgres.RevenueForward(nil), forwardsSortedOut...)
 	sort.SliceStable(forwards, func(i, j int) bool {
 		first := forwards[i]
 		second := forwards[j]
@@ -547,7 +547,7 @@ func matchOpenChannelHtlcs(forwardsSortedOut []*postgresql.RevenueForward, openC
 	}
 }
 
-func calculateRevenue(forwards []*postgresql.RevenueForward) *RevenueResponse {
+func calculateRevenue(forwards []*postgres.RevenueForward) *RevenueResponse {
 	result := &RevenueResponse{
 		Nodes: make([]*NodeRevenue, 0),
 	}

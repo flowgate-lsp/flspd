@@ -1,0 +1,25 @@
+# Dev-only reverse proxy for the Vite frontend. Vite's dev server rejects
+# requests whose Host header isn't localhost/an allowlisted name (DNS-rebinding
+# protection), which breaks access through each dev's own external
+# reverse-proxy hostname. This rewrites the Host header to localhost before
+# forwarding to the frontend container, so any external hostname works
+# without touching Vite's allowlist.
+:80 {
+	reverse_proxy frontend:5173 {
+		header_up Host localhost:5173
+	}
+}
+
+# HTTPS with Caddy's locally-trusted internal CA (self-signed) -- lets you
+# test flows that require a secure context (e.g. WebAuthn, clipboard APIs)
+# without a real certificate. Browsers will show a trust warning unless you
+# import Caddy's root CA (docker compose exec caddy cat
+# /data/caddy/pki/authorities/local/root.crt) into your OS/browser trust
+# store. The `caddy_data` volume persists that CA across container restarts
+# so you don't have to re-trust it every time.
+:443 {
+	tls internal
+	reverse_proxy frontend:5173 {
+		header_up Host localhost:5173
+	}
+}

@@ -4,7 +4,7 @@ A private, disposable Flokicoin regtest network for local development and
 for backing the YAML-driven integration tests (see `BACKLOG.md` Phase 4).
 Everything here is built from source (never a production/release image),
 mirroring the sibling-checkout convention the top-level
-`docker-compose.dev.yml` already uses for its single-instance dev `flnd`.
+`deploy/docker-compose.dev.yml` already uses for its single-instance dev `flnd`.
 
 **Native Flokicoin only — no Bitcoin Core anywhere.** The chain backend is
 `lokid` (go-flokicoin's own full node daemon), and `flnd` connects to it

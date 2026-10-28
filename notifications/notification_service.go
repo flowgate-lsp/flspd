@@ -5,15 +5,18 @@ import (
 	"sync"
 	"time"
 
-	"github.com/flowgate-lsp/flspd/common"
+	"github.com/flowgate-lsp/flspd/core"
 	"github.com/flowgate-lsp/flspd/lightning"
+	"github.com/flowgate-lsp/flspd/platform/logging"
+	"github.com/flowgate-lsp/flspd/ports"
 	"github.com/rs/zerolog/log"
 )
 
 // Notifier is an interface for sending LSPS5 webhook notifications and other alerts.
 type Notifier interface {
 	Notify(pubkey string, paymenthash string, nodePrivKey interface{}) (bool, error)
-	NotifyWebhookRegistered(pubkey string, webhook *common.Lsps5Webhook) bool
+	NotifyAsync(pubkey string, paymenthash string, nodePrivKey interface{})
+	NotifyWebhookRegistered(pubkey string, webhook *core.Lsps5Webhook) bool
 	NotifyOrderStateChanged(pubkey string, orderId string, state string, channelPoint string, errorMsg string) (bool, error)
 	NotifyExpirySoon(pubkey string, timeout int, nodePrivKey interface{}, paymentHash string) (bool, error)
 	NotifyLiquidityManagementRequest(pubkey string, nodePrivKey interface{}) (bool, error)
@@ -26,13 +29,13 @@ var cleanInterval time.Duration = time.Minute * 2
 type NotificationService struct {
 	mtx                 sync.Mutex
 	recentNotifications map[string]time.Time
-	openingStore        common.OpeningStore
-	nodesService        common.NodesService
+	openingStore        ports.OpeningStore
+	nodesService        ports.NodesService
 	store               Store
 	transports          map[TransportType]NotificationTransport
 }
 
-func NewNotificationService(openingStore common.OpeningStore, nodesService common.NodesService, store Store) *NotificationService {
+func NewNotificationService(openingStore ports.OpeningStore, nodesService ports.NodesService, store Store) *NotificationService {
 	s := &NotificationService{
 		openingStore:        openingStore,
 		recentNotifications: make(map[string]time.Time),
@@ -108,7 +111,7 @@ func (s *NotificationService) processPending(ctx context.Context) {
 
 	for _, item := range items {
 		// Prepare temp webhook
-		webhook := &common.Lsps5Webhook{
+		webhook := &core.Lsps5Webhook{
 			Url:       item.TargetURL,
 			Transport: item.Transport,
 		}
@@ -139,39 +142,32 @@ func (s *NotificationService) processPending(ctx context.Context) {
 	}
 }
 
-// Notify sends an lsps5.payment_incoming notification to all registered webhooks
-// for the given pubkey. This is compliant with bLIP-55 (LSPS5) specification.
-// nodePrivKey should be a *btcec.PrivateKey for signing the notification.
+// Notify sends an lsps5.payment_incoming notification to all registered
+// webhooks for the given pubkey, waiting for delivery (up to a 7s context)
+// and returning whether the client was actually reached. This is
+// compliant with bLIP-55 (LSPS5) specification. nodePrivKey should be a
+// *btcec.PrivateKey for signing the notification.
+//
+// The synchronous wait matters: interceptor's notifyAndWait depends on
+// this return value as a fast-fail signal (client unreachable -> resume
+// the HTLC now rather than blocking up to NotificationTimeout for a
+// WaitOnline that will never succeed). Callers that don't need that
+// signal (the peer is already known-connected; this is a courtesy push)
+// should use NotifyAsync instead, which skips the wait entirely (P-4).
 func (s *NotificationService) Notify(
 	pubkey string,
 	paymenthash string,
 	nodePrivKey interface{},
 ) (bool, error) {
-	s.mtx.Lock()
-	lastTime, ok := s.recentNotifications[paymentIdentifier(pubkey, paymenthash)]
-	s.mtx.Unlock()
-	if ok && lastTime.Add(minNotificationInterval).After(time.Now()) {
-		// Treat as if we notified if the notification was recent.
-		return true, nil
-	}
-
-	webhooks, err := s.openingStore.GetLsps5Webhooks(pubkey)
+	webhooks, deduped, err := s.paymentIncomingWebhooks(pubkey, paymenthash)
 	if err != nil {
-		log.Error().
-			Err(err).
-			Str("component", string(common.LogComponentNotifications)).
-			Str("action", string(common.LogActionFailure)).
-			Str("pubkey", pubkey).
-			Msg("Notifications: Failed to fetch webhooks")
 		return false, err
 	}
-
-	log.Debug().
-		Str("component", string(common.LogComponentNotifications)).
-		Str("action", string(common.LogActionRequest)).
-		Str("pubkey", pubkey).
-		Int("webhooks_count", len(webhooks)).
-		Msg("Notifications: Dispatching lsps5.payment_incoming to all webhooks")
+	if deduped {
+		// Treat as if we notified: this (pubkey, paymenthash) pair was
+		// already dispatched inside the dedup window.
+		return true, nil
+	}
 
 	var mtx sync.Mutex
 	var wg sync.WaitGroup
@@ -180,10 +176,10 @@ func (s *NotificationService) Notify(
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*7)
 
 	for _, w := range webhooks {
-		go func(w *common.Lsps5Webhook) {
+		go func(w *core.Lsps5Webhook) {
 			defer wg.Done()
 			log.Trace().
-				Str("component", string(common.LogComponentNotifications)).
+				Str("component", string(logging.LogComponentNotifications)).
 				Str("action", "dispatch_one").
 				Str("url", w.Url).
 				Str("transport", w.Transport).
@@ -203,17 +199,90 @@ func (s *NotificationService) Notify(
 	cancel()
 
 	log.Debug().
-		Str("component", string(common.LogComponentNotifications)).
-		Str("action", string(common.LogActionResponse)).
+		Str("component", string(logging.LogComponentNotifications)).
+		Str("action", string(logging.LogActionResponse)).
 		Str("pubkey", pubkey).
 		Bool("notified", notified).
 		Msg("Notifications: Finished dispatching notifications")
 	if notified {
-		s.mtx.Lock()
-		s.recentNotifications[paymentIdentifier(pubkey, paymenthash)] = time.Now()
-		s.mtx.Unlock()
+		s.markRecentlyNotified(pubkey, paymenthash)
 	}
 	return notified, nil
+}
+
+// NotifyAsync durably enqueues an lsps5.payment_incoming notification for
+// all of pubkey's registered webhooks and returns immediately -- delivery
+// happens on the next background worker tick (runWorker, up to 10s later),
+// not inline on the caller's path. Only correct for callers that don't
+// depend on knowing whether the client was actually reached (see Notify's
+// doc comment); today that's exactly intercept_handler.go's
+// isConnected-already-true branch, a courtesy push with no decision
+// riding on its outcome.
+func (s *NotificationService) NotifyAsync(
+	pubkey string,
+	paymenthash string,
+	nodePrivKey interface{},
+) {
+	webhooks, deduped, err := s.paymentIncomingWebhooks(pubkey, paymenthash)
+	if err != nil || deduped {
+		return
+	}
+
+	ctx := context.Background()
+	for _, w := range webhooks {
+		if _, err := s.store.Enqueue(ctx, pubkey, w.Url, w.Transport, lightning.Lsps5MethodPaymentIncoming, &lightning.Lsps5PaymentIncomingParams{
+			PaymentHash: paymenthash,
+		}); err != nil {
+			log.Error().
+				Err(err).
+				Str("component", string(logging.LogComponentNotifications)).
+				Str("action", string(logging.LogActionFailure)).
+				Str("url", w.Url).
+				Msg("Notifications: NotifyAsync failed to enqueue")
+		}
+	}
+	s.markRecentlyNotified(pubkey, paymenthash)
+}
+
+// paymentIncomingWebhooks is Notify/NotifyAsync's shared prelude: the
+// recent-notification dedup check and the webhook lookup. deduped is true
+// (with a nil error and nil webhooks) when this (pubkey, paymenthash) pair
+// was already dispatched inside the dedup window -- callers must treat
+// that as "already notified" (Notify returns true), not as "zero
+// webhooks to iterate".
+func (s *NotificationService) paymentIncomingWebhooks(pubkey, paymenthash string) (webhooks []*core.Lsps5Webhook, deduped bool, err error) {
+	s.mtx.Lock()
+	lastTime, recent := s.recentNotifications[paymentIdentifier(pubkey, paymenthash)]
+	s.mtx.Unlock()
+	if recent && lastTime.Add(minNotificationInterval).After(time.Now()) {
+		return nil, true, nil
+	}
+
+	webhooks, err = s.openingStore.GetLsps5Webhooks(pubkey)
+	if err != nil {
+		log.Error().
+			Err(err).
+			Str("component", string(logging.LogComponentNotifications)).
+			Str("action", string(logging.LogActionFailure)).
+			Str("pubkey", pubkey).
+			Msg("Notifications: Failed to fetch webhooks")
+		return nil, false, err
+	}
+
+	log.Debug().
+		Str("component", string(logging.LogComponentNotifications)).
+		Str("action", string(logging.LogActionRequest)).
+		Str("pubkey", pubkey).
+		Int("webhooks_count", len(webhooks)).
+		Msg("Notifications: Dispatching lsps5.payment_incoming to all webhooks")
+
+	return webhooks, false, nil
+}
+
+func (s *NotificationService) markRecentlyNotified(pubkey, paymenthash string) {
+	s.mtx.Lock()
+	s.recentNotifications[paymentIdentifier(pubkey, paymenthash)] = time.Now()
+	s.mtx.Unlock()
 }
 
 // NotifyWebhookRegistered sends the lsps5.webhook_registered notification to a single
@@ -221,11 +290,11 @@ func (s *NotificationService) Notify(
 // webhook, not to all webhooks.
 func (s *NotificationService) NotifyWebhookRegistered(
 	pubkey string,
-	webhook *common.Lsps5Webhook,
+	webhook *core.Lsps5Webhook,
 ) bool {
 	log.Info().
-		Str("component", string(common.LogComponentNotifications)).
-		Str("action", string(common.LogActionRequest)).
+		Str("component", string(logging.LogComponentNotifications)).
+		Str("action", string(logging.LogActionRequest)).
 		Str("pubkey", pubkey).
 		Str("url", webhook.Url).
 		Msg("Notifications: Sending lsps5.webhook_registered to newly registered webhook")
@@ -248,8 +317,8 @@ func (s *NotificationService) NotifyExpirySoon(
 	if err != nil {
 		log.Error().
 			Err(err).
-			Str("component", string(common.LogComponentNotifications)).
-			Str("action", string(common.LogActionFailure)).
+			Str("component", string(logging.LogComponentNotifications)).
+			Str("action", string(logging.LogActionFailure)).
 			Str("pubkey", pubkey).
 			Msg("Notifications: Failed to fetch webhooks for expiry_soon")
 		return false, err
@@ -264,7 +333,7 @@ func (s *NotificationService) NotifyExpirySoon(
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*7)
 
 	for _, w := range webhooks {
-		go func(w *common.Lsps5Webhook) {
+		go func(w *core.Lsps5Webhook) {
 			defer wg.Done()
 			currentNotified := s.enqueueAndDeliver(ctx, pubkey, w, lightning.Lsps5MethodExpirySoon, params)
 			if currentNotified {
@@ -297,7 +366,7 @@ func (s *NotificationService) NotifyLiquidityManagementRequest(
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*7)
 
 	for _, w := range webhooks {
-		go func(w *common.Lsps5Webhook) {
+		go func(w *core.Lsps5Webhook) {
 			defer wg.Done()
 			currentNotified := s.enqueueAndDeliver(ctx, pubkey, w, lightning.Lsps5MethodLiquidityManagementRequest, map[string]interface{}{})
 			if currentNotified {
@@ -334,8 +403,8 @@ func (s *NotificationService) NotifyOrderStateChanged(
 	if err != nil {
 		log.Error().
 			Err(err).
-			Str("component", string(common.LogComponentNotifications)).
-			Str("action", string(common.LogActionFailure)).
+			Str("component", string(logging.LogComponentNotifications)).
+			Str("action", string(logging.LogActionFailure)).
 			Str("pubkey", pubkey).
 			Msg("Notifications: Failed to fetch webhooks for order_state_changed")
 		return false, err
@@ -349,8 +418,8 @@ func (s *NotificationService) NotifyOrderStateChanged(
 	}
 
 	log.Debug().
-		Str("component", string(common.LogComponentNotifications)).
-		Str("action", string(common.LogActionRequest)).
+		Str("component", string(logging.LogComponentNotifications)).
+		Str("action", string(logging.LogActionRequest)).
 		Str("pubkey", pubkey).
 		Str("order_id", orderId).
 		Str("state", state).
@@ -364,10 +433,10 @@ func (s *NotificationService) NotifyOrderStateChanged(
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*7)
 
 	for _, w := range webhooks {
-		go func(w *common.Lsps5Webhook) {
+		go func(w *core.Lsps5Webhook) {
 			defer wg.Done()
 			log.Trace().
-				Str("component", string(common.LogComponentNotifications)).
+				Str("component", string(logging.LogComponentNotifications)).
 				Str("action", "dispatch_one").
 				Str("url", w.Url).
 				Str("transport", w.Transport).
@@ -403,7 +472,7 @@ func (s *NotificationService) NotifyOnionMessageIncoming(
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*7)
 
 	for _, w := range webhooks {
-		go func(w *common.Lsps5Webhook) {
+		go func(w *core.Lsps5Webhook) {
 			defer wg.Done()
 			currentNotified := s.enqueueAndDeliver(ctx, pubkey, w, lightning.Lsps5MethodOnionMessageIncoming, map[string]interface{}{})
 			if currentNotified {
@@ -424,14 +493,14 @@ func (s *NotificationService) deliverOne(
 	ctx context.Context,
 	method string,
 	params interface{},
-	webhook *common.Lsps5Webhook,
+	webhook *core.Lsps5Webhook,
 ) bool {
 	s.mtx.Lock()
 	transport, ok := s.transports[TransportType(webhook.Transport)]
 	s.mtx.Unlock()
 
 	log.Trace().
-		Str("component", string(common.LogComponentNotifications)).
+		Str("component", string(logging.LogComponentNotifications)).
 		Str("action", "deliver_one").
 		Str("method", method).
 		Str("url", webhook.Url).
@@ -440,8 +509,8 @@ func (s *NotificationService) deliverOne(
 
 	if !ok {
 		log.Error().
-			Str("component", string(common.LogComponentNotifications)).
-			Str("action", string(common.LogActionFailure)).
+			Str("component", string(logging.LogComponentNotifications)).
+			Str("action", string(logging.LogActionFailure)).
 			Str("transport", webhook.Transport).
 			Msg("Notifications: Unsupported transport type")
 		return false
@@ -451,8 +520,8 @@ func (s *NotificationService) deliverOne(
 	if err != nil {
 		log.Error().
 			Err(err).
-			Str("component", string(common.LogComponentNotifications)).
-			Str("action", string(common.LogActionFailure)).
+			Str("component", string(logging.LogComponentNotifications)).
+			Str("action", string(logging.LogActionFailure)).
 			Str("url", webhook.Url).
 			Str("method", method).
 			Str("transport", string(transport.Type())).
@@ -461,8 +530,8 @@ func (s *NotificationService) deliverOne(
 	}
 
 	log.Info().
-		Str("component", string(common.LogComponentNotifications)).
-		Str("action", string(common.LogActionSuccess)).
+		Str("component", string(logging.LogComponentNotifications)).
+		Str("action", string(logging.LogActionSuccess)).
 		Str("method", method).
 		Str("transport", string(transport.Type())).
 		Msg("Notifications: Delivery succeeded")
@@ -473,7 +542,7 @@ func (s *NotificationService) deliverOne(
 func (s *NotificationService) enqueueAndDeliver(
 	ctx context.Context,
 	pubkey string,
-	webhook *common.Lsps5Webhook,
+	webhook *core.Lsps5Webhook,
 	method string,
 	params interface{},
 ) bool {

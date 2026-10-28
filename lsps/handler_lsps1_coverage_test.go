@@ -2,15 +2,17 @@ package lsps
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
 
-	"github.com/flokiorg/flnd/lnrpc"
-	"github.com/flowgate-lsp/flspd/common"
-	"github.com/flowgate-lsp/flspd/config"
+	"github.com/flokiorg/flnd/lnrpc/invoicesrpc"
+	"github.com/flowgate-lsp/flspd/core"
+	"github.com/flowgate-lsp/flspd/platform/config"
 
 	// "github.com/flowgate-lsp/flspd/lsps/mocks" // Removed
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 )
 
 func TestHandleLsps1CreateOrder_Matrix(t *testing.T) {
@@ -60,8 +62,9 @@ func TestHandleLsps1CreateOrder_Matrix(t *testing.T) {
 			clientBalance: "0",
 			lspBalance:    "10000", // < MinChan (20000)
 			mockSetup: func(lm *MockLiquidityManager, ns *MockNodesService, os *MockOpeningService, lc *MockLndClient, notif *MockNotificationService) {
-				lm.On("CheckOnChainLiquidity", mock.Anything, uint64(10000)).Return(nil)
+				mockSufficientLiquidity(lm)
 				ns.On("GetMinChannelCapacity").Return(MinChan)
+				os.On("CountLsps1Orders", mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
 			},
 			expectCode: 100,
 			expectMsg:  "Channel capacity too small",
@@ -71,15 +74,15 @@ func TestHandleLsps1CreateOrder_Matrix(t *testing.T) {
 			clientBalance: "0",
 			lspBalance:    "50000",
 			mockSetup: func(lm *MockLiquidityManager, ns *MockNodesService, os *MockOpeningService, lc *MockLndClient, notif *MockNotificationService) {
-				lm.On("CheckOnChainLiquidity", mock.Anything, uint64(50000)).Return(nil)
+				mockSufficientLiquidity(lm)
 				ns.On("GetMinChannelCapacity").Return(MinChan)
-				ns.On("GetNodes").Return([]*common.Node{{NodeConfig: &config.NodeConfig{}}})
-				os.On("GetFeeParamsMenu", mock.Anything, mock.Anything).Return([]*common.OpeningFeeParams{{
+				ns.On("GetNodes").Return([]*core.Node{{NodeConfig: config.NewNodeConfigRef(&config.NodeConfig{})}})
+				os.On("GetFeeParamsMenu", mock.Anything, mock.Anything).Return([]*core.OpeningFeeParams{{
 					MinFeeMloki: 1000, Proportional: 100,
 				}}, nil)
 				os.On("CountLsps1Orders", mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
-				lc.On("AddInvoice", mock.Anything, mock.Anything).Return(&lnrpc.AddInvoiceResponse{PaymentRequest: "lnbc..."}, nil)
-				os.On("RegisterLsps1Order", mock.Anything).Return(nil)
+				lc.On("AddHoldInvoice", mock.Anything, mock.Anything).Return(&invoicesrpc.AddHoldInvoiceResp{PaymentRequest: "lnbc..."}, nil)
+				lm.On("ReserveLsps1Order", mock.Anything, mock.Anything).Return(true, nil)
 				notif.On("NotifyOrderStateChanged", mock.Anything, mock.Anything, "CREATED", "", "").Return(true, nil)
 			},
 			expectCode: 0, // Success (no error field in response, but test checks result != nil)
@@ -108,7 +111,7 @@ func TestHandleLsps1CreateOrder_Matrix(t *testing.T) {
 			maxExpiry := uint32(201600)
 			orderExpiry := uint32(86400)
 
-			mockNS.On("GetNodes").Return([]*common.Node{{NodeConfig: &config.NodeConfig{
+			mockNS.On("GetNodes").Return([]*core.Node{{NodeConfig: config.NewNodeConfigRef(&config.NodeConfig{
 				Lsps1MinRequiredChannelConfirmations: &minReqConf,
 				Lsps1MinFundingConfirmsWithinBlocks:  &minFundingConf,
 				Lsps1SupportsZeroChannelReserve:      &supportsZeroReserve,
@@ -120,19 +123,19 @@ func TestHandleLsps1CreateOrder_Matrix(t *testing.T) {
 				Lsps1MaxInitialLspBalanceLoki:        &maxLsp,
 				Lsps1MinChannelBalanceLoki:           &minChan,
 				Lsps1MaxChannelBalanceLoki:           &maxChan,
-			}}}).Maybe()
+			})}}).Maybe()
 
 			if tt.mockSetup != nil {
 				tt.mockSetup(mockLM, mockNS, mockOS, mockLC, mockNotif)
 			} else {
 				// Default permissive mocks for validations that proceed far enough to need them
-				mockLM.On("CheckOnChainLiquidity", mock.Anything, mock.Anything).Return(nil).Maybe()
+				mockSufficientLiquidity(mockLM)
 				mockNS.On("GetMinChannelCapacity").Return(MinChan).Maybe()
 			}
 
 			// Server setup
 			cfg := Config{Lsps1MaxPendingOrders: 10}
-			server := NewServer(cfg, mockLC, mockNS, mockOS, mockLM, mockNotif)
+			server := NewHandlers(cfg, mockLC, mockNS, mockOS, mockLM, mockNotif, nil)
 
 			// Request construction
 			reqData := map[string]interface{}{
@@ -168,4 +171,103 @@ func TestHandleLsps1CreateOrder_Matrix(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestHandleLsps1CreateOrder_FeeMatchesUnifiedFeeFunction is the
+// regression test for F-5: handleLsps1CreateOrder used to compute its fee
+// with its own hand-rolled floor(max(proportional, min)) logic instead of
+// ComputeOpeningFee (the function LSPS2's handler already used), which
+// rounds differently (ceiling, with overflow checks) for the same
+// logical "opening fee" concept. Picks a proportional/capacity
+// combination with a non-exact remainder specifically so the two
+// rounding rules would disagree if LSPS1 weren't actually calling the
+// shared function.
+func TestHandleLsps1CreateOrder_FeeMatchesUnifiedFeeFunction(t *testing.T) {
+	const (
+		// Chosen (and >= the 20,000 loki network floor) so
+		// capacity*proportional = 2,999,500 sits just past a 1000-mloki
+		// (1 loki) boundary: the old floor-in-loki-space formula rounds
+		// down to 2 loki, but ComputeOpeningFee's ceiling-in-mloki-space
+		// rounds up to 3000 mloki = 3 loki before the mloki->loki
+		// conversion. Not every capacity/proportional pair exercises
+		// this — most land on the same integer loki value either way —
+		// this one specifically doesn't.
+		lspBalanceLoki = uint64(29_995)
+		minFeeMloki    = uint64(100)
+		proportional   = uint32(100)
+	)
+
+	wantFeeMloki, err := ComputeOpeningFee(lspBalanceLoki*1000, minFeeMloki, uint64(proportional))
+	require.NoError(t, err)
+	wantFeeLoki := int64(wantFeeMloki / 1000)
+
+	// Sanity: confirm this fixture actually exercises the ceiling-vs-floor
+	// difference, i.e. the old hand-rolled floor formula would have
+	// produced a different (smaller-or-equal) result — otherwise this
+	// test wouldn't actually catch a regression back to the old logic.
+	oldFloorFeeLoki := int64((lspBalanceLoki * uint64(proportional)) / 1_000_000)
+	if oldFloorFeeLoki > int64(minFeeMloki/1000) {
+		require.NotEqual(t, oldFloorFeeLoki, wantFeeLoki, "fixture must exercise a case where ceiling (new) and floor (old) rounding actually disagree")
+	}
+
+	mockLM := new(MockLiquidityManager)
+	mockNS := new(MockNodesService)
+	mockOS := new(MockOpeningService)
+	mockLC := new(MockLndClient)
+	mockNotif := new(MockNotificationService)
+
+	minClient, maxClient := uint64(0), uint64(100_000_000)
+	minLsp, maxLsp := uint64(0), uint64(100_000_000)
+	minChan, maxChan := uint64(20_000), uint64(100_000_000)
+	minReqConf, minFundingConf := uint16(0), uint16(1)
+	supportsZeroReserve := true
+	maxExpiry, orderExpiry := uint32(201_600), uint32(86_400)
+
+	mockNS.On("GetNodes").Return([]*core.Node{{NodeConfig: config.NewNodeConfigRef(&config.NodeConfig{
+		Lsps1MinRequiredChannelConfirmations: &minReqConf,
+		Lsps1MinFundingConfirmsWithinBlocks:  &minFundingConf,
+		Lsps1SupportsZeroChannelReserve:      &supportsZeroReserve,
+		Lsps1MaxChannelExpiryBlocks:          &maxExpiry,
+		Lsps1OrderExpirySeconds:              &orderExpiry,
+		Lsps1MinInitialClientBalanceLoki:     &minClient,
+		Lsps1MaxInitialClientBalanceLoki:     &maxClient,
+		Lsps1MinInitialLspBalanceLoki:        &minLsp,
+		Lsps1MaxInitialLspBalanceLoki:        &maxLsp,
+		Lsps1MinChannelBalanceLoki:           &minChan,
+		Lsps1MaxChannelBalanceLoki:           &maxChan,
+	})}})
+	mockNS.On("GetMinChannelCapacity").Return(minChan)
+	mockSufficientLiquidity(mockLM)
+	mockOS.On("GetFeeParamsMenu", mock.Anything, mock.Anything).Return([]*core.OpeningFeeParams{{
+		MinFeeMloki: minFeeMloki, Proportional: proportional,
+	}}, nil)
+	mockOS.On("CountLsps1Orders", mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
+	mockLC.On("AddHoldInvoice", mock.Anything, mock.MatchedBy(func(req *invoicesrpc.AddHoldInvoiceRequest) bool {
+		return req.Value == wantFeeLoki // clientBalance is 0, so order total == fee
+	})).Return(&invoicesrpc.AddHoldInvoiceResp{PaymentRequest: "lnbc..."}, nil)
+	mockLM.On("ReserveLsps1Order", mock.Anything, mock.MatchedBy(func(order *core.Lsps1Order) bool {
+		return order.FeeTotalLoki == wantFeeLoki
+	})).Return(true, nil)
+	mockNotif.On("NotifyOrderStateChanged", mock.Anything, mock.Anything, "CREATED", "", "").Return(true, nil)
+
+	server := NewHandlers(Config{Lsps1MaxPendingOrders: 10}, mockLC, mockNS, mockOS, mockLM, mockNotif, nil)
+
+	reqData := map[string]interface{}{
+		"client_balance_loki":            "0",
+		"lsp_balance_loki":               fmt.Sprintf("%d", lspBalanceLoki),
+		"required_channel_confirmations": 0,
+		"funding_confirms_within_blocks": 1,
+		"channel_expiry_blocks":          144,
+		"token":                          "",
+		"refund_onchain_address":         "",
+		"announce_channel":               false,
+	}
+	paramsBytes, _ := json.Marshal(reqData)
+	req := &JsonRpcRequest{Id: 1, Method: "lsps1.create_order", Params: paramsBytes, JsonRpc: "2.0"}
+
+	resp := server.handleLsps1CreateOrder(req, []byte("peer_id"))
+
+	require.Nil(t, resp.Error)
+	mockOS.AssertExpectations(t)
+	mockLC.AssertExpectations(t)
 }

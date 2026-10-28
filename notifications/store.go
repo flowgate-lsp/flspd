@@ -4,12 +4,12 @@ import (
 	"context"
 	"time"
 
-	"github.com/flowgate-lsp/flspd/common"
+	"github.com/flowgate-lsp/flspd/core"
 )
 
 type Store interface {
 	Register(ctx context.Context, pubkey string, url string, transport string) error
-	GetRegistrations(ctx context.Context, pubkey string) ([]common.NotificationRegistration, error)
+	GetRegistrations(ctx context.Context, pubkey string) ([]core.NotificationRegistration, error)
 	Unsubscribe(ctx context.Context, pubkey string, url string) error
 	RemoveExpired(ctx context.Context, before time.Time) error
 

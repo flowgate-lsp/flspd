@@ -1,0 +1,23 @@
+# syntax=docker/dockerfile:1.4
+FROM golang:1.26.1-alpine AS dev
+
+RUN apk add --no-cache git
+
+ENV CGO_ENABLED=0
+
+WORKDIR /app
+
+RUN go install github.com/air-verse/air@latest
+
+# Copy go.mod/go.sum first to leverage layer caching.
+COPY go.mod go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
+
+# Baseline copy so the image is runnable even without the dev bind mount;
+# deploy/docker-compose.dev.yml overlays the live working tree on top of
+# this at runtime, which is what air actually watches/rebuilds.
+COPY . .
+
+EXPOSE 9090 8080
+
+ENTRYPOINT ["air", "-c", ".air.toml"]

@@ -9,15 +9,23 @@ It is designed to work with an [flnd](https://github.com/flokiorg/flnd) (Flokico
 The easiest way to run `flspd` is using the provided Docker setup.
 
 1.  **Configure Environment**:
-    Copy `sample.env` to `.env` and update the `NODES` and `DATABASE_URL` settings.
+    Copy `deploy/compose.env.sample` to `.env` and update the `NODES` and `DATABASE_URL` settings.
     ```bash
-    cp sample.env .env
+    cp deploy/compose.env.sample .env
     # Edit .env with your favorite editor
     ```
 
-2.  **Run with Docker Compose**:
+2.  **Configure Nodes**:
+    Copy `deploy/nodes.prod.sample.yaml` to `deploy/nodes.prod.yaml`, fill in your node details, and point `NODES_CONFIG_PATH` in `.env` at it.
     ```bash
-    docker-compose up -d
+    cp deploy/nodes.prod.sample.yaml deploy/nodes.prod.yaml
+    # Edit deploy/nodes.prod.yaml, then set NODES_CONFIG_PATH=./deploy/nodes.prod.yaml in .env
+    ```
+    (`deploy/nodes.dev.sample.yaml` is the equivalent for the local dev stack — see `just docker up`.)
+
+3.  **Run with Docker Compose**:
+    ```bash
+    docker compose -f deploy/docker-compose.prod.yml --project-directory . up -d
     ```
     This will start `flspd` and a `postgres` database. Ensure your `flnd` node is running and accessible (as configured in `NODES`).
 
@@ -50,17 +58,12 @@ When a client (Alice) wants to receive a payment but lacks sufficient inbound ca
 The difference represents the LSP fee. `flspd` intercepts the incoming HTLC from the upstream node and opens a channel to Alice on-the-fly (Zero-Conf) to fulfill the payment.
 
 ## Integration Tests
-To run integration tests, you need:
-*   Docker
-*   `flnd` binary
-*   `lokid` binary
+Integration tests run against a real, disposable Flokicoin regtest devnet
+(native `lokid` + `flnd`, no Bitcoin Core) — see `test/devnet/README.md`
+for the devnet itself. You need Docker; the devnet builds `flnd`/`lokid`
+from source on first run, no separate binary paths to configure.
 
 Run tests from the root directory:
 ```bash
-go test -timeout 20m -v ./itest \
-  --lndexec /path/to/flnd \
-  --lndmobileexec /path/to/flnd \
-  --bitcoindexec /path/to/lokid \
-  --bitcoincliexec /path/to/lokicli \
-  --flspdexec /path/to/built/flspd
+go test -timeout 20m -v ./test/itest/...
 ```

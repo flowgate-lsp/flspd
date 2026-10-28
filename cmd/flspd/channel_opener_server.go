@@ -12,10 +12,11 @@ import (
 
 	ecies "github.com/ecies/go/v2"
 	btcec "github.com/flokiorg/go-flokicoin/crypto"
+	rpc "github.com/flowgate-lsp/flspd/api/proto/rpc"
 	"github.com/flowgate-lsp/flspd/common"
-	"github.com/flowgate-lsp/flspd/format"
+	"github.com/flowgate-lsp/flspd/core"
 	"github.com/flowgate-lsp/flspd/interceptor"
-	rpc "github.com/flowgate-lsp/flspd/rpc"
+	"github.com/flowgate-lsp/flspd/ports"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/flokiorg/flnd/lnwire"
@@ -25,12 +26,12 @@ import (
 type channelOpenerServer struct {
 	rpc.ChannelOpenerServer
 	store          interceptor.InterceptStore
-	openingService common.OpeningService
+	openingService ports.OpeningService
 }
 
 func NewChannelOpenerServer(
 	store interceptor.InterceptStore,
-	openingService common.OpeningService,
+	openingService ports.OpeningService,
 ) *channelOpenerServer {
 	return &channelOpenerServer{
 		store:          store,
@@ -61,20 +62,21 @@ func (s *channelOpenerServer) ChannelInformation(ctx context.Context, in *rpc.Ch
 		})
 	}
 
+	cfg := node.NodeConfig.Load()
 	return &rpc.ChannelInformationReply{
-		Name:                   node.NodeConfig.Name,
-		Pubkey:                 node.NodeConfig.NodePubkey,
-		Host:                   node.NodeConfig.Host,
-		ChannelCapacity:        int64(node.NodeConfig.PublicChannelAmount),
-		TargetConf:             int32(node.NodeConfig.TargetConf),
-		MinHtlcMloki:           int64(node.NodeConfig.MinHtlcMloki),
-		BaseFeeMloki:           int64(node.NodeConfig.BaseFeeMloki),
-		FeeRate:                node.NodeConfig.FeeRate,
-		TimeLockDelta:          node.NodeConfig.TimeLockDelta,
-		ChannelFeePermyriad:    int64(node.NodeConfig.ChannelFeePermyriad),
-		ChannelMinimumFeeMloki: int64(node.NodeConfig.ChannelMinimumFeeMloki),
+		Name:                   cfg.Name,
+		Pubkey:                 cfg.NodePubkey,
+		Host:                   cfg.Host,
+		ChannelCapacity:        int64(cfg.PublicChannelAmount),
+		TargetConf:             int32(cfg.TargetConf),
+		MinHtlcMloki:           int64(cfg.MinHtlcMloki),
+		BaseFeeMloki:           int64(cfg.BaseFeeMloki),
+		FeeRate:                cfg.FeeRate,
+		TimeLockDelta:          cfg.TimeLockDelta,
+		ChannelFeePermyriad:    int64(cfg.ChannelFeePermyriad),
+		ChannelMinimumFeeMloki: int64(cfg.ChannelMinimumFeeMloki),
 		LspPubkey:              node.PublicKey.SerializeCompressed(), // TODO: Is the publicKey different from the ecies public key?
-		MaxInactiveDuration:    int64(node.NodeConfig.MaxInactiveDuration),
+		MaxInactiveDuration:    int64(cfg.MaxInactiveDuration),
 		OpeningFeeParamsMenu:   menu,
 	}, nil
 }
@@ -119,7 +121,7 @@ func (s *channelOpenerServer) RegisterPayment(
 	// clients to use opening_fee_params.
 	if pi.OpeningFeeParams != nil {
 		valid := s.openingService.ValidateOpeningFeeParams(
-			&common.OpeningFeeParams{
+			&core.OpeningFeeParams{
 				MinFeeMloki:          pi.OpeningFeeParams.MinMloki,
 				Proportional:         pi.OpeningFeeParams.Proportional,
 				ValidUntil:           pi.OpeningFeeParams.ValidUntil,
@@ -135,11 +137,12 @@ func (s *channelOpenerServer) RegisterPayment(
 	} else {
 		tokenHash := sha256.Sum256([]byte(token))
 		log.Info().Msgf("DEPRECATED: RegisterPayment with deprecated fee mechanism. sha256 hash of token used: %x", tokenHash)
+		cfg := node.NodeConfig.Load()
 		pi.OpeningFeeParams = &rpc.OpeningFeeParams{
-			MinMloki:             uint64(node.NodeConfig.ChannelMinimumFeeMloki),
-			Proportional:         uint32(node.NodeConfig.ChannelFeePermyriad * 100),
-			ValidUntil:           time.Now().UTC().Add(time.Duration(time.Hour * 24)).Format(format.TIME_FORMAT),
-			MaxIdleTime:          uint32(node.NodeConfig.MaxInactiveDuration / 600),
+			MinMloki:             uint64(cfg.ChannelMinimumFeeMloki),
+			Proportional:         uint32(cfg.ChannelFeePermyriad * 100),
+			ValidUntil:           time.Now().UTC().Add(time.Duration(time.Hour * 24)).Format(common.TimeFormat),
+			MaxIdleTime:          uint32(cfg.MaxInactiveDuration / 60), // seconds -> blocks (1 min/block)
 			MaxClientToSelfDelay: uint32(10000),
 		}
 	}
@@ -149,7 +152,7 @@ func (s *channelOpenerServer) RegisterPayment(
 		log.Error().Msgf("checkPayment(%v, %v) error: %v", pi.IncomingAmountMloki, pi.OutgoingAmountMloki, err)
 		return nil, fmt.Errorf("checkPayment(%v, %v) error: %v", pi.IncomingAmountMloki, pi.OutgoingAmountMloki, err)
 	}
-	params := &common.OpeningFeeParams{
+	params := &core.OpeningFeeParams{
 		MinFeeMloki:          pi.OpeningFeeParams.MinMloki,
 		Proportional:         pi.OpeningFeeParams.Proportional,
 		ValidUntil:           pi.OpeningFeeParams.ValidUntil,
@@ -165,7 +168,7 @@ func (s *channelOpenerServer) RegisterPayment(
 	return &rpc.RegisterPaymentReply{}, nil
 }
 
-func getSignedEncryptedData(n *common.Node, in *rpc.Encrypted) (string, []byte, error) {
+func getSignedEncryptedData(n *core.Node, in *rpc.Encrypted) (string, []byte, error) {
 	signedBlob, err := ecies.Decrypt(n.EciesPrivateKey, in.Data)
 	if err != nil {
 		log.Error().Msgf("ecies.Decrypt(%x) error: %v", in.Data, err)

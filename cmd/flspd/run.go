@@ -17,23 +17,27 @@ import (
 	"github.com/flokiorg/flnd/funding"
 	"github.com/nbd-wtf/go-nostr"
 	"github.com/rs/zerolog/log"
-	"gopkg.in/yaml.v3"
 
 	ecies "github.com/ecies/go/v2"
 	btcec "github.com/flokiorg/go-flokicoin/crypto"
-	"github.com/flowgate-lsp/flspd/build"
 	"github.com/flowgate-lsp/flspd/chain"
 	"github.com/flowgate-lsp/flspd/common"
-	"github.com/flowgate-lsp/flspd/config"
+	"github.com/flowgate-lsp/flspd/core"
 	"github.com/flowgate-lsp/flspd/dashboard"
 	"github.com/flowgate-lsp/flspd/history"
 	"github.com/flowgate-lsp/flspd/interceptor"
+	"github.com/flowgate-lsp/flspd/internal/adapters/lnd"
+	"github.com/flowgate-lsp/flspd/internal/adapters/mempool"
+	"github.com/flowgate-lsp/flspd/internal/adapters/postgres"
 	"github.com/flowgate-lsp/flspd/lightning"
-	"github.com/flowgate-lsp/flspd/lnd"
 	"github.com/flowgate-lsp/flspd/lsps"
-	"github.com/flowgate-lsp/flspd/mempool"
 	"github.com/flowgate-lsp/flspd/notifications"
-	"github.com/flowgate-lsp/flspd/postgresql"
+	"github.com/flowgate-lsp/flspd/platform/build"
+	"github.com/flowgate-lsp/flspd/platform/config"
+	"github.com/flowgate-lsp/flspd/platform/logging"
+	"github.com/flowgate-lsp/flspd/services"
+	transdashboard "github.com/flowgate-lsp/flspd/transport/dashboard"
+	translsps "github.com/flowgate-lsp/flspd/transport/lsps"
 	"github.com/urfave/cli"
 )
 
@@ -44,7 +48,14 @@ const (
 	DefaultMaxClientToSelfDelay  = 10080          // ~1 week
 	DefaultFeeParamsValidity     = time.Hour      // Fee params validity duration
 	DefaultLsps1MaxPendingOrders = 50             // Max pending LSPS1 orders per peer
-	DefaultLsps5MaxWebhooks      = 100            // Max LSPS5 webhooks per client
+	// DefaultLsps2MaxPendingRegistrations mirrors DefaultLsps1MaxPendingOrders
+	// for LSPS2 buy registrations (Phase 7, F-17/T7-7).
+	DefaultLsps2MaxPendingRegistrations = 50
+	DefaultLsps5MaxWebhooks             = 100 // Max LSPS5 webhooks per client
+	// BurstLimiterEvictionInterval bounds how often the in-memory per-peer
+	// burst-shaper map is swept for expired entries -- needed so a real
+	// Sybil attempt (many fresh peer identities) can't grow it unbounded.
+	BurstLimiterEvictionInterval = 5 * time.Minute
 
 	// LSP Policy Limits
 	AbsoluteMinChannelCapacityLoki = 20000 // Hard floor for channel size enforced by LSP
@@ -67,34 +78,17 @@ func runLspd(cliCtx *cli.Context) error {
 	if funding.MinChanFundingSize > funding.MaxFlokicoinFundingAmount {
 		return fmt.Errorf("external consistency error: Network MinChanFundingSize (%d) > MaxFlokicoinFundingAmount (%d)", funding.MinChanFundingSize, funding.MaxFlokicoinFundingAmount)
 	}
-	common.InitLogger()
+	logging.InitLogger()
 	log.Info().Msgf(`Starting flspd, tag='%s', revision='%s'`, build.GetTag(), build.GetRevision())
-	// Load nodes configuration
-	var nodesContent []byte
-	var err error
 
-	if nodesJson := os.Getenv("NODES_JSON"); nodesJson != "" {
-		nodesContent = []byte(nodesJson)
-	} else {
-		nodesConfigPath := os.Getenv("NODES_CONFIG_PATH")
-		if nodesConfigPath == "" {
-			return fmt.Errorf("NODES_CONFIG_PATH environment variable is not set")
-		}
-
-		nodesContent, err = os.ReadFile(nodesConfigPath)
-		if err != nil {
-			return fmt.Errorf("failed to read nodes config file: %w", err)
-		}
-	}
-
-	var nodeConfigs []*config.NodeConfig
-	err = yaml.Unmarshal(nodesContent, &nodeConfigs)
+	nodeConfigs, err := loadNodeConfigs()
 	if err != nil {
-		log.Fatal().Msgf("failed to unmarshal nodes config from file: %v", err)
+		log.Fatal().Msgf("failed to load nodes config: %v", err)
 	}
 
-	if len(nodeConfigs) == 0 {
-		log.Fatal().Msgf("need at least one node configured in nodes config file.")
+	announceRelays, err := checkAnnounceRequirements(nodeConfigs, os.Getenv(announceRelaysEnv))
+	if err != nil {
+		log.Fatal().Msgf("NIP-LSP announcing: %v", err)
 	}
 
 	nodes, err := initializeNodes(nodeConfigs)
@@ -102,7 +96,7 @@ func runLspd(cliCtx *cli.Context) error {
 		log.Fatal().Msgf("failed to initialize nodes: %v", err)
 	}
 
-	nodesService, err := common.NewNodesService(nodes)
+	nodesService, err := services.NewNodesService(nodes)
 	if err != nil {
 		log.Fatal().Msgf("failed to create nodes service: %v", err)
 	}
@@ -138,37 +132,38 @@ func runLspd(cliCtx *cli.Context) error {
 	databaseUrl := os.Getenv("DATABASE_URL")
 	automigrate, _ := strconv.ParseBool(os.Getenv("AUTO_MIGRATE_DATABASE"))
 	if automigrate {
-		err = postgresql.Migrate(databaseUrl)
+		err = postgres.Migrate(databaseUrl)
 		if err != nil {
 			log.Fatal().Msgf("Failed to migrate postgres database: %v", err)
 		}
 	}
-	pool, err := postgresql.PgConnect(databaseUrl)
+	pool, err := postgres.PgConnect(databaseUrl)
 	if err != nil {
 		log.Fatal().Msgf("pgConnect() error: %v", err)
 	}
 
-	interceptStore := postgresql.NewPostgresInterceptStore(pool)
-	openingStore := postgresql.NewPostgresOpeningStore(pool)
-	notificationsStore := postgresql.NewNotificationsStore(pool)
-	historyStore := postgresql.NewHistoryStore(pool)
+	interceptStore := postgres.NewPostgresInterceptStore(pool)
+	openingStore := postgres.NewPostgresOpeningStore(pool)
+	notificationsStore := postgres.NewNotificationsStore(pool)
+	historyStore := postgres.NewHistoryStore(pool)
 
 	// Logic: We no longer auto-adjust values at runtime. Instead, we validated
 	// them above to ensure they are safe based on the configured padding.
 	for _, node := range nodes {
+		cfg := node.NodeConfig.Load()
 		for _, token := range node.Tokens {
-			minPaymentSize := node.NodeConfig.MinPaymentSizeMloki
-			maxPaymentSize := node.NodeConfig.JitMaxPaymentSizeMloki
+			minPaymentSize := cfg.MinPaymentSizeMloki
+			maxPaymentSize := cfg.JitMaxPaymentSizeMloki
 			if maxPaymentSize == 0 {
 				maxPaymentSize = DefaultMaxPaymentSizeLoki
 			}
 
 			// Proportional from ChannelFeePermyriad (in basis points of basis points)
 			// ChannelFeePermyriad is per 10,000. PPM is per 1,000,000. So multiply by 100.
-			proportional := uint32(node.NodeConfig.ChannelFeePermyriad * 100)
+			proportional := uint32(cfg.ChannelFeePermyriad * 100)
 
-			params := common.OpeningFeeParams{
-				MinFeeMloki:          uint64(node.NodeConfig.ChannelMinimumFeeMloki),
+			params := core.OpeningFeeParams{
+				MinFeeMloki:          uint64(cfg.ChannelMinimumFeeMloki),
 				Proportional:         proportional,
 				ValidUntil:           "",
 				MinLifetime:          DefaultMinLifetimeBlocks,
@@ -206,7 +201,7 @@ func runLspd(cliCtx *cli.Context) error {
 	}
 
 	go notificationService.Start(ctx)
-	openingService := common.NewOpeningService(openingStore, nodesService)
+	openingService := services.NewOpeningService(openingStore, nodesService)
 
 	// Initialize Dashboard Service
 	dashboardAdminPubkey := os.Getenv("DASHBOARD_ADMIN_PUBKEY")
@@ -215,14 +210,39 @@ func runLspd(cliCtx *cli.Context) error {
 		dashboardListenAddr = ":8080"
 	}
 
-	dashSvc := dashboard.NewDashboardService(
+	dashHandlers := dashboard.NewHandlers(
 		nodesService,
 		openingService,
 		openingStore,
 		historyStore,
-		dashboardAdminPubkey,
 		os.Getenv("NODES_CONFIG_PATH"),
 	)
+	dashHandlers.SetAnnounce(announceRelays, func(cfg *config.NodeConfig) error {
+		return checkNodeAnnounceRequirements(cfg, announceRelays)
+	})
+	for _, cfg := range nodeConfigs {
+		if cfg.Announcing() {
+			log.Info().Msgf("NIP-LSP announcing on for %s, relays %v", nodeLabel(cfg), announceRelays)
+		}
+	}
+	// NIP-LSP announcements (T8-3/T8-4). Nodes join below, once their LSPS
+	// handlers exist; a node publishes only while its announce block is on.
+	announceStateStore := postgres.NewAnnounceStateStore(pool)
+	announcePool := notifications.NewRelayPool()
+	announceSvc := services.NewAnnounceService(services.AnnounceServiceConfig{
+		Relays:    announceRelays,
+		Store:     announceStateStore,
+		Publisher: announcePool,
+		RelayList: announcePool,
+	}, nil)
+	go announceSvc.Start(ctx)
+	// Pause/Resume/Unlist (T8-2) republish at once.
+	dashHandlers.SetAnnounceState(announceStateStore, func(st *core.AnnounceState) {
+		log.Info().Msgf("NIP-LSP announcement status of %x is %s", st.NodeID, st.Status)
+		announceSvc.Trigger()
+	})
+	dashHandlers.SetAnnouncePublisher(announceSvc)
+	dashSvc := transdashboard.NewServer(dashboardAdminPubkey, dashHandlers, nodesService)
 
 	// Start dashboard HTTP server
 	go func() {
@@ -243,21 +263,22 @@ func runLspd(cliCtx *cli.Context) error {
 
 	var settlementServices []*lsps.Lsps1SettlementService
 	var interceptors []interceptor.HtlcInterceptor
-	var lspsServers []*lsps.Server
+	var lspsServers []*translsps.Server
 	for _, node := range nodes {
+		nodeCfg := node.NodeConfig.Load()
 		var htlcInterceptor interceptor.HtlcInterceptor
 		var feeEstimator chain.FeeEstimator
 		if mempoolClient == nil {
-			feeEstimator = chain.NewDefaultFeeEstimator(node.NodeConfig.TargetConf)
+			feeEstimator = chain.NewDefaultFeeEstimator(nodeCfg.TargetConf)
 		} else {
 			feeEstimator = mempoolClient
 		}
 
-		if node.NodeConfig.Lnd == nil {
+		if nodeCfg.Lnd == nil {
 			log.Fatal().Msgf("node has to be flnd")
 		}
 
-		client, err := lnd.NewLndClient(node.NodeConfig.Lnd)
+		client, err := lnd.NewLndClient(nodeCfg.Lnd)
 		if err != nil {
 			log.Fatal().Msgf("failed to initialize LND client: %v", err)
 		}
@@ -266,18 +287,37 @@ func runLspd(cliCtx *cli.Context) error {
 
 		// Start LSPS1 settlement service for this node
 		settlementSvc := lsps.NewLsps1SettlementService(client, openingStore, historyStore, node.NodeConfig, feeEstimator, feeStrategy, dashBridge)
+		// orderWatcher is only wired into lspsHandlers below if the
+		// settlement service actually started (H-12) -- mirrors the
+		// existing behavior where a failed settlement-service start
+		// already leaves this node's invoice-driven processing disabled.
+		var orderWatcher lsps.OrderWatcher
 		err = settlementSvc.Start(ctx)
 		if err != nil {
 			log.Error().Err(err).Msg("Failed to start LSPS1 settlement service")
 		} else {
 			settlementServices = append(settlementServices, settlementSvc)
+			orderWatcher = settlementSvc
 		}
 
 		forwardSync := lnd.NewForwardSync(node.NodeId, client, historyStore)
 		go forwardSync.ForwardsSynchronize(ctx)
 		notificationService.SetNodePrivKey(node.PrivateKey)
 		handler := interceptor.NewInterceptHandler(client, node.NodeConfig, interceptStore, historyStore, openingService, feeEstimator, feeStrategy, dashBridge, node.PrivateKey)
-		combinedHandler := common.NewCombinedHandler(handler)
+		// Phase 7 (T7-13): reconcile any LSPS2 registration left stuck at
+		// OPENING by a crash between openChannel succeeding and the
+		// consuming DB write. Launched in a goroutine, mirroring LSPS1's
+		// own recoverStuckOrders (settlement_service.go: "Recover stuck
+		// orders in a separate goroutine to avoid blocking Start()") --
+		// this must NOT block startup (with multiple nodes, a slow
+		// ListChannels call here would delay every later node's init
+		// too). Safe to run concurrently with the interceptor already
+		// taking live traffic: ClaimLsps2Registration's CAS
+		// (state='ACTIVE') already fails closed against any registration
+		// still at OPENING, so a real HTLC racing this sweep is simply
+		// rejected and retried later, never double-processed.
+		go handler.RecoverStuckLsps2Registrations()
+		combinedHandler := services.NewCombinedHandler(handler)
 		htlcInterceptor, err = lnd.NewLndHtlcInterceptor(node.NodeConfig, client, combinedHandler)
 		if err != nil {
 			log.Fatal().Msgf("failed to initialize LND interceptor: %v", err)
@@ -293,6 +333,15 @@ func runLspd(cliCtx *cli.Context) error {
 		if lsps5MaxWebhooks <= 0 {
 			lsps5MaxWebhooks = DefaultLsps5MaxWebhooks
 		}
+		lsps2MaxRegistrations, _ := strconv.Atoi(os.Getenv("LSPS2_MAX_PENDING_REGISTRATIONS"))
+		if lsps2MaxRegistrations <= 0 {
+			lsps2MaxRegistrations = DefaultLsps2MaxPendingRegistrations
+		}
+		// Unlike the per-peer standing caps above (always on, with a real
+		// default), the fleet-wide ceiling is opt-in: zero means disabled,
+		// so an existing deployment that never sets this env var sees no
+		// behavior change (Phase 7, F-17/T7-7).
+		maxGlobalPendingReservationsLoki, _ := strconv.ParseUint(os.Getenv("MAX_GLOBAL_PENDING_RESERVATIONS_LOKI"), 10, 64)
 
 		var lspNostrPubkey string
 		if lspNostrPrivKey != "" {
@@ -304,15 +353,30 @@ func runLspd(cliCtx *cli.Context) error {
 		}
 
 		lspsConfig := lsps.Config{
-			Lsps1MaxPendingOrders: lsps1MaxOrders,
-			Lsps5MaxWebhooks:      lsps5MaxWebhooks,
-			EnableLsps5Https:      true,
-			EnableLsps5Nostr:      lspNostrPrivKey != "",
-			Lsps5NostrPubkey:      lspNostrPubkey,
+			Lsps1MaxPendingOrders:               lsps1MaxOrders,
+			Lsps2MaxPendingRegistrations:        lsps2MaxRegistrations,
+			MaxGlobalPendingReservationsPerNode: maxGlobalPendingReservationsLoki,
+			Lsps5MaxWebhooks:                    lsps5MaxWebhooks,
+			EnableLsps5Https:                    true,
+			EnableLsps5Nostr:                    lspNostrPrivKey != "",
+			Lsps5NostrPubkey:                    lspNostrPubkey,
 		}
 
 		liquidityManager := lsps.NewLiquidityManager(client, openingStore)
-		lspsServer := lsps.NewServer(lspsConfig, client, nodesService, openingService, liquidityManager, dashBridge)
+		lspsHandlers := lsps.NewHandlers(lspsConfig, client, nodesService, openingService, liquidityManager, dashBridge, orderWatcher)
+		go lspsHandlers.BurstLimiter().StartEvictionLoop(ctx.Done(), BurstLimiterEvictionInterval)
+		if signer, err := services.NewAnnouncementSigner(node); err != nil {
+			log.Error().Err(err).Msg("NIP-LSP: no announcement signer for node; it cannot announce")
+		} else {
+			announceSvc.AddNode(services.AnnounceNode{
+				Node:    node,
+				Signer:  signer,
+				Answers: lspsHandlers,
+				Chain:   node.Chain,
+				Network: node.Network,
+			})
+		}
+		lspsServer := translsps.NewServer(client, lspsHandlers)
 		lspsServer.Start()
 		lspsServers = append(lspsServers, lspsServer)
 	}
@@ -329,22 +393,36 @@ func runLspd(cliCtx *cli.Context) error {
 	var wg sync.WaitGroup
 	wg.Add(len(interceptors) + 1)
 
+	// stopInterceptors is invoked concurrently from up to three independent
+	// paths: each interceptor's own goroutine when it stops, the gRPC
+	// server's goroutine when it stops, and the SIGTERM/SIGINT handler.
+	// Any two of those racing (e.g. the SIGTERM handler stopping the gRPC
+	// server, which its own goroutine then observes and reacts to) means
+	// this runs more than once — services like OrderCleanupService aren't
+	// safe to Stop() twice (double-close panics), so gate the whole thing
+	// behind sync.Once to make shutdown idempotent regardless of which
+	// path gets there first.
+	var stopOnce sync.Once
 	stopInterceptors := func() {
-		for _, interceptor := range interceptors {
-			interceptor.Stop()
-		}
+		stopOnce.Do(func() {
+			for _, interceptor := range interceptors {
+				if err := interceptor.Stop(); err != nil {
+					log.Error().Err(err).Msg("Failed to stop interceptor")
+				}
+			}
 
-		for _, lspsServer := range lspsServers {
-			lspsServer.Stop()
-		}
+			for _, lspsServer := range lspsServers {
+				lspsServer.Stop()
+			}
 
-		for _, settlementSvc := range settlementServices {
-			settlementSvc.Stop()
-		}
+			for _, settlementSvc := range settlementServices {
+				settlementSvc.Stop()
+			}
 
-		orderCleanupService.Stop()
+			orderCleanupService.Stop()
 
-		cancel()
+			cancel()
+		})
 	}
 
 	for _, interceptor := range interceptors {
@@ -396,14 +474,21 @@ func runLspd(cliCtx *cli.Context) error {
 	return nil
 }
 
-func initializeNodes(configs []*config.NodeConfig) ([]*common.Node, error) {
+func initializeNodes(configs []*config.NodeConfig) ([]*core.Node, error) {
 	if len(configs) == 0 {
 		return nil, fmt.Errorf("no nodes supplied")
 	}
 
-	nodes := []*common.Node{}
-	for _, config := range configs {
-		hexKey, err := common.ParsePrivateKey(config.FlspdPrivateKey)
+	nodes := []*core.Node{}
+	// Named cfg, not config, so the config package import stays reachable
+	// inside the loop body (needed below to construct the NodeConfigRef).
+	for _, cfg := range configs {
+		flspdPrivateKey, err := cfg.FlspdPrivateKey.Resolve()
+		if err != nil {
+			return nil, fmt.Errorf("resolving config.flspdPrivateKey: %w", err)
+		}
+
+		hexKey, err := common.ParsePrivateKey(flspdPrivateKey)
 		if err != nil {
 			return nil, fmt.Errorf("ParsePrivateKey(config.flspdPrivateKey) error: %v", err)
 		}
@@ -418,69 +503,66 @@ func initializeNodes(configs []*config.NodeConfig) ([]*common.Node, error) {
 		privateKey, publicKey := btcec.PrivKeyFromBytes(pk)
 
 		// Validate config using the config package validation logic
-		if err := config.Validate(); err != nil {
+		if err := cfg.Validate(); err != nil {
 			return nil, err
 		}
 
 		// Validate wumbo limits (PublicChannelAmount or explicit wumbo needs)
-		if config.PublicChannelAmount > int64(funding.MaxFlokicoinFundingAmountWumbo) {
-			return nil, fmt.Errorf("publicChannelAmount %d exceeds MaxFlokicoinFundingAmountWumbo %d", config.PublicChannelAmount, funding.MaxFlokicoinFundingAmountWumbo)
+		if cfg.PublicChannelAmount > int64(funding.MaxFlokicoinFundingAmountWumbo) {
+			return nil, fmt.Errorf("publicChannelAmount %d exceeds MaxFlokicoinFundingAmountWumbo %d", cfg.PublicChannelAmount, funding.MaxFlokicoinFundingAmountWumbo)
 		}
 		// Warn if exceeding standard limit but under wumbo
-		if config.PublicChannelAmount > int64(funding.MaxFlokicoinFundingAmount) {
-			log.Warn().Msgf("PublicChannelAmount %d exceeds standard MaxFlokicoinFundingAmount %d. Ensure wumbo is enabled.", config.PublicChannelAmount, funding.MaxFlokicoinFundingAmount)
+		if cfg.PublicChannelAmount > int64(funding.MaxFlokicoinFundingAmount) {
+			log.Warn().Msgf("PublicChannelAmount %d exceeds standard MaxFlokicoinFundingAmount %d. Ensure wumbo is enabled.", cfg.PublicChannelAmount, funding.MaxFlokicoinFundingAmount)
 		}
 
-		if err := config.ValidateLsps1(); err != nil {
+		if err := cfg.ValidateLsps1(); err != nil {
 			return nil, fmt.Errorf("LSPS1 config validation failed: %w", err)
 		}
 
-		if err := config.ValidateJit(); err != nil {
+		if err := cfg.ValidateJit(); err != nil {
 			return nil, fmt.Errorf("JIT config validation failed: %w", err)
 		}
 
-		node := &common.Node{
-			NodeConfig:      config,
-			PrivateKey:      privateKey,
-			PublicKey:       publicKey,
-			EciesPrivateKey: eciesPrivateKey,
-			EciesPublicKey:  eciesPublicKey,
-		}
-
-		if config.Lnd == nil {
+		if cfg.Lnd == nil {
 			return nil, fmt.Errorf("node has to be flnd")
 		}
 
-		node.Client, err = lnd.NewLndClient(config.Lnd)
+		client, err := lnd.NewLndClient(cfg.Lnd)
 		if err != nil {
 			return nil, err
 		}
 
-		// Make sure the nodes is available and set name and pubkey if not set
-		// in config.
-		info, err := node.Client.GetInfo()
+		// Make sure the nodes is available and set name and pubkey if not
+		// set in config. This mutates cfg directly, before it's wrapped in
+		// a NodeConfigRef below — safe, single-threaded startup code.
+		//
+		// Retried for a bit: on a fresh `docker compose up`, flspd's own
+		// container can win the race against flnd's gRPC server still
+		// coming up, and a single failed attempt here would otherwise take
+		// down the whole process (fatal below) for a purely transient
+		// reason.
+		info, err := getInfoWithRetry(client, 30*time.Second)
 		if err != nil {
-			decodedPubkey, decodeErr := hex.DecodeString(
-				node.NodeConfig.NodePubkey)
-			if node.NodeConfig.Name == "" || node.NodeConfig.NodePubkey == "" ||
+			decodedPubkey, decodeErr := hex.DecodeString(cfg.NodePubkey)
+			if cfg.Name == "" || cfg.NodePubkey == "" ||
 				decodeErr != nil || len(decodedPubkey) != 33 {
 
-				return nil, fmt.Errorf("failed to get info from host %s",
-					node.NodeConfig.Host)
+				return nil, fmt.Errorf("failed to get info from host %s", cfg.Host)
 			}
 
 			info = &lightning.GetInfoResult{
-				Alias:  node.NodeConfig.Name,
-				Pubkey: node.NodeConfig.NodePubkey,
+				Alias:  cfg.Name,
+				Pubkey: cfg.NodePubkey,
 			}
 		}
 
-		if node.NodeConfig.Name == "" {
-			node.NodeConfig.Name = info.Alias
+		if cfg.Name == "" {
+			cfg.Name = info.Alias
 		}
 
-		if node.NodeConfig.NodePubkey == "" {
-			node.NodeConfig.NodePubkey = info.Pubkey
+		if cfg.NodePubkey == "" {
+			cfg.NodePubkey = info.Pubkey
 		}
 
 		nodeId, err := hex.DecodeString(info.Pubkey)
@@ -488,12 +570,44 @@ func initializeNodes(configs []*config.NodeConfig) ([]*common.Node, error) {
 			return nil, fmt.Errorf("failed to parse node id %s", info.Pubkey)
 		}
 
-		node.NodeId = nodeId
-		node.Tokens = config.Tokens
+		node := &core.Node{
+			NodeConfig:      config.NewNodeConfigRef(cfg),
+			PrivateKey:      privateKey,
+			PublicKey:       publicKey,
+			EciesPrivateKey: eciesPrivateKey,
+			EciesPublicKey:  eciesPublicKey,
+			Client:          client,
+			NodeKeySigner:   client,
+			NodeId:          nodeId,
+			Tokens:          cfg.Tokens,
+			Chain:           info.Chain,
+			Network:         info.Network,
+		}
 		nodes = append(nodes, node)
 
-		log.Info().Msgf("LSPS Connection URI: %s@%s", info.Pubkey, config.Host)
+		log.Info().Msgf("LSPS Connection URI: %s@%s", info.Pubkey, cfg.Host)
 	}
 
 	return nodes, nil
+}
+
+// getInfoWithRetry retries client.GetInfo() with a fixed backoff until it
+// succeeds or timeout elapses, returning the last error on timeout.
+func getInfoWithRetry(client *lnd.LndClient, timeout time.Duration) (*lightning.GetInfoResult, error) {
+	deadline := time.Now().Add(timeout)
+	const retryInterval = 2 * time.Second
+
+	for {
+		info, err := client.GetInfo()
+		if err == nil {
+			return info, nil
+		}
+
+		if time.Now().After(deadline) {
+			return nil, err
+		}
+
+		log.Warn().Err(err).Msg("GetInfo failed, node may still be starting up, retrying...")
+		time.Sleep(retryInterval)
+	}
 }

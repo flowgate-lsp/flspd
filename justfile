@@ -2,7 +2,7 @@ set shell := ["bash", "-c"]
 
 VERSION := `cat VERSION`
 PKG := "github.com/flowgate-lsp/flspd"
-COMPOSE := "docker compose -f docker-compose.dev.yml"
+COMPOSE := "docker compose -f deploy/docker-compose.dev.yml --project-directory ."
 
 # Default recipe: show help
 default:
@@ -10,114 +10,170 @@ default:
 
 ### --- 🏗️ Build --- ###
 
-# Build all binaries and the frontend
-build: build-backend build-cli build-frontend
+# Build binaries and/or the frontend.
+# Usage: just build [backend|cli|frontend|dist|all]  (default: all)
+[group('build')]
+build target="all":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    backend() {
+        go get {{PKG}}/cmd/flspd
+        CGO_ENABLED=0 go build -v -trimpath -o flspd -ldflags "-s -w -X {{PKG}}/platform/build.tag={{VERSION}}" ./cmd/flspd
+    }
+    cli() {
+        go get {{PKG}}/cmd/flspd_revenue_cli
+        CGO_ENABLED=0 go build -v -trimpath -o flspd_revenue_cli -ldflags="-s -w -X {{PKG}}/platform/build.tag={{VERSION}}" ./cmd/flspd_revenue_cli
+    }
+    frontend() { (cd web && npm run build); }
+    dist() {
+        mkdir -p dist
+        echo "Building for linux/amd64..."
+        GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -v -trimpath -o dist/flspd-linux-amd64 -ldflags "-s -w -X {{PKG}}/platform/build.tag={{VERSION}}" ./cmd/flspd
+        echo "Building for linux/arm64..."
+        GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -v -trimpath -o dist/flspd-linux-arm64 -ldflags "-s -w -X {{PKG}}/platform/build.tag={{VERSION}}" ./cmd/flspd
+    }
+    case "{{target}}" in
+        backend)  backend ;;
+        cli)      cli ;;
+        frontend) frontend ;;
+        dist)     dist ;;
+        all)      backend; cli; frontend ;;
+        *) echo "unknown build target: {{target}} (want: backend|cli|frontend|dist|all)" >&2; exit 1 ;;
+    esac
 
-# Build the flspd daemon
-build-backend:
-    go get {{PKG}}/cmd/flspd
-    CGO_ENABLED=0 go build -v -trimpath -o flspd -ldflags "-s -w -X {{PKG}}/build.tag={{VERSION}}" ./cmd/flspd
-
-# Build the revenue CLI
-build-cli:
-    go get {{PKG}}/cmd/flspd_revenue_cli
-    CGO_ENABLED=0 go build -v -trimpath -o flspd_revenue_cli -ldflags="-s -w -X {{PKG}}/build.tag={{VERSION}}" ./cmd/flspd_revenue_cli
-
-# Build the frontend production bundle
-build-frontend:
-    cd frontend && npm run build
+# Build the image lokihub's regtest stack runs as its test LSP (LP-13; see
+# deploy/regtest/README.md). Needs an nmilat checkout carrying niplsp until
+# go.mod pins one (BACKLOG T8-5).
+# Usage: just image-regtest /path/to/nmilat [image tag]  (default flspd:regtest)
+[group('build')]
+image-regtest nmilat tag="flspd:regtest":
+    docker build -f deploy/Dockerfile.regtest \
+        --build-context nmilat={{nmilat}} \
+        --build-arg COMMIT=$(git rev-parse --short HEAD) \
+        -t {{tag}} .
 
 # Deploy the frontend to Cloudflare Workers
-deploy-frontend: build-frontend
-    cd frontend && npx wrangler deploy
-
-# Build for various platforms (CI/CD)
-dist:
-    mkdir -p dist
-    @echo "Building for linux/amd64..."
-    GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -v -trimpath -o dist/flspd-linux-amd64 -ldflags "-s -w -X {{PKG}}/build.tag={{VERSION}}" ./cmd/flspd
-    @echo "Building for linux/arm64..."
-    GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -v -trimpath -o dist/flspd-linux-arm64 -ldflags "-s -w -X {{PKG}}/build.tag={{VERSION}}" ./cmd/flspd
+[group('build')]
+deploy-frontend: (build "frontend")
+    cd web && npx wrangler deploy
 
 ### --- 🚀 Development --- ###
 
-# Initialize development environment
-setup: setup-backend setup-frontend
-
-# Setup backend data and config
-setup-backend:
-    mkdir -p data/postgres
-    [ -f data/nodes.yaml ] || cp nodes.sample.yaml data/nodes.yaml
-    [ -f .env ] || cp compose.env.sample .env
-
-# Install frontend dependencies
-setup-frontend:
-    cd frontend && npm install
+# Initialize the dev environment (backend data/config and/or frontend deps).
+# Usage: just setup [backend|frontend|all]  (default: all)
+[group('dev')]
+setup target="all":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    backend() {
+        mkdir -p data/postgres data/flnd
+        [ -f deploy/nodes.yaml ] || cp deploy/nodes.dev.sample.yaml deploy/nodes.yaml
+        [ -f .env ] || cp deploy/compose.env.sample .env
+        [ -f data/flnd/flnd.conf ] || cp data/flnd/flnd.conf.sample data/flnd/flnd.conf
+    }
+    frontend() { (cd web && npm install); }
+    case "{{target}}" in
+        backend)  backend ;;
+        frontend) frontend ;;
+        all)      backend; frontend ;;
+        *) echo "unknown setup target: {{target}} (want: backend|frontend|all)" >&2; exit 1 ;;
+    esac
 
 # Start the frontend in development mode but connected to a production/remote backend
+[group('dev')]
 frontend-dev-prod url:
-    cd frontend && VITE_PROXY_URL={{url}} npm run dev
+    cd web && VITE_PROXY_URL={{url}} npm run dev
 
-# Start the stack or a specific service
-up service="":
-    {{COMPOSE}} up {{service}} -d
-
-# Stop the stack
-down:
-    {{COMPOSE}} down
-
-# Restart the stack or a specific service
-restart service="":
-    {{COMPOSE}} restart {{service}}
-
-# View service status
-ps:
-    {{COMPOSE}} ps
-
-# View logs for the stack or a specific service
-logs service="":
-    {{COMPOSE}} logs -f {{service}}
-
-# Execute a command in a service (default: sh)
-sh service cmd="/bin/sh":
-    {{COMPOSE}} exec {{service}} {{cmd}}
+# Manage the local docker compose stack: mainnet-backed flnd (real wallet,
+# real funds -- see docker-compose.dev.yml) + flspd (hot-reloading via Air)
+# + postgres + frontend.
+#   up       start the stack or a specific service (ensures the shared
+#            "flowgate-integration" network other product stacks join for
+#            integration testing exists first)
+#   down     stop the stack
+#   restart  restart the stack or a specific service
+#   ps       show service status
+#   logs     follow logs for the stack or a specific service
+#   sh       exec into a service (default cmd: /bin/sh)
+#   network  create the shared "flowgate-integration" network (idempotent)
+# Usage: just docker <up|down|restart|ps|logs|sh|network> [service] [cmd]
+[group('dev')]
+docker action *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    set -- {{args}}
+    ensure_network() {
+        docker network inspect flowgate-integration >/dev/null 2>&1 || docker network create flowgate-integration
+    }
+    case "{{action}}" in
+        network) ensure_network ;;
+        up)      ensure_network; {{COMPOSE}} up "$@" -d ;;
+        down)    {{COMPOSE}} down ;;
+        restart) {{COMPOSE}} restart "$@" ;;
+        ps)      {{COMPOSE}} ps ;;
+        logs)    {{COMPOSE}} logs -f "$@" ;;
+        sh)
+            service="${1:?usage: just docker sh <service> [cmd]}"
+            cmd="${2:-/bin/sh}"
+            {{COMPOSE}} exec "$service" "$cmd"
+            ;;
+        *) echo "unknown docker action: {{action}} (want: up|down|restart|ps|logs|sh|network)" >&2; exit 1 ;;
+    esac
 
 ### --- 🧹 Operations --- ###
 
-# Clean build artifacts
-clean:
+# Clean build artifacts (binaries, dist output, air's tmp/ build dir, compiled
+# test binaries), and optionally ("all") also stop the stack and clear
+# docker-managed caches. Deliberately NEVER touches data/ -- data/flnd is a
+# live mainnet flnd wallet holding real funds and data/postgres its
+# associated state; resetting either must be a deliberate manual
+# `rm -rf data/<subdir>`, never a side effect of a clean command.
+# Usage: just clean [all]
+[group('ops')]
+clean target="":
+    #!/usr/bin/env bash
+    set -euo pipefail
     rm -f flspd flspd_revenue_cli
-    rm -rf dist frontend/dist
-
-# Deep clean: remove build artifacts and docker volumes
-clean-all: clean
-    {{COMPOSE}} down -v --remove-orphans
+    rm -rf dist web/dist tmp
+    find . -name "*.test" -type f -delete
+    if [ "{{target}}" = "all" ]; then
+        {{COMPOSE}} down -v --remove-orphans
+    elif [ -n "{{target}}" ]; then
+        echo "unknown clean target: {{target}} (want: all)" >&2
+        exit 1
+    fi
 
 ### --- ✅ Testing & Linting --- ###
 
-# Run all tests (Go and Frontend)
-test: test-backend test-frontend
+# Note: "all" runs backend+frontend only -- lsps is required separately by
+# .agents/skills/flspd-lsps-protocol, not part of the routine suite.
+# Run tests. Usage: just test [backend|frontend|lsps|all]  (default: all)
+[group('test')]
+test target="all":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    backend() { go test -v -race ./...; }
+    frontend() { (cd web && npm run test); }
+    lsps() { go test -v ./lsps/... -count=1; }
+    case "{{target}}" in
+        backend)  backend ;;
+        frontend) frontend ;;
+        lsps)     lsps ;;
+        all)      backend; frontend ;;
+        *) echo "unknown test target: {{target}} (want: backend|frontend|lsps|all)" >&2; exit 1 ;;
+    esac
 
-# Run backend tests with race detector
-test-backend:
-    go test -v -race ./...
-
-# Run LSPS protocol specific tests (required by .agents/skills/flspd)
-test-lsps:
-    go test -v ./lsps/... -count=1
-
-# Run frontend tests
-test-frontend:
-    cd frontend && npm run test
-
-# Run Go linter (required by .agents/skills/golang-pro)
+# Run Go linter
+[group('test')]
 lint:
     golangci-lint run ./...
 
 # Format Go code
+[group('test')]
 fmt:
     go fmt ./...
 
 # Vet Go code
+[group('test')]
 vet:
     go vet ./...

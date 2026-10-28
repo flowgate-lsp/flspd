@@ -5,8 +5,8 @@ import (
 	"testing"
 
 	btcec "github.com/flokiorg/go-flokicoin/crypto"
-	"github.com/flowgate-lsp/flspd/common"
-	"github.com/flowgate-lsp/flspd/config"
+	"github.com/flowgate-lsp/flspd/core"
+	"github.com/flowgate-lsp/flspd/platform/config"
 
 	// "github.com/flowgate-lsp/flspd/lsps/mocks" // Removed
 	"github.com/stretchr/testify/assert"
@@ -27,7 +27,7 @@ func TestHandleLsps2Buy_CapacityChecks(t *testing.T) {
 			name:             "Reject: Payment Size Too Small (Below Min Capacity)",
 			paymentSizeMloki: "20000000", // 20,000 Loki (Min is 50,000)
 			mockSetup: func(ns *MockNodesService, os *MockOpeningService, lm *MockLiquidityManager) {
-				ns.On("GetNodes").Return([]*common.Node{{
+				ns.On("GetNodes").Return([]*core.Node{{
 					PublicKey: &btcec.PublicKey{}, // Just dummy
 				}})
 				ns.On("GetMinChannelCapacity").Return(MinChan)
@@ -40,15 +40,14 @@ func TestHandleLsps2Buy_CapacityChecks(t *testing.T) {
 			name:             "Success: Payment Size Sufficient",
 			paymentSizeMloki: "60000000", // 60,000 Loki (> 50,000)
 			mockSetup: func(ns *MockNodesService, os *MockOpeningService, lm *MockLiquidityManager) {
-				ns.On("GetNodes").Return([]*common.Node{{
+				ns.On("GetNodes").Return([]*core.Node{{
 					PublicKey:  &btcec.PublicKey{},
-					NodeConfig: &config.NodeConfig{TimeLockDelta: 40},
+					NodeConfig: config.NewNodeConfigRef(&config.NodeConfig{TimeLockDelta: 40}),
 					Tokens:     []string{"token"},
 				}})
 				ns.On("GetMinChannelCapacity").Return(MinChan)
 				os.On("ValidateOpeningFeeParams", mock.Anything, mock.Anything).Return(true)
-				lm.On("CheckOnChainLiquidity", mock.Anything, mock.Anything).Return(nil)
-				os.On("RegisterLsps2Buy", mock.Anything).Return(nil)
+				mockSufficientLiquidity(lm)
 			},
 			expectCode: 0,
 		},
@@ -66,7 +65,7 @@ func TestHandleLsps2Buy_CapacityChecks(t *testing.T) {
 				tt.mockSetup(mockNS, mockOS, mockLM)
 			}
 
-			server := NewServer(Config{}, mockLC, mockNS, mockOS, mockLM, mockNotif)
+			server := NewHandlers(Config{}, mockLC, mockNS, mockOS, mockLM, mockNotif, nil)
 
 			// Construct request
 			// We need a dummy opening_fee_params structure to pass unmarshalling

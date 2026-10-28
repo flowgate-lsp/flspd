@@ -5,11 +5,11 @@ import (
 	"time"
 
 	"github.com/flokiorg/go-flokicoin/wire"
-	"github.com/flowgate-lsp/flspd/common"
-	"github.com/flowgate-lsp/flspd/config"
+	"github.com/flowgate-lsp/flspd/core"
 	"github.com/flowgate-lsp/flspd/lightning"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 )
 
 // MockStore for InterceptStore interface
@@ -17,31 +17,89 @@ type MockStore struct {
 	mock.Mock
 }
 
-func (m *MockStore) PaymentInfo(paymentHash []byte) (string, string, *common.OpeningFeeParams, []byte, []byte, []byte, int64, int64, *wire.OutPoint, *string, error) {
+func (m *MockStore) PaymentInfo(paymentHash []byte) (string, string, *core.OpeningFeeParams, []byte, []byte, []byte, int64, int64, *wire.OutPoint, *string, error) {
 	args := m.Called(paymentHash)
-	// Return default nil/empty for not found
-	return args.String(0), args.String(1), nil, nil, nil, nil, 0, 0, nil, nil, args.Error(10)
+	var params *core.OpeningFeeParams
+	if v := args.Get(2); v != nil {
+		params = v.(*core.OpeningFeeParams)
+	}
+	var gotHash, secret, dest []byte
+	if v := args.Get(3); v != nil {
+		gotHash = v.([]byte)
+	}
+	if v := args.Get(4); v != nil {
+		secret = v.([]byte)
+	}
+	if v := args.Get(5); v != nil {
+		dest = v.([]byte)
+	}
+	var channelPoint *wire.OutPoint
+	if v := args.Get(8); v != nil {
+		channelPoint = v.(*wire.OutPoint)
+	}
+	var tag *string
+	if v := args.Get(9); v != nil {
+		tag = v.(*string)
+	}
+	return args.String(0), args.String(1), params, gotHash, secret, dest, args.Get(6).(int64), args.Get(7).(int64), channelPoint, tag, args.Error(10)
 }
 
-func (m *MockStore) GetLsps2Order(scid uint64) (*common.Lsps2BuyRegistration, error) {
+func (m *MockStore) GetLsps2Order(scid uint64) (*core.Lsps2BuyRegistration, error) {
 	args := m.Called(scid)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
-	return args.Get(0).(*common.Lsps2BuyRegistration), args.Error(1)
+	return args.Get(0).(*core.Lsps2BuyRegistration), args.Error(1)
 }
 
-func (m *MockStore) RegisterPayment(token, orderId string, params *common.OpeningFeeParams, destination, paymentHash, paymentSecret []byte, incomingAmountMloki, outgoingAmountMloki int64, tag string) error {
+func (m *MockStore) RegisterPayment(token, orderId string, params *core.OpeningFeeParams, destination, paymentHash, paymentSecret []byte, incomingAmountMloki, outgoingAmountMloki int64, tag string) error {
 	args := m.Called(token, orderId, params, destination, paymentHash, paymentSecret, incomingAmountMloki, outgoingAmountMloki, tag)
 	return args.Error(0)
 }
 
 func (m *MockStore) SetFundingTx(paymentHash []byte, channelPoint *wire.OutPoint) error {
-	return nil
+	args := m.Called(paymentHash, channelPoint)
+	return args.Error(0)
 }
 
-func (m *MockStore) GetPaidLsps1Order(clientNodeId string) (*common.Lsps1Order, error) {
+func (m *MockStore) GetPaidLsps1Order(clientNodeId string) (*core.Lsps1Order, error) {
 	return nil, nil // Not testing LSPS1 here
+}
+
+// ClaimLsps2Registration/ReleaseLsps2Registration/ConsumeLsps2Registration/
+// GetStuckLsps2Registrations: Phase 7 (F-15/T7-2). Routed through
+// m.Called() like every other method here -- tests that never exercise
+// the LSPS2 claim/consume path (isLsps2Registration stays false) never
+// trigger these, so they don't need an .On(...) expectation registered.
+func (m *MockStore) ClaimLsps2Registration(scid uint64) (bool, error) {
+	args := m.Called(scid)
+	return args.Bool(0), args.Error(1)
+}
+
+func (m *MockStore) ReleaseLsps2Registration(scid uint64) error {
+	args := m.Called(scid)
+	return args.Error(0)
+}
+
+func (m *MockStore) ConsumeLsps2Registration(scid uint64, channelPoint *wire.OutPoint, paymentSizeMloki, feeMloki uint64) (bool, error) {
+	args := m.Called(scid, channelPoint, paymentSizeMloki, feeMloki)
+	return args.Bool(0), args.Error(1)
+}
+
+func (m *MockStore) GetStuckLsps2Registrations() ([]*core.Lsps2BuyRegistration, error) {
+	args := m.Called()
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]*core.Lsps2BuyRegistration), args.Error(1)
+}
+
+func (m *MockStore) GetClaimedLsps2ChannelPoints() (map[string]bool, error) {
+	args := m.Called()
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(map[string]bool), args.Error(1)
 }
 
 // TestResolvePayment_JIT_Success tests the happy path where sender pays Gross Amount
@@ -61,7 +119,7 @@ func TestResolvePayment_JIT_Success(t *testing.T) {
 	validUntil := time.Now().Add(1 * time.Hour).Format(time.RFC3339)
 
 	// Mock Order Lookup
-	order := &common.Lsps2BuyRegistration{
+	order := &core.Lsps2BuyRegistration{
 		Id:                 "order_1",
 		Scid:               scid,
 		PaymentSizeMloki:   &paymentSize,
@@ -88,11 +146,11 @@ func TestResolvePayment_JIT_Success(t *testing.T) {
 		mock.Anything,   // secret
 		int64(20000000), // Incoming (Gross)
 		int64(19920318), // Outgoing (Net)
-		"",
+		lsps2JitTag,
 	).Return(nil)
 
 	// Call
-	req := common.InterceptRequest{
+	req := core.InterceptRequest{
 		Scid:                lightning.ShortChannelID(scid),
 		IncomingAmountMloki: 20000000,
 		PaymentHash:         []byte("hash"),
@@ -104,6 +162,9 @@ func TestResolvePayment_JIT_Success(t *testing.T) {
 	assert.NotNil(t, result)
 	assert.Equal(t, int64(19920318), result.outgoingAmountMloki)
 	assert.True(t, result.isJit)
+	assert.True(t, result.isLsps2Registration)
+	require.NotNil(t, result.tag)
+	assert.Equal(t, lsps2JitTag, *result.tag)
 }
 
 // TestResolvePayment_JIT_Underpayment tests rejection when sender pays Net Amount
@@ -114,7 +175,7 @@ func TestResolvePayment_JIT_Underpayment(t *testing.T) {
 	scid := uint64(123456)
 	paymentSize := uint64(20000000) // 20k
 
-	order := &common.Lsps2BuyRegistration{
+	order := &core.Lsps2BuyRegistration{
 		Id:                 "order_1",
 		Scid:               scid,
 		PaymentSizeMloki:   &paymentSize,
@@ -126,7 +187,7 @@ func TestResolvePayment_JIT_Underpayment(t *testing.T) {
 	mockStore.On("GetLsps2Order", scid).Return(order, nil)
 
 	// Sender pays only 19920000 (Net)
-	req := common.InterceptRequest{
+	req := core.InterceptRequest{
 		Scid:                lightning.ShortChannelID(scid),
 		IncomingAmountMloki: 19920000,
 		PaymentHash:         []byte("hash"),
@@ -188,54 +249,10 @@ func TestComputeJitOutgoingAmount(t *testing.T) {
 	}
 }
 
-// TestOpenChannel_CapacityLogic verifies that padding and floor are correctly applied
-func TestOpenChannel_CapacityLogic(t *testing.T) {
-	tests := []struct {
-		name                string
-		incomingAmountMloki int64
-		padding             int64
-		minFloor            uint64
-		expectedCapacity    int64
-	}{
-		{
-			name:                "Small payment + Padding hits Floor",
-			incomingAmountMloki: 100 * 1000, // 100 sat
-			padding:             21000,
-			minFloor:            20000,
-			expectedCapacity:    21100, // 100 + 21000
-		},
-		{
-			name:                "Tiny payment + Small padding floors",
-			incomingAmountMloki: 100 * 1000,
-			padding:             500,
-			minFloor:            20000,
-			expectedCapacity:    20000, // Floor!
-		},
-		{
-			name:                "Large payment + Padding",
-			incomingAmountMloki: 500000 * 1000,
-			padding:             21000,
-			minFloor:            20000,
-			expectedCapacity:    521000,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			interceptor := &Interceptor{
-				config: &config.NodeConfig{
-					AdditionalChannelCapacity: tt.padding,
-					MinChannelCapacityLoki:    tt.minFloor,
-				},
-			}
-
-			// Verify the math in openChannel
-			capacity := tt.incomingAmountMloki/1000 + interceptor.config.AdditionalChannelCapacity
-			if uint64(capacity) < interceptor.config.MinChannelCapacityLoki {
-				capacity = int64(interceptor.config.MinChannelCapacityLoki)
-			}
-
-			assert.Equal(t, tt.expectedCapacity, capacity, "Capacity calculation mismatch")
-		})
-	}
-}
+// Capacity-sizing behavior (padding, network floor, and the reserve floor
+// that guarantees outgoingAmountMloki is actually forwardable) is covered
+// by the real-call tests in open_channel_test.go
+// (TestOpenChannel_Success_NonJitUsesConfiguredRoutingFee,
+// TestOpenChannel_RejectsCapacityBelowNetworkFloor,
+// TestOpenChannel_CapacityLeavesRoomForChannelReserve), which exercise
+// openChannel itself rather than a standalone copy of its math.

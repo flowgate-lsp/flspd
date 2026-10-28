@@ -8,9 +8,9 @@ import (
 	"github.com/flokiorg/go-flokicoin/chaincfg/chainhash"
 	"github.com/flokiorg/go-flokicoin/wire"
 	"github.com/flowgate-lsp/flspd/chain"
-	"github.com/flowgate-lsp/flspd/common"
-	"github.com/flowgate-lsp/flspd/config"
+	"github.com/flowgate-lsp/flspd/core"
 	"github.com/flowgate-lsp/flspd/lightning"
+	"github.com/flowgate-lsp/flspd/platform/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )
@@ -27,7 +27,7 @@ func TestMatrixProcessSettledInvoice(t *testing.T) {
 	tests := []struct {
 		name                 string
 		invoice              string
-		order                *common.Lsps1Order // nil if unknown invoice
+		order                *core.Lsps1Order // nil if unknown invoice
 		peerConnected        bool
 		connError            error
 		feeError             error
@@ -40,7 +40,7 @@ func TestMatrixProcessSettledInvoice(t *testing.T) {
 		{
 			name:                 "Happy Path - Standard Success",
 			invoice:              "lnbc1...valid",
-			order:                &common.Lsps1Order{OrderId: "o1", PeerId: "02677063d89856f4d04be859e9a4d3393165b6f3cd78641bc3c4ef9ca2fde37f", OrderState: string(Lsps1OrderStateCreated), ClientBalanceLoki: 1000},
+			order:                &core.Lsps1Order{OrderId: "o1", PeerId: "02677063d89856f4d04be859e9a4d3393165b6f3cd78641bc3c4ef9ca2fde37f", OrderState: string(Lsps1OrderStateCreated), ClientBalanceLoki: 1000},
 			peerConnected:        true,
 			expectStateUpdate:    true,
 			expectChannelAttempt: true,
@@ -57,14 +57,14 @@ func TestMatrixProcessSettledInvoice(t *testing.T) {
 		{
 			name:                 "Ignored - Already Paid Order",
 			invoice:              "lnbc1...paid",
-			order:                &common.Lsps1Order{OrderId: "o2", PeerId: "02677063d89856f4d04be859e9a4d3393165b6f3cd78641bc3c4ef9ca2fde37f", OrderState: string(Lsps1OrderStatePaid)},
+			order:                &core.Lsps1Order{OrderId: "o2", PeerId: "02677063d89856f4d04be859e9a4d3393165b6f3cd78641bc3c4ef9ca2fde37f", OrderState: string(Lsps1OrderStatePaid)},
 			expectStateUpdate:    false,
 			expectChannelAttempt: false,
 		},
 		{
 			name:                 "Deferred - Peer Disconnected",
 			invoice:              "lnbc1...disco",
-			order:                &common.Lsps1Order{OrderId: "o3", PeerId: "02677063d89856f4d04be859e9a4d3393165b6f3cd78641bc3c4ef9ca2fde37f", OrderState: string(Lsps1OrderStateCreated), ClientBalanceLoki: 1000},
+			order:                &core.Lsps1Order{OrderId: "o3", PeerId: "02677063d89856f4d04be859e9a4d3393165b6f3cd78641bc3c4ef9ca2fde37f", OrderState: string(Lsps1OrderStateCreated), ClientBalanceLoki: 1000},
 			peerConnected:        false,
 			expectStateUpdate:    true,
 			expectChannelAttempt: true, // It attempts, but returns early
@@ -73,7 +73,7 @@ func TestMatrixProcessSettledInvoice(t *testing.T) {
 		{
 			name:                 "Fallback - Fee Estimation Fails",
 			invoice:              "lnbc1...nofee",
-			order:                &common.Lsps1Order{OrderId: "o4", PeerId: "02677063d89856f4d04be859e9a4d3393165b6f3cd78641bc3c4ef9ca2fde37f", OrderState: string(Lsps1OrderStateCreated), ClientBalanceLoki: 1000},
+			order:                &core.Lsps1Order{OrderId: "o4", PeerId: "02677063d89856f4d04be859e9a4d3393165b6f3cd78641bc3c4ef9ca2fde37f", OrderState: string(Lsps1OrderStateCreated), ClientBalanceLoki: 1000},
 			peerConnected:        true,
 			feeError:             assert.AnError,
 			expectStateUpdate:    true,
@@ -84,7 +84,7 @@ func TestMatrixProcessSettledInvoice(t *testing.T) {
 		{
 			name:                 "Retry/Fail - Channel Open Fails",
 			invoice:              "lnbc1...openfail",
-			order:                &common.Lsps1Order{OrderId: "o5", PeerId: "02677063d89856f4d04be859e9a4d3393165b6f3cd78641bc3c4ef9ca2fde37f", OrderState: string(Lsps1OrderStateCreated), ClientBalanceLoki: 1000},
+			order:                &core.Lsps1Order{OrderId: "o5", PeerId: "02677063d89856f4d04be859e9a4d3393165b6f3cd78641bc3c4ef9ca2fde37f", OrderState: string(Lsps1OrderStateCreated), ClientBalanceLoki: 1000},
 			peerConnected:        true,
 			openChannelError:     assert.AnError,
 			expectStateUpdate:    true,
@@ -109,7 +109,7 @@ func TestMatrixProcessSettledInvoice(t *testing.T) {
 
 			// Setup State Update to PAID
 			if tt.expectStateUpdate {
-				mockStore.On("UpdateLsps1OrderState", tt.order.OrderId, string(Lsps1OrderStatePaid), string(Lsps1OrderStatePaid)).Return(nil)
+				mockStore.On("UpdateLsps1OrderState", tt.order.OrderId, string(Lsps1OrderStatePaid), string(Lsps1OrderStatePaid), string(Lsps1OrderStateCreated)).Return(true, nil)
 			}
 
 			// Setup Channel Opening Logic
@@ -130,21 +130,25 @@ func TestMatrixProcessSettledInvoice(t *testing.T) {
 					// Open Channel
 					if tt.openChannelError != nil {
 						mockClient.On("OpenChannel", mock.Anything).Return(nil, tt.openChannelError)
-						mockStore.On("UpdateLsps1OrderState", tt.order.OrderId, string(Lsps1OrderStateFailed), string(Lsps1OrderStatePaid)).Return(nil)
+						// reconcileUnclaimedChannel's own ListChannels check: no channel
+						// to this peer exists, so it falls straight through to FAILED
+						// below -- this is a genuine failure, not a crash-orphaned open.
+						mockClient.On("ListChannels").Return([]*lightning.Channel{}, nil)
+						mockStore.On("UpdateLsps1OrderState", tt.order.OrderId, string(Lsps1OrderStateFailed), string(Lsps1OrderStatePaid), string(Lsps1OrderStatePaid)).Return(true, nil)
 					} else {
 						chanPoint := &wire.OutPoint{Hash: chainhash.Hash{}, Index: 0}
 						mockClient.On("OpenChannel", mock.Anything).Return(chanPoint, nil)
 
 						// Completion Updates
 						if tt.expectCompletion {
-							mockStore.On("UpdateLsps1OrderFunding", tt.order.OrderId, mock.Anything, mock.Anything).Return(nil)
-							mockStore.On("UpdateLsps1OrderState", tt.order.OrderId, tt.expectedEndState, string(Lsps1OrderStatePaid)).Return(nil)
+							mockStore.On("UpdateLsps1OrderFunding", tt.order.OrderId, mock.Anything, mock.Anything).Return(true, nil)
+							mockStore.On("UpdateLsps1OrderState", tt.order.OrderId, tt.expectedEndState, string(Lsps1OrderStatePaid), string(Lsps1OrderStatePaid)).Return(true, nil)
 						}
 					}
 				}
 			}
 
-			svc := NewLsps1SettlementService(mockClient, mockStore, mockHistory, &config.NodeConfig{}, mockFee, chain.FeeStrategyEconomy, nil)
+			svc := NewLsps1SettlementService(mockClient, mockStore, mockHistory, config.NewNodeConfigRef(&config.NodeConfig{}), mockFee, chain.FeeStrategyEconomy, nil)
 
 			svc.processSettledInvoice(&lightning.InvoiceUpdate{
 				PaymentRequest: tt.invoice,

@@ -1,0 +1,114 @@
+# Services lokihub's regtest compose (docker-compose.dev.yml) adds for flspd,
+# its test LSP (LP-13). A fragment to merge, not a stack on its own: it uses
+# lokihub's chain, fees and relay services and its lokihub-dev network.
+# Paths are relative to lokihub's checkout; FLSPD_DIR is this flspd checkout.
+# See README.md.
+
+services:
+  # The LSP's own flnd node (a third node beside flnd and payer).
+  flnd-lsp:
+    build: *flnd-build # lokihub's flnd build anchor, as payer uses
+    hostname: flnd-lsp
+    restart: unless-stopped
+    command:
+      - --configfile=/config/flnd.conf
+      - --tlsextradomain=${DEV_HOST:-localhost}
+    volumes:
+      - ${FLSPD_DIR}/deploy/regtest/flnd-lsp.conf.sample:/config/flnd.conf:ro
+      - ./data/regtest/flnd-lsp:/root/.flnd
+      - ./data/regtest/chain/rpc.cert:/chain/rpc.cert:ro
+    healthcheck: *flnd-health
+    ports:
+      - "${LSP_RPC_PORT:-10007}:10007"
+      - "${LSP_P2P_PORT:-9737}:9735" # for a host-run client only
+    depends_on:
+      - chain
+      - fees
+    networks:
+      lokihub-dev:
+        # Announced as the NIP-LSP addr, which takes an IP, not a hostname.
+        ipv4_address: 172.29.40.40
+
+  flspd-db:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=flspd
+      - POSTGRES_PASSWORD=flspd
+      - POSTGRES_DB=flspd
+    volumes:
+      - ./data/regtest/flspd-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "flspd"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    networks:
+      - lokihub-dev
+
+  # One-shot, before flspd: bakes flspd's macaroon (no signer:generate,
+  # only signrpc SignMessage beside what flspd uses), copies flnd-lsp's TLS
+  # cert next to it, and puts a writable copy of the nodes sample in
+  # flspd's config directory (the dashboard saves settings there by
+  # replacing the file). Everything is made readable by flspd's uid 10001.
+  # A nodes.yaml already there is kept, with the dashboard's edits.
+  flspd-init:
+    build: *flnd-build
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        flncli --rpcserver=flnd-lsp:10007 \
+          --tlscertpath=/flnd-lsp/tls.cert \
+          --macaroonpath=/flnd-lsp/data/chain/flokicoin/regtest/admin.macaroon \
+          bakemacaroon --save_to=/creds/flspd.macaroon \
+          info:read onchain:read onchain:write offchain:read offchain:write \
+          address:read address:write message:read message:write \
+          peers:read peers:write invoices:read invoices:write \
+          uri:/signrpc.Signer/SignMessage
+        cp /flnd-lsp/tls.cert /creds/tls.cert
+        [ -f /config/nodes.yaml ] || cp /sample/nodes.yaml /config/nodes.yaml
+        chown 10001:10001 /creds /creds/flspd.macaroon /creds/tls.cert /config /config/nodes.yaml
+        chmod 0400 /creds/flspd.macaroon
+    volumes:
+      - ./data/regtest/flnd-lsp:/flnd-lsp:ro
+      - ./data/regtest/flspd-creds:/creds
+      - ./data/regtest/flspd-config:/config
+      - ${FLSPD_DIR}/deploy/regtest/nodes.regtest.sample.yaml:/sample/nodes.yaml:ro
+    restart: "no"
+    depends_on:
+      flnd-lsp:
+        condition: service_healthy
+    networks:
+      - lokihub-dev
+
+  flspd:
+    # Built by `just image-regtest <nmilat checkout>` in the flspd checkout,
+    # or the release tag once T8-5 ships it.
+    image: ${FLSPD_IMAGE:-flspd:regtest}
+    restart: unless-stopped
+    env_file:
+      - ./data/regtest/flspd.env # from deploy/regtest/flspd.regtest.env.sample
+    volumes:
+      # Writable: the dashboard saves nodes.yaml by replacing it here.
+      - ./data/regtest/flspd-config:/flspd
+      # Only the cert and the narrow macaroon, not flnd-lsp's data.
+      - ./data/regtest/flspd-creds:/flnd-creds:ro
+    ports:
+      - "${FLSPD_DASHBOARD_PORT:-8090}:8080"
+    depends_on:
+      flspd-init:
+        condition: service_completed_successfully
+      flspd-db:
+        condition: service_healthy
+      relay:
+        condition: service_started
+    networks:
+      - lokihub-dev
+
+# lokihub-dev needs a fixed subnet for flnd-lsp's ipv4_address:
+networks:
+  lokihub-dev:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.29.40.0/24

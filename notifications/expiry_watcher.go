@@ -5,8 +5,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/flowgate-lsp/flspd/config"
 	"github.com/flowgate-lsp/flspd/lightning"
+	"github.com/flowgate-lsp/flspd/platform/config"
 	"github.com/rs/zerolog/log"
 )
 
@@ -118,8 +118,11 @@ func (w *ExpiryWatcher) checkExpiries() {
 				continue
 			}
 
-			// Find the most urgent milestone this HTLC has crossed that hasn't
-			// been notified yet, and fire exactly one notification for it.
+			// Fire a notification for every milestone this HTLC has crossed
+			// since the last check that hasn't been notified yet — not just
+			// the first (least urgent) one. Thresholds are descending, so
+			// once blocksToExpiry exceeds one, it exceeds every remaining
+			// (smaller, more urgent) one too, and we can stop.
 			for _, threshold := range expiryMilestones {
 				if blocksToExpiry > threshold {
 					break
@@ -142,7 +145,6 @@ func (w *ExpiryWatcher) checkExpiries() {
 						Msg("ExpiryWatcher: notifying expiry milestone")
 					w.notificationService.NotifyExpirySoon(pubkey, blocksToExpiry, nil, paymentHash)
 				}
-				break
 			}
 		}
 	}

@@ -6,9 +6,10 @@ import (
 	"fmt"
 
 	ecies "github.com/ecies/go/v2"
-	"github.com/flowgate-lsp/flspd/common"
+	pb "github.com/flowgate-lsp/flspd/api/proto/notifications"
+	rpc "github.com/flowgate-lsp/flspd/api/proto/rpc"
 	"github.com/flowgate-lsp/flspd/lightning"
-	rpc "github.com/flowgate-lsp/flspd/rpc"
+	"github.com/flowgate-lsp/flspd/platform/logging"
 	"github.com/rs/zerolog/log"
 	"google.golang.org/protobuf/proto"
 )
@@ -17,10 +18,10 @@ var ErrInternal = fmt.Errorf("internal error")
 
 type server struct {
 	store Store
-	NotificationsServer
+	pb.NotificationsServer
 }
 
-func NewNotificationsServer(store Store) NotificationsServer {
+func NewNotificationsServer(store Store) pb.NotificationsServer {
 	return &server{
 		store: store,
 	}
@@ -28,8 +29,8 @@ func NewNotificationsServer(store Store) NotificationsServer {
 
 func (s *server) SubscribeNotifications(
 	ctx context.Context,
-	in *EncryptedNotificationRequest,
-) (*SubscribeNotificationsReply, error) {
+	in *pb.EncryptedNotificationRequest,
+) (*pb.SubscribeNotificationsReply, error) {
 	node, _, err := rpc.GetNode(ctx)
 	if err != nil {
 		return nil, err
@@ -39,19 +40,19 @@ func (s *server) SubscribeNotifications(
 	if err != nil {
 		log.Warn().
 			Err(err).
-			Str("component", string(common.LogComponentNotifications)).
-			Str("action", string(common.LogActionValidate)).
+			Str("component", string(logging.LogComponentNotifications)).
+			Str("action", string(logging.LogActionValidate)).
 			Msg("Notifications: Failed to decrypt request")
 		return nil, fmt.Errorf("ecies.Decrypt(%x) error: %w", in.Blob, err)
 	}
 
-	var request SubscribeNotificationsRequest
+	var request pb.SubscribeNotificationsRequest
 	err = proto.Unmarshal(data, &request)
 	if err != nil {
 		log.Warn().
 			Err(err).
-			Str("component", string(common.LogComponentNotifications)).
-			Str("action", string(common.LogActionValidate)).
+			Str("component", string(logging.LogComponentNotifications)).
+			Str("action", string(logging.LogActionValidate)).
 			Msg("Notifications: Failed to unmarshal subscription request")
 		return nil, fmt.Errorf("proto.Unmarshal(%x) error: %w", data, err)
 	}
@@ -60,8 +61,8 @@ func (s *server) SubscribeNotifications(
 	if err != nil {
 		log.Warn().
 			Err(err).
-			Str("component", string(common.LogComponentNotifications)).
-			Str("action", string(common.LogActionValidate)).
+			Str("component", string(logging.LogComponentNotifications)).
+			Str("action", string(logging.LogActionValidate)).
 			Str("url", request.Url).
 			Msg("Notifications: Failed to verify signature")
 
@@ -80,8 +81,8 @@ func (s *server) SubscribeNotifications(
 	if err != nil {
 		log.Error().
 			Err(err).
-			Str("component", string(common.LogComponentNotifications)).
-			Str("action", string(common.LogActionFailure)).
+			Str("component", string(logging.LogComponentNotifications)).
+			Str("action", string(logging.LogActionFailure)).
 			Str("pubkey", pubkeyStr).
 			Str("url", request.Url).
 			Msg("Notifications: Failed to register in store")
@@ -90,19 +91,19 @@ func (s *server) SubscribeNotifications(
 	}
 
 	log.Debug().
-		Str("component", string(common.LogComponentNotifications)).
-		Str("action", string(common.LogActionSuccess)).
+		Str("component", string(logging.LogComponentNotifications)).
+		Str("action", string(logging.LogActionSuccess)).
 		Str("pubkey", pubkeyStr).
 		Str("url", request.Url).
 		Str("transport", transport).
 		Msg("Notifications: Successfully registered client")
-	return &SubscribeNotificationsReply{}, nil
+	return &pb.SubscribeNotificationsReply{}, nil
 }
 
 func (s *server) UnsubscribeNotifications(
 	ctx context.Context,
-	in *EncryptedNotificationRequest,
-) (*UnsubscribeNotificationsReply, error) {
+	in *pb.EncryptedNotificationRequest,
+) (*pb.UnsubscribeNotificationsReply, error) {
 	node, _, err := rpc.GetNode(ctx)
 	if err != nil {
 		return nil, err
@@ -112,19 +113,19 @@ func (s *server) UnsubscribeNotifications(
 	if err != nil {
 		log.Warn().
 			Err(err).
-			Str("component", string(common.LogComponentNotifications)).
-			Str("action", string(common.LogActionValidate)).
+			Str("component", string(logging.LogComponentNotifications)).
+			Str("action", string(logging.LogActionValidate)).
 			Msg("Notifications: Failed to decrypt unsubscribe request")
 		return nil, fmt.Errorf("ecies.Decrypt(%x) error: %w", in.Blob, err)
 	}
 
-	var request UnsubscribeNotificationsRequest
+	var request pb.UnsubscribeNotificationsRequest
 	err = proto.Unmarshal(data, &request)
 	if err != nil {
 		log.Warn().
 			Err(err).
-			Str("component", string(common.LogComponentNotifications)).
-			Str("action", string(common.LogActionValidate)).
+			Str("component", string(logging.LogComponentNotifications)).
+			Str("action", string(logging.LogActionValidate)).
 			Msg("Notifications: Failed to unmarshal unsubscribe request")
 		return nil, fmt.Errorf("proto.Unmarshal(%x) error: %w", data, err)
 	}
@@ -133,8 +134,8 @@ func (s *server) UnsubscribeNotifications(
 	if err != nil {
 		log.Warn().
 			Err(err).
-			Str("component", string(common.LogComponentNotifications)).
-			Str("action", string(common.LogActionValidate)).
+			Str("component", string(logging.LogComponentNotifications)).
+			Str("action", string(logging.LogActionValidate)).
 			Str("url", request.Url).
 			Msg("Notifications: Failed to verify signature for unsubscribe")
 
@@ -147,8 +148,8 @@ func (s *server) UnsubscribeNotifications(
 	if err != nil {
 		log.Error().
 			Err(err).
-			Str("component", string(common.LogComponentNotifications)).
-			Str("action", string(common.LogActionFailure)).
+			Str("component", string(logging.LogComponentNotifications)).
+			Str("action", string(logging.LogActionFailure)).
 			Str("pubkey", pubkeyStr).
 			Str("url", request.Url).
 			Msg("Notifications: Failed to unsubscribe in store")
@@ -157,11 +158,11 @@ func (s *server) UnsubscribeNotifications(
 	}
 
 	log.Debug().
-		Str("component", string(common.LogComponentNotifications)).
-		Str("action", string(common.LogActionSuccess)).
+		Str("component", string(logging.LogComponentNotifications)).
+		Str("action", string(logging.LogActionSuccess)).
 		Str("pubkey", pubkeyStr).
 		Str("url", request.Url).
 		Msg("Notifications: Successfully unsubscribed client")
 
-	return &UnsubscribeNotificationsReply{}, nil
+	return &pb.UnsubscribeNotificationsReply{}, nil
 }
