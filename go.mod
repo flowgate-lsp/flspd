@@ -5,7 +5,7 @@ go 1.26.10
 require (
 	github.com/GoWebProd/uuid7 v0.0.0-20230623091058-5f5954faed6a
 	github.com/caddyserver/certmagic v0.11.2
-	github.com/coder/websocket v1.8.14
+	github.com/coder/websocket v1.8.15
 	github.com/docker/docker v28.5.2+incompatible
 	github.com/docker/go-connections v0.7.0
 	github.com/flokiorg/flnd v0.1.21-beta
