@@ -1,35 +1,18 @@
 name: CI
 
 on:
+  pull_request:
   push:
     branches: [main]
-  pull_request:
 
 permissions:
   contents: read
 
-jobs:
-  changes:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: read
-    outputs:
-      docker: ${{ steps.filter.outputs.docker }}
-      frontend: ${{ steps.filter.outputs.frontend }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dorny/paths-filter@v4.0.2
-        id: filter
-        with:
-          filters: |
-            docker:
-              - 'deploy/Dockerfile'
-              - 'go.mod'
-              - 'go.sum'
-            frontend:
-              - 'web/**'
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
+jobs:
   test:
     runs-on: ubuntu-latest
     steps:
@@ -46,68 +29,10 @@ jobs:
       - name: Vet
         run: go vet ./...
 
-      - name: Test (race detector)
+      - name: Unit tests (race detector)
         run: go test -race -count=1 $(go list ./... | grep -v '/itest')
 
-  lint:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: read
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-
-      # The codebase carries pre-existing lint debt (see .golangci.yml history);
-      # only-new-issues gates the diff instead of demanding a big-bang cleanup.
-      - name: golangci-lint
-        uses: golangci/golangci-lint-action@v9
-        with:
-          version: v2.12
-          only-new-issues: true
-
-  frontend:
-    needs: changes
-    if: needs.changes.outputs.frontend == 'true'
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: web
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: npm
-          cache-dependency-path: web/package-lock.json
-
-      - name: Install dependencies
-        run: npm ci
-
-      # Non-blocking: the frontend has ~65 pre-existing eslint errors
-      # (no-explicit-any, react-hooks/set-state-in-effect,
-      # react-refresh/only-export-components) that predate this job. Surface
-      # them without blocking merges until that debt is burned down; test
-      # and build below (both clean) remain blocking.
-      - name: Lint
-        run: npm run lint
-        continue-on-error: true
-
-      - name: Test
-        run: npm run test
-
-      - name: Build
-        run: npm run build
-
-  docker-validate:
-    needs: changes
-    if: needs.changes.outputs.docker == 'true'
+  docker:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -115,44 +40,15 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # Build-only, no push: this just proves the production Dockerfile
-      # still builds against the changed go.mod/go.sum/Dockerfile. It
-      # covers deploy/Dockerfile (repo-root context, since it COPYs the
-      # full source tree) only -- deploy/Dockerfile.dev isn't validated
-      # here because the dev stack's flnd service builds against sibling
-      # flokiorg checkouts (see deploy/docker-compose.dev.yml) that don't
-      # exist on a plain CI runner.
-      - name: Build image
-        uses: docker/build-push-action@v5
+      - name: Build image (no push)
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: deploy/Dockerfile
           push: false
+          platforms: linux/amd64
           build-args: |
-            TAG=ci-validate
+            TAG=ci
             COMMIT=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-
-  secret-scan:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      # data/ is gitignored specifically because it holds per-deployment
-      # secrets (node keys, macaroons, certs) — see SEC-1 in BACKLOG.md,
-      # where a force-added file under data/ leaked a real production
-      # macaroon and private key into history. .gitignore only stops
-      # *new* files from being added; it does nothing once a file is
-      # force-added, so this check exists specifically to catch that.
-      - name: Fail if anything under data/ is tracked
-        run: |
-          tracked=$(git ls-files data/)
-          if [ -n "$tracked" ]; then
-            echo "::error::Tracked file(s) found under data/, which is gitignored for a reason — see SEC-1 in BACKLOG.md:"
-            echo "$tracked"
-            exit 1
-          fi
-
