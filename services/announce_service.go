@@ -117,7 +117,7 @@ type announceNodeState struct {
 
 	// The current signed event and what it was built from.
 	event       *nostr.Event
-	fields      []byte // the event's Fields as JSON, stored on acceptance
+	fields      []byte // the signed event as JSON, stored on acceptance
 	fingerprint string
 	signedAt    time.Time
 	eventStatus core.AnnounceStatus
@@ -321,7 +321,10 @@ func (s *AnnounceService) runNode(ctx context.Context, n *announceNodeState) err
 	now := s.cfg.Now()
 	if n.event == nil || fp != n.fingerprint || reason != n.reason || blocked != n.blocked ||
 		now.Sub(n.signedAt) >= s.cfg.RepublishEvery {
-		createdAt := nextCreatedAt(now.Unix(), state.LastCreatedAt, n.lastCreatedAt)
+		createdAt, ahead := nextCreatedAt(now.Unix(), state.LastCreatedAt, n.lastCreatedAt)
+		if ahead != 0 {
+			log.Warn().Msgf("NIP-LSP: the last signed created_at %d is more than %s ahead of the clock (%d); signing at the clock instead", ahead, time.Duration(maxCreatedAtLead)*time.Second, now.Unix())
+		}
 		ev, err := niplsp.NewAnnouncement(fields, createdAt)
 		if err != nil {
 			return fmt.Errorf("building the announcement: %w", err)
@@ -334,9 +337,11 @@ func (s *AnnounceService) runNode(ctx context.Context, n *announceNodeState) err
 			return fmt.Errorf("recording the announcement's created_at: %w", err)
 		}
 		n.lastCreatedAt = createdAt
-		fieldsJSON, err := json.Marshal(fields)
+		// The event itself, not the Go encoding of Fields: its tags are the
+		// NIP-LSP wire format, so a later niplsp still reads them.
+		fieldsJSON, err := json.Marshal(ev)
 		if err != nil {
-			return fmt.Errorf("encoding the announced fields: %w", err)
+			return fmt.Errorf("encoding the announced event: %w", err)
 		}
 		if n.event != nil && status != n.eventStatus {
 			// A new status goes to every relay now, not after a backoff
@@ -495,18 +500,35 @@ func (s *AnnounceService) send(ctx context.Context, n *announceNodeState, now ti
 	s.mu.Unlock()
 }
 
+// maxCreatedAtLead is how far, in seconds, a stored created_at may be ahead
+// of the clock and still be signed after. It is below the future limit
+// relays commonly apply (15 minutes), so the event signed after it is still
+// accepted.
+const maxCreatedAtLead = 10 * 60
+
 // nextCreatedAt is now, or one second after the newest created_at already
 // signed when that is not before now. Relays keep the newest event per node
 // and, on a created_at tie, the one with the lowest id (NIP-01), so a status
 // change signed in the same second as the event before it, or after the
 // clock went back, must still be newer.
-func nextCreatedAt(now int64, last ...int64) int64 {
+//
+// A created_at more than maxCreatedAtLead ahead of now (signed once with the
+// clock far ahead) is not followed: relays that refuse events from the
+// future would refuse every later one too. It is returned as ahead (the
+// largest such value, 0 if none) so the caller can log it; the event is then
+// signed at now, and may lose to that one where a relay kept it.
+func nextCreatedAt(now int64, last ...int64) (next, ahead int64) {
+	next = now
 	for _, l := range last {
-		if now <= l {
-			now = l + 1
+		if l-now > maxCreatedAtLead {
+			ahead = max(ahead, l)
+			continue
+		}
+		if next <= l {
+			next = l + 1
 		}
 	}
-	return now
+	return next, ahead
 }
 
 // backoffDelay is base doubled per failure after the first, capped at max.
@@ -537,21 +559,61 @@ func (s *AnnounceService) currentFields(cfg *config.NodeConfig, n *announceNodeS
 // status closed. They do not depend on the config or the live answers,
 // which may no longer build an announcement once announcing is switched off
 // (the announce block removed, addrs cleared) or the LSPS answers changed.
-// A node with no stored values (published before they were kept) is built
-// from the current config.
+// A node with no stored values (published before they were kept), or whose
+// stored values no longer read or build an announcement, is built from the
+// current config.
 func (s *AnnounceService) closedFields(cfg *config.NodeConfig, n *announceNodeState, state *core.AnnounceState) (niplsp.Fields, error) {
-	if len(state.LastFields) > 0 {
-		var f niplsp.Fields
-		err := json.Unmarshal(state.LastFields, &f)
+	if f, ok := storedFields(state.LastFields); ok {
+		f.Status = niplsp.StatusClosed
+		f.Expiration = 0
+		f.Relays = s.cfg.Relays
+		_, err := niplsp.NewAnnouncement(f, s.cfg.Now().Unix())
 		if err == nil {
-			f.Status = niplsp.StatusClosed
-			f.Expiration = 0
-			f.Relays = s.cfg.Relays
 			return f, nil
 		}
-		log.Warn().Err(err).Msg("NIP-LSP: the stored announcement values do not decode; building closed from the config")
+		log.Warn().Err(err).Msg("NIP-LSP: the stored announcement values no longer build an announcement; building closed from the config")
 	}
 	return s.currentFields(cfg, n, core.AnnounceClosed)
+}
+
+// storedFields reads AnnounceState.LastFields: the last accepted event, read
+// back from its tags, or niplsp Fields as JSON as stored before the event
+// was kept. ok is false when there is nothing usable.
+func storedFields(raw []byte) (niplsp.Fields, bool) {
+	if len(raw) == 0 {
+		return niplsp.Fields{}, false
+	}
+	var ev nip01.Event
+	if err := json.Unmarshal(raw, &ev); err == nil && ev.Kind == niplsp.Kind && ev.Sig != "" {
+		// Checked as of its own created_at: a withdrawal may come after the
+		// event expired. Its own chain and network are the ones accepted.
+		a, err := niplsp.ParseAnnouncement(&ev, niplsp.CheckOptions{
+			Chains:   []string{eventTag(&ev, niplsp.TagChain)},
+			Networks: []string{eventTag(&ev, niplsp.TagNetwork)},
+			Now:      int64(ev.CreatedAt), //nolint:gosec // event timestamps are seconds
+		})
+		if err != nil {
+			log.Warn().Err(err).Msg("NIP-LSP: the stored announcement does not read back")
+			return niplsp.Fields{}, false
+		}
+		return a.Fields, true
+	}
+	var f niplsp.Fields
+	if err := json.Unmarshal(raw, &f); err != nil {
+		log.Warn().Err(err).Msg("NIP-LSP: the stored announcement values do not decode")
+		return niplsp.Fields{}, false
+	}
+	return f, true
+}
+
+// eventTag is the first value of the tag name, or "".
+func eventTag(ev *nip01.Event, name string) string {
+	for _, t := range ev.Tags {
+		if len(t) >= 2 && t[0] == name {
+			return t[1]
+		}
+	}
+	return ""
 }
 
 // buildFields maps the live answers, the announce block and the status to

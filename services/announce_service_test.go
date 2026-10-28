@@ -14,6 +14,7 @@ import (
 	"github.com/flowgate-lsp/flspd/platform/config"
 	"github.com/flowgate-lsp/flspd/ports"
 	"github.com/nbd-wtf/go-nostr"
+	"github.com/ohstr/nmilat/nip01"
 	"github.com/ohstr/nmilat/niplsp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -834,11 +835,46 @@ func TestAnnounceService_RelayBackoff(t *testing.T) {
 }
 
 func TestNextCreatedAt(t *testing.T) {
-	assert.Equal(t, int64(100), nextCreatedAt(100))
-	assert.Equal(t, int64(100), nextCreatedAt(100, 99, 0))
-	assert.Equal(t, int64(101), nextCreatedAt(100, 100, 0), "same second")
-	assert.Equal(t, int64(151), nextCreatedAt(100, 150, 120), "clock went back")
-	assert.Equal(t, int64(151), nextCreatedAt(100, 120, 150))
+	next := func(now int64, last ...int64) int64 {
+		n, ahead := nextCreatedAt(now, last...)
+		assert.Zero(t, ahead)
+		return n
+	}
+	assert.Equal(t, int64(100), next(100))
+	assert.Equal(t, int64(100), next(100, 99, 0))
+	assert.Equal(t, int64(101), next(100, 100, 0), "same second")
+	assert.Equal(t, int64(151), next(100, 150, 120), "clock went back")
+	assert.Equal(t, int64(151), next(100, 120, 150))
+	assert.Equal(t, int64(100+maxCreatedAtLead+1), next(100, 100+maxCreatedAtLead), "at the limit")
+
+	// R2-F2: a created_at far in the future is not followed.
+	n, ahead := nextCreatedAt(100, 100+maxCreatedAtLead+1, 0)
+	assert.Equal(t, int64(100), n)
+	assert.Equal(t, int64(100+maxCreatedAtLead+1), ahead)
+	n, ahead = nextCreatedAt(100, 1_000_000, 120)
+	assert.Equal(t, int64(121), n, "a near one is still followed")
+	assert.Equal(t, int64(1_000_000), ahead)
+}
+
+// R2-F2: one run with the clock far ahead does not pin every later event
+// to that future second.
+func TestAnnounceService_FutureCreatedAtIsNotFollowed(t *testing.T) {
+	ctx := context.Background()
+	f := newAnnounceFixture(t, constAnswers(testAnswers(1, 2, 5)))
+	real := *f.now
+	*f.now = real.Add(48 * time.Hour)
+	f.run()
+	require.Equal(t, real.Add(48*time.Hour).Unix(), int64(f.relays.last().CreatedAt))
+
+	// The clock is fixed and the service restarted: signed at the clock.
+	*f.now = real
+	restarted := NewAnnounceService(AnnounceServiceConfig{Relays: testRelays, Store: f.store, Publisher: f.relays, Now: func() time.Time { return *f.now }},
+		[]AnnounceNode{f.svc.nodeList()[0].AnnounceNode})
+	restarted.RunOnce(ctx)
+	assert.Equal(t, real.Unix(), int64(f.relays.last().CreatedAt))
+	assert.Empty(t, restarted.Status(f.node.NodeId).LastError)
+	st, _ := f.store.GetAnnounceState(ctx, f.node.NodeId)
+	assert.Equal(t, real.Unix(), st.LastCreatedAt, "the stored value heals")
 }
 
 // F-M4: a status change in the same second as the event before it, and an
@@ -866,8 +902,9 @@ func TestAnnounceService_CreatedAtIsMonotonic(t *testing.T) {
 	st, _ := f.store.GetAnnounceState(ctx, f.node.NodeId)
 	assert.Equal(t, int64(open.CreatedAt), st.LastCreatedAt, "stored")
 
-	// Restarted with the clock an hour behind: still after the stored one.
-	*f.now = f.now.Add(-time.Hour)
+	// Restarted with the clock five minutes behind: still after the stored
+	// one (further behind is R2-F2's case).
+	*f.now = f.now.Add(-5 * time.Minute)
 	restarted := NewAnnounceService(AnnounceServiceConfig{Relays: testRelays, Store: f.store, Publisher: f.relays, Now: func() time.Time { return *f.now }},
 		[]AnnounceNode{f.svc.nodeList()[0].AnnounceNode})
 	restarted.RunOnce(ctx)
@@ -932,6 +969,56 @@ func TestAnnounceService_UnlistWithdrawsFromTheLastAnnouncedValues(t *testing.T)
 	f.run()
 	require.Equal(t, 4, f.relays.count())
 	assert.Equal(t, "closed", tagValue(f.relays.last(), "status"))
+}
+
+// R2-F1: the stored values are the accepted event, read back from its tags.
+func TestAnnounceService_StoresTheAcceptedEvent(t *testing.T) {
+	f := newAnnounceFixture(t, constAnswers(testAnswers(1, 2, 5)))
+	f.run()
+	st, _ := f.store.GetAnnounceState(context.Background(), f.node.NodeId)
+	var ev nip01.Event
+	require.NoError(t, json.Unmarshal(st.LastFields, &ev))
+	assert.Equal(t, f.relays.last().ID, ev.ID)
+	fields, ok := storedFields(st.LastFields)
+	require.True(t, ok)
+	assert.Equal(t, []string{"203.0.113.7:9735"}, fields.Addrs)
+}
+
+// R2-F1: stored values that no longer build an announcement (an older or
+// reshaped encoding) fall back to the config instead of failing every run.
+func TestAnnounceService_UnusableStoredValuesFallBackToTheConfig(t *testing.T) {
+	cases := map[string][]byte{
+		"reshaped fields":   []byte(`{"Meta":{"Renamed":"x"},"Protocols":[2]}`),
+		"not json":          []byte(`{`),
+		"tampered event":    nil, // filled below
+		"legacy but usable": nil,
+	}
+	for name, stored := range cases {
+		t.Run(name, func(t *testing.T) {
+			f := newAnnounceFixture(t, constAnswers(testAnswers(1, 2, 5)))
+			f.run()
+			st, _ := f.store.GetAnnounceState(context.Background(), f.node.NodeId)
+			switch name {
+			case "tampered event":
+				var ev nip01.Event
+				require.NoError(t, json.Unmarshal(st.LastFields, &ev))
+				ev.Content = "changed"
+				stored, _ = json.Marshal(ev)
+			case "legacy but usable":
+				fields, ok := storedFields(st.LastFields)
+				require.True(t, ok)
+				stored, _ = json.Marshal(fields)
+			}
+			require.NoError(t, f.store.update(f.node.NodeId, func(st *core.AnnounceState) { st.LastFields = stored }))
+
+			f.setConfig(func(c *config.NodeConfig) { c.Announce.Enabled = false })
+			f.run()
+			closed := f.relays.last()
+			assert.Equal(t, "closed", tagValue(closed, "status"))
+			assert.Equal(t, "203.0.113.7:9735", tagValue(closed, "addr"))
+			assert.Empty(t, f.status().LastError)
+		})
+	}
 }
 
 // F-L6: a relay backing off from an older event gets a new status at once.

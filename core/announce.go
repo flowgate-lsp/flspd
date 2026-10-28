@@ -86,8 +86,8 @@ type AnnounceState struct {
 	// signed for the node, 0 if none; the next one is signed after it.
 	LastCreatedAt int64
 	// LastFields are the announced values of the last event a relay
-	// accepted, as the publisher encoded them (niplsp Fields as JSON); nil
-	// if none. Closed is built from them when the config no longer can.
+	// accepted: the signed event as JSON (rows written before it was kept
+	// hold niplsp Fields as JSON); nil if none. Closed is built from them when the config no longer can.
 	LastFields []byte
 }
 
