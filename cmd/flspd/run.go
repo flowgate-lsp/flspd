@@ -362,7 +362,10 @@ func runLspd(cliCtx *cli.Context) error {
 		}
 
 		liquidityManager := lsps.NewLiquidityManager(client, openingStore)
-		lspsHandlers := lsps.NewHandlers(lspsConfig, client, nodesService, openingService, liquidityManager, dashBridge, orderWatcher)
+		lspsHandlers, err := newNodeLSPSHandlers(node, lspsConfig, client, openingService, liquidityManager, dashBridge, orderWatcher)
+		if err != nil {
+			log.Fatal().Err(err).Msgf("LSPS handlers for %s", nodeLabel(nodeCfg))
+		}
 		go lspsHandlers.BurstLimiter().StartEvictionLoop(ctx.Done(), BurstLimiterEvictionInterval)
 		if signer, err := services.NewAnnouncementSigner(node); err != nil {
 			log.Error().Err(err).Msg("NIP-LSP: no announcement signer for node; it cannot announce")

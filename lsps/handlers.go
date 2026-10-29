@@ -168,6 +168,8 @@ func (s *Handlers) checkFleetCeilingAndLiquidity(req *JsonRpcRequest, component 
 	return nil
 }
 
+// NewHandlers builds the handlers of one node; nodesService must hold only
+// that node, since every answer and sale is read from the nodes it returns.
 func NewHandlers(
 	config Config,
 	lndClient LndClientWrapper,
