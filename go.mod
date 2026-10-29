@@ -18,7 +18,7 @@ require (
 	github.com/nbd-wtf/go-nostr v0.52.3
 	github.com/ohstr/nmilat v0.5.0-rc.45
 	github.com/rs/zerolog v1.35.1
-	github.com/stretchr/testify v1.11.1
+	github.com/stretchr/testify v1.12.1
 	github.com/urfave/cli v1.22.17
 	golang.org/x/sync v0.21.0
 	google.golang.org/grpc v1.81.0
@@ -115,6 +115,7 @@ require (
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.34.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.39.0 // indirect
 	go.opentelemetry.io/otel/metric v1.43.0 // indirect
+	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/arch v0.15.0 // indirect
 	golang.org/x/exp v0.0.0-20250811191247-51f88131bc50 // indirect
 	golang.org/x/net v0.55.0 // indirect
@@ -172,7 +173,7 @@ require (
 	github.com/sirupsen/logrus v1.9.3 // indirect
 	github.com/soheilhy/cmux v0.1.5 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
-	github.com/stretchr/objx v0.5.2 // indirect
+	github.com/stretchr/objx v0.5.3 // indirect
 	github.com/syndtr/goleveldb v1.0.1-0.20220721030215-126854af5e6d // indirect
 	github.com/tmc/grpc-websocket-proxy v0.0.0-20201229170055-e5319fda7802 // indirect
 	github.com/tv42/zbase32 v0.0.0-20220222190657-f76a9fc892fa
