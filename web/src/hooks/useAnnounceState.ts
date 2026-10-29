@@ -5,7 +5,8 @@ import type { AnnounceAction, AnnounceState } from '../lib/announce';
 
 // The node's NIP-LSP announcement status and the Pause/Resume/Unlist
 // actions (T8-2).
-export const useAnnounceState = () => {
+// node is the targeted fleet node; null waits for a choice.
+export const useAnnounceState = (node: string | null) => {
   const { user, getAuthHeader } = useAuth();
   const [state, setState] = useState<AnnounceState | null>(null);
   const [busy, setBusy] = useState(false);
@@ -19,17 +20,19 @@ export const useAnnounceState = () => {
   const refresh = useCallback(async () => {
     try {
       setError(null);
-      setState(await api.getAnnounceState());
+      if (!node) return;
+      setState(await api.getAnnounceState(node));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
-  }, [api]);
+  }, [api, node]);
 
   const act = async (action: AnnounceAction) => {
     try {
       setBusy(true);
       setError(null);
-      setState(await api.setAnnounceState(action));
+      if (!node) throw new Error('Choose a node first');
+      setState(await api.setAnnounceState(action, node));
       return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -43,7 +46,8 @@ export const useAnnounceState = () => {
     try {
       setBusy(true);
       setError(null);
-      setState(await api.recheckAnnouncement());
+      if (!node) throw new Error('Choose a node first');
+      setState(await api.recheckAnnouncement(node));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {

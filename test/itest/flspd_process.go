@@ -100,6 +100,13 @@ type FlspdProcessOptions struct {
 	// the default," matching production's own behavior when
 	// MEMPOOL_API_BASE_URL isn't set.
 	MempoolAPIBaseURL string
+
+	// Announce is the node's NIP-LSP announce block; nil leaves it off.
+	Announce *config.AnnounceConfig
+
+	// Env adds environment variables (e.g. NOSTR_ANNOUNCE_RELAYS,
+	// DASHBOARD_ADMIN_PUBKEY).
+	Env []string
 }
 
 // FlspdProcess runs the actual flspd binary under test as a real OS
@@ -108,11 +115,12 @@ type FlspdProcessOptions struct {
 // scenarios (notably the F-1 crash-recovery one) direct control over its
 // lifecycle.
 type FlspdProcess struct {
-	t          *testing.T
-	binaryPath string
-	configPath string
-	listenAddr string
-	env        []string
+	t             *testing.T
+	binaryPath    string
+	configPath    string
+	listenAddr    string
+	dashboardAddr string
+	env           []string
 
 	mu  sync.Mutex
 	cmd *exec.Cmd
@@ -163,6 +171,7 @@ func NewFlspdProcess(t *testing.T, d *Devnet, pg *PostgresContainer, opts FlspdP
 		JitMaxPaymentSizeMloki:    300_000_000_000,
 		JitMaxClientToSelfDelay:   10000,
 		JitValidUntilSeconds:      86400,
+		Announce:                  opts.Announce,
 		Lnd: &config.LndConfig{
 			Address:    lndConf.Address,
 			Cert:       lndConf.Cert,
@@ -190,13 +199,15 @@ func NewFlspdProcess(t *testing.T, d *Devnet, pg *PostgresContainer, opts FlspdP
 	if opts.MempoolAPIBaseURL != "" {
 		env = append(env, "MEMPOOL_API_BASE_URL="+opts.MempoolAPIBaseURL)
 	}
+	env = append(env, opts.Env...)
 
 	return &FlspdProcess{
-		t:          t,
-		binaryPath: buildFlspdBinary(t),
-		configPath: configPath,
-		listenAddr: listenAddr,
-		env:        env,
+		t:             t,
+		binaryPath:    buildFlspdBinary(t),
+		configPath:    configPath,
+		listenAddr:    listenAddr,
+		dashboardAddr: dashboardAddr,
+		env:           env,
 	}
 }
 
@@ -315,6 +326,11 @@ func (p *FlspdProcess) Restart() error {
 // ListenAddress returns the address flspd's gRPC API is bound to.
 func (p *FlspdProcess) ListenAddress() string {
 	return p.listenAddr
+}
+
+// DashboardAddress returns the address flspd's dashboard is bound to.
+func (p *FlspdProcess) DashboardAddress() string {
+	return p.dashboardAddr
 }
 
 // Context is a convenience for steps that need a bounded context tied to

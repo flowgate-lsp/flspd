@@ -25,7 +25,7 @@ func SupportedProtocols(nodeCfg *config.NodeConfig, c Config) []int {
 
 // SupportedProtocols returns the protocol list for the node these handlers
 // serve, from its live config (a dashboard hot-swap of jitEnabled is seen on
-// the next call). Like the other handlers, it reads the first node's config.
+// the next call). Handlers serve one node: their NodesService holds only it.
 func (s *Handlers) SupportedProtocols() []int {
 	var nodeCfg *config.NodeConfig
 	if s.nodesService != nil {

@@ -73,7 +73,9 @@ services:
       - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL}
       - DISCORD_NOTIFICATIONS_ENABLED=${DISCORD_NOTIFICATIONS_ENABLED:-false}
       - LSP_NOSTR_PRIVATE_KEY=${LSP_NOSTR_PRIVATE_KEY}
-      - NOSTR_ANNOUNCE_RELAYS=${NOSTR_ANNOUNCE_RELAYS:-}
+      # The local relay below unless set: the dev node's announcement stays
+      # on this host. Point it at public relays only to announce for real.
+      - NOSTR_ANNOUNCE_RELAYS=${NOSTR_ANNOUNCE_RELAYS:-ws://flspd-dev-relay:5500}
       - DASHBOARD_ADMIN_PUBKEY=${DASHBOARD_ADMIN_PUBKEY}
       - DASHBOARD_LISTEN_ADDRESS=${DASHBOARD_LISTEN_ADDRESS:-:8080}
       - LOG_DIR=/var/log/flspd
@@ -92,6 +94,8 @@ services:
         condition: service_healthy
       flnd:
         condition: service_healthy
+      relay:
+        condition: service_started
     healthcheck:
       test: ["CMD", "nc", "-z", "localhost", "9090"]
       interval: 10s
@@ -105,6 +109,22 @@ services:
       # postgres. Created via `just docker network` (also run automatically
       # by `just docker up`); the other stack joins the same external
       # network name.
+      - flowgate-integration
+
+  # Local Nostr relay for the dev node's NIP-LSP announcement (config from
+  # deploy/relay.dev.sample.yaml, written by `just setup backend`). Also on
+  # flowgate-integration, so a lokihub dev stack can read it as
+  # ws://flspd-dev-relay:5500.
+  relay:
+    image: ghcr.io/ohstr/ncli:rc
+    container_name: flspd-dev-relay
+    restart: unless-stopped
+    command: ["relay", "--config", "/config/relay.yaml"]
+    volumes:
+      - ./data/relay/relay.yaml:/config/relay.yaml:ro
+      - ./data/relay:/data
+    networks:
+      - flspd-dev
       - flowgate-integration
 
   postgres:

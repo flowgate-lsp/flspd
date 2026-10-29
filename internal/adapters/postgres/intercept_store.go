@@ -100,11 +100,12 @@ func (s *PostgresInterceptStore) RegisterPayment(token string, orderId string, p
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		ON CONFLICT DO NOTHING`,
 		destination, paymentHash, paymentSecret, incomingAmountMloki, outgoingAmountMloki, t, p)
-	log.Info().Msgf("registerPayment(%x, %x, %x, %v, %v, %v, %s) rows: %v err: %v",
-		destination, paymentHash, paymentSecret, incomingAmountMloki, outgoingAmountMloki, tag, p, commandTag.RowsAffected(), err)
+	// The payment secret is never logged nor put in the error.
+	log.Info().Msgf("registerPayment(%x, %x, %v, %v, %v, %s) rows: %v err: %v",
+		destination, paymentHash, incomingAmountMloki, outgoingAmountMloki, tag, p, commandTag.RowsAffected(), err)
 	if err != nil {
-		return fmt.Errorf("registerPayment(%x, %x, %x, %v, %v, %v, %s) error: %w",
-			destination, paymentHash, paymentSecret, incomingAmountMloki, outgoingAmountMloki, tag, p, err)
+		return fmt.Errorf("registerPayment(%x, %x, %v, %v, %v, %s) error: %w",
+			destination, paymentHash, incomingAmountMloki, outgoingAmountMloki, tag, p, err)
 	}
 	return nil
 }

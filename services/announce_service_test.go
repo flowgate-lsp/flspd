@@ -881,15 +881,38 @@ func TestNextCreatedAt(t *testing.T) {
 	assert.Equal(t, int64(101), next(100, 100, 0), "same second")
 	assert.Equal(t, int64(151), next(100, 150, 120), "clock went back")
 	assert.Equal(t, int64(151), next(100, 120, 150))
-	assert.Equal(t, int64(100+maxCreatedAtLead+1), next(100, 100+maxCreatedAtLead), "at the limit")
+	assert.Equal(t, int64(100+maxCreatedAtLead), next(100, 100+maxCreatedAtLead-1), "at the limit")
 
 	// R2-F2: a created_at far in the future is not followed.
-	n, ahead := nextCreatedAt(100, 100+maxCreatedAtLead+1, 0)
-	assert.Equal(t, int64(100), n)
-	assert.Equal(t, int64(100+maxCreatedAtLead+1), ahead)
+	n, ahead := nextCreatedAt(100, 100+maxCreatedAtLead, 0)
+	assert.Equal(t, int64(100), n, "following it would sign past the limit")
+	assert.Equal(t, int64(100+maxCreatedAtLead), ahead)
 	n, ahead = nextCreatedAt(100, 1_000_000, 120)
 	assert.Equal(t, int64(121), n, "a near one is still followed")
 	assert.Equal(t, int64(1_000_000), ahead)
+}
+
+// The NIP-LSP step 4 bound: a client sets aside an event created more than
+// 15 minutes ahead of its clock.
+const clientFutureBound = 15 * 60
+
+// However often the terms change and however the clock steps back, no
+// event is signed more than maxCreatedAtLead ahead of the clock, and every
+// one within that lead is newer than the one before it.
+func TestNextCreatedAt_NeverAheadOfTheLead(t *testing.T) {
+	require.Less(t, maxCreatedAtLead, clientFutureBound)
+	now, last := int64(1_000_000), int64(0)
+	for i := 0; i < 2*maxCreatedAtLead; i++ {
+		if i == maxCreatedAtLead/2 {
+			now -= 5 * 60 // the clock steps back five minutes
+		}
+		next, _ := nextCreatedAt(now, last)
+		assert.LessOrEqual(t, next-now, int64(maxCreatedAtLead), "change %d", i)
+		if last-now < maxCreatedAtLead {
+			assert.Greater(t, next, last, "change %d is newer", i)
+		}
+		last = next
+	}
 }
 
 // R2-F2: one run with the clock far ahead does not pin every later event

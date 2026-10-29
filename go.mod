@@ -16,7 +16,7 @@ require (
 	github.com/jackc/pgtype v1.14.4
 	github.com/jackc/pgx/v5 v5.9.2
 	github.com/nbd-wtf/go-nostr v0.52.3
-	github.com/ohstr/nmilat v0.5.0-rc.44
+	github.com/ohstr/nmilat v0.5.0-rc.45
 	github.com/rs/zerolog v1.35.1
 	github.com/stretchr/testify v1.11.1
 	github.com/urfave/cli v1.22.17

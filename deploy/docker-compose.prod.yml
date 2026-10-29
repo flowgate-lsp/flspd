@@ -44,7 +44,7 @@ services:
     restart: unless-stopped
     environment:
       - LISTEN_ADDRESS=0.0.0.0:9090
-      - DATABASE_URL=postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
+      - DATABASE_URL=postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB}?sslmode=disable
       - AUTO_MIGRATE_DATABASE=${AUTO_MIGRATE_DATABASE:-true}
       - MEMPOOL_PRIORITY=${MEMPOOL_PRIORITY:-economy}
       - MEMPOOL_API_BASE_URL=${MEMPOOL_API_BASE_URL}
@@ -83,21 +83,13 @@ services:
       - "traefik.http.services.flspd.loadbalancer.server.port=51611"
       - "traefik.http.middlewares.flspd-strip.stripprefix.prefixes=/api"
       - "traefik.http.routers.flspd.middlewares=flspd-strip"
-      
-      # Dashboard Labels
-      - "traefik.http.routers.flspd-dash.rule=Host(`flspapi.flowgate.to`) && (PathPrefix(`/dashboard`) || PathPrefix(`/dashboard/`))"
-      - "traefik.http.routers.flspd-dash.entrypoints=web"
-      - "traefik.http.routers.flspd-dash.service=flspd-dash"
-      - "traefik.http.services.flspd-dash.loadbalancer.server.port=8080"
-      - "traefik.http.middlewares.dash-strip.stripprefix.prefixes=/dashboard"
-      - "traefik.http.routers.flspd-dash.middlewares=dash-strip"
 
-      # Public, unauthenticated status endpoint the frontend polls to decide
-      # whether to show the login form (reuses the same dashboard-container
-      # service/port; no strip-prefix needed since /info has none to strip).
-      - "traefik.http.routers.flspd-info.rule=Host(`flspapi.flowgate.to`) && Path(`/info`)"
-      - "traefik.http.routers.flspd-info.entrypoints=web"
-      - "traefik.http.routers.flspd-info.service=flspd-dash"
+    # The dashboard (port 8080: admin JSON-RPC, /dashboard/ws, /info) is not
+    # routed through traefik by default. Reach it on this host only, e.g.
+    # over an SSH tunnel, or expose it on purpose over TLS with
+    # deploy/docker-compose.prod.dashboard.yml.
+    ports:
+      - "127.0.0.1:${DASHBOARD_HOST_PORT:-8080}:8080"
 
 
   postgres:
@@ -106,9 +98,12 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: ${POSTGRES_DB}
-      POSTGRES_HOST_AUTH_METHOD: trust
+      # Other containers on flsp_network (lokihub too) must log in with the
+      # password; only the in-container socket (pg_isready) skips it.
+      POSTGRES_HOST_AUTH_METHOD: scram-sha-256
+      POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256
     volumes:
       - ./data/postgres:/var/lib/postgresql/data
     healthcheck:

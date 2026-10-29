@@ -55,6 +55,20 @@ func TestNodesRegtestSample_Announces(t *testing.T) {
 	assert.Equal(t, []string{cfg.Host}, cfg.Announce.Addrs)
 }
 
+// The dev sample announces too, to the dev stack's local relay.
+func TestNodesDevSample_Announces(t *testing.T) {
+	data, err := os.ReadFile("../../deploy/nodes.dev.sample.yaml")
+	require.NoError(t, err)
+	var configs []*NodeConfig
+	require.NoError(t, yaml.Unmarshal(data, &configs))
+	require.Len(t, configs, 1)
+	cfg := configs[0]
+	require.NoError(t, cfg.Validate())
+	assert.True(t, cfg.Announcing())
+	assert.True(t, cfg.JitEnabled, "LSPS2 is announced only with JIT on")
+	assert.NotEmpty(t, cfg.Announce.Addrs)
+}
+
 func unmarshalSecretRef(t *testing.T, doc string) SecretRef {
 	t.Helper()
 	var r SecretRef

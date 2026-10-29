@@ -1,3 +1,5 @@
+import { withNode, type FleetNode } from './nodes';
+
 export class DashboardAPI {
   private baseUrl: string;
   private authUrl: string;
@@ -62,26 +64,33 @@ export class DashboardAPI {
     return this.request('list_orders', { limit, offset });
   }
 
-  getConfig() {
-    return this.request('get_config');
+  // The fleet's nodes, for the node selector.
+  listNodes(): Promise<{ nodes: FleetNode[] }> {
+    return this.request('list_nodes');
   }
 
-  updateConfig(config: any) {
-    return this.request('update_config', { config });
+  // The per-node methods take the selected node; the server requires it
+  // when the fleet has more than one node.
+  getConfig(node?: string | null) {
+    return this.request('get_config', withNode({}, node));
+  }
+
+  updateConfig(config: any, node?: string | null) {
+    return this.request('update_config', withNode({ config }, node));
   }
 
   // NIP-LSP announcement status (T8-2): open, paused or closed.
-  getAnnounceState() {
-    return this.request('get_announce_state');
+  getAnnounceState(node?: string | null) {
+    return this.request('get_announce_state', withNode({}, node));
   }
 
-  setAnnounceState(action: 'pause' | 'resume' | 'unlist') {
-    return this.request('set_announce_state', { action });
+  setAnnounceState(action: 'pause' | 'resume' | 'unlist', node?: string | null) {
+    return this.request('set_announce_state', withNode({ action }, node));
   }
 
   // Lifts a failed self-check's block once its cause is fixed (T8-4).
-  recheckAnnouncement() {
-    return this.request('recheck_announcement');
+  recheckAnnouncement(node?: string | null) {
+    return this.request('recheck_announcement', withNode({}, node));
   }
 
   getOrderDetail(orderId: string) {

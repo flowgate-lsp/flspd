@@ -29,6 +29,17 @@ The easiest way to run `flspd` is using the provided Docker setup.
     ```
     This will start `flspd` and a `postgres` database. Ensure your `flnd` node is running and accessible (as configured in `NODES`).
 
+    `POSTGRES_PASSWORD` is required: postgres asks every other container for it (scram-sha-256).
+    A data directory first created by an older compose file still has `trust` in its `pg_hba.conf`;
+    change those `host` lines to `scram-sha-256` and restart postgres.
+
+    The admin dashboard (`/dashboard`, `/dashboard/ws`, `/info`) listens on `127.0.0.1:8080` of the host only;
+    reach it over an SSH tunnel (`ssh -L 8080:127.0.0.1:8080 <host>`). To serve it publicly, route it over TLS on purpose:
+    ```bash
+    docker compose -f deploy/docker-compose.prod.yml -f deploy/docker-compose.prod.dashboard.yml --project-directory . up -d
+    ```
+    with `DASHBOARD_TLS_ENTRYPOINT` and `DASHBOARD_CERT_RESOLVER` in `.env` set to your traefik's names.
+
 ### Manual Install
 If you prefer to run `flspd` manually or want to contribute:
 

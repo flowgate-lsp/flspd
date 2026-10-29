@@ -70,6 +70,10 @@ setup target="all":
         [ -f deploy/nodes.yaml ] || cp deploy/nodes.dev.sample.yaml deploy/nodes.yaml
         [ -f .env ] || cp deploy/compose.env.sample .env
         [ -f data/flnd/flnd.conf ] || cp data/flnd/flnd.conf.sample data/flnd/flnd.conf
+        if [ ! -f data/relay/relay.yaml ]; then
+            mkdir -p data/relay
+            sed "s/__RELAY_PRIVKEY__/$(openssl rand -hex 32)/" deploy/relay.dev.sample.yaml > data/relay/relay.yaml
+        fi
     }
     frontend() { (cd web && npm install); }
     case "{{target}}" in

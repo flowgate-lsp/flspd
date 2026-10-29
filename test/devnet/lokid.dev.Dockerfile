@@ -7,7 +7,7 @@
 # instead of a pinned/production release — never the production image,
 # mirroring the sibling-checkout convention flnd/dev.Dockerfile already
 # uses in this repo's own docker-compose.dev.yml.
-FROM golang:1.26.1-alpine AS dev
+FROM golang:1.26.8-alpine AS dev
 
 RUN apk add --no-cache git gcc musl-dev
 

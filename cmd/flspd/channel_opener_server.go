@@ -99,11 +99,12 @@ func (s *channelOpenerServer) RegisterPayment(
 	var pi rpc.PaymentInformation
 	err = proto.Unmarshal(data, &pi)
 	if err != nil {
-		log.Error().Msgf("proto.Unmarshal(%x) error: %v", data, err)
-		return nil, fmt.Errorf("proto.Unmarshal(%x) error: %w", data, err)
+		// The plaintext carries the payment secret: never log or return it.
+		log.Error().Msgf("proto.Unmarshal(%d decrypted bytes) error: %v", len(data), err)
+		return nil, fmt.Errorf("proto.Unmarshal(%d decrypted bytes) error: %w", len(data), err)
 	}
-	log.Info().Msgf("RegisterPayment - Destination: %x, pi.PaymentHash: %x, pi.PaymentSecret: %x, pi.IncomingAmountMloki: %v, pi.OutgoingAmountMloki: %v, pi.Tag: %v",
-		pi.Destination, pi.PaymentHash, pi.PaymentSecret, pi.IncomingAmountMloki, pi.OutgoingAmountMloki, pi.Tag)
+	log.Info().Msgf("RegisterPayment - Destination: %x, pi.PaymentHash: %x, pi.IncomingAmountMloki: %v, pi.OutgoingAmountMloki: %v, pi.Tag: %v",
+		pi.Destination, pi.PaymentHash, pi.IncomingAmountMloki, pi.OutgoingAmountMloki, pi.Tag)
 
 	if len(pi.Tag) > 1000 {
 		return nil, fmt.Errorf("tag too long")
@@ -177,8 +178,9 @@ func getSignedEncryptedData(n *core.Node, in *rpc.Encrypted) (string, []byte, er
 	var signed rpc.Signed
 	err = proto.Unmarshal(signedBlob, &signed)
 	if err != nil {
-		log.Error().Msgf("proto.Unmarshal(%x) error: %v", signedBlob, err)
-		return "", nil, fmt.Errorf("proto.Unmarshal(%x) error: %w", signedBlob, err)
+		// The plaintext carries the payment secret: never log or return it.
+		log.Error().Msgf("proto.Unmarshal(%d decrypted bytes) error: %v", len(signedBlob), err)
+		return "", nil, fmt.Errorf("proto.Unmarshal(%d decrypted bytes) error: %w", len(signedBlob), err)
 	}
 	pubkey, err := btcec.ParsePubKey(signed.Pubkey)
 	if err != nil {
