@@ -8,6 +8,7 @@ package dashboard
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"time"
 
@@ -26,6 +27,10 @@ import (
 // login form and to show persistent node-status after login too), so a
 // hung LND connection must not be able to stall it.
 const nodeReachableTimeout = 3 * time.Second
+
+// MaxRequestBodyBytes caps a dashboard request body; JSON-RPC calls are a
+// few KiB, config saves well under this.
+const MaxRequestBodyBytes int64 = 1 << 20
 
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
@@ -214,23 +219,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 1. Authenticate
-	session, err := auth.VerifyNostrAuth(r)
-	if err != nil {
-		log.Error().Err(err).Msg("Dashboard auth failed")
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
-	}
-
-	// 2. Authorize
-	if s.adminPubKey == "" {
-		log.Error().Msg("Dashboard attempted to be accessed but adminPubKey is not configured")
-		http.Error(w, "Dashboard is disabled (misconfigured)", http.StatusForbidden)
-		return
-	}
-	if session.PubKey != s.adminPubKey {
-		log.Warn().Msgf("Unauthorized dashboard access attempt by %s", session.PubKey)
-		http.Error(w, "Forbidden", http.StatusForbidden)
+	// 1. Authenticate and authorize: the admin check runs before the
+	// (capped) body is read, so other keys cannot make the server buffer it.
+	if !s.authorize(w, r, false) {
 		return
 	}
 
@@ -253,18 +244,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
-	// Verify auth before upgrade
-	session, err := auth.VerifyNostrAuth(r)
-	if err != nil {
-		log.Error().Err(err).Msg("Dashboard WebSocket auth failed")
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
-	}
-
-	// Authorize
-	if s.adminPubKey == "" || session.PubKey != s.adminPubKey {
-		log.Warn().Msgf("Unauthorized dashboard WebSocket attempt by %s", session.PubKey)
-		http.Error(w, "Forbidden", http.StatusForbidden)
+	// Verify auth before upgrade; browsers cannot set headers on a
+	// WebSocket, so the token may come in the query.
+	if !s.authorize(w, r, true) {
 		return
 	}
 
@@ -278,6 +260,37 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	s.hub.register <- client
 
 	go client.writePump()
+}
+
+// authorize writes the refusal and returns false unless r carries a valid
+// NIP-98 event signed by the admin key.
+func (s *Server) authorize(w http.ResponseWriter, r *http.Request, allowQueryToken bool) bool {
+	if s.adminPubKey == "" {
+		log.Error().Msg("Dashboard attempted to be accessed but adminPubKey is not configured")
+		http.Error(w, "Dashboard is disabled (misconfigured)", http.StatusForbidden)
+		return false
+	}
+	if r.Body != nil {
+		r.Body = http.MaxBytesReader(w, r.Body, MaxRequestBodyBytes)
+	}
+	_, err := auth.VerifyNostrAuth(r, auth.Options{
+		PubKey:          s.adminPubKey,
+		MaxBodyBytes:    MaxRequestBodyBytes,
+		AllowQueryToken: allowQueryToken,
+	})
+	switch {
+	case err == nil:
+		return true
+	case errors.Is(err, auth.ErrForbidden):
+		log.Warn().Err(err).Msg("Unauthorized dashboard access attempt")
+		http.Error(w, "Forbidden", http.StatusForbidden)
+	case errors.Is(err, auth.ErrBodyTooLarge):
+		http.Error(w, "Request body too large", http.StatusRequestEntityTooLarge)
+	default:
+		log.Error().Err(err).Msg("Dashboard auth failed")
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+	}
+	return false
 }
 
 func (s *Server) BroadcastEvent(event string, data interface{}) {

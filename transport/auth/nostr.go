@@ -5,9 +5,11 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -55,6 +57,31 @@ func checkAndRecordReplay(eventID string, nowUnix int64) error {
 	return nil
 }
 
+// DefaultMaxBodyBytes caps the body read for the payload hash when Options
+// sets no cap; dashboard JSON-RPC requests are a few KiB.
+const DefaultMaxBodyBytes int64 = 1 << 20
+
+var (
+	// ErrForbidden means the event is valid but its signer is not Options.PubKey.
+	ErrForbidden = errors.New("signer is not allowed")
+	// ErrBodyTooLarge means the body is longer than the cap.
+	ErrBodyTooLarge = errors.New("request body too large")
+)
+
+// Options says whose events are accepted and how much body is read.
+type Options struct {
+	// PubKey, when set, is the only accepted signer; it is checked before
+	// the body is read, so other keys cannot make the server buffer a body.
+	PubKey string
+	// MaxBodyBytes caps the body read to check the payload hash (0 means
+	// DefaultMaxBodyBytes).
+	MaxBodyBytes int64
+	// AllowQueryToken also accepts the event in the "auth" query parameter.
+	// Only browser WebSocket upgrades need it, since they cannot set headers;
+	// elsewhere it would put tokens in proxy logs.
+	AllowQueryToken bool
+}
+
 // NostrAuth represents the authenticated session
 type NostrAuth struct {
 	PubKey string
@@ -62,35 +89,22 @@ type NostrAuth struct {
 
 // VerifyNostrAuth verifies a NIP-98 authentication header.
 // Expected header: "Authorization: Nostr <base64_event>"
-func VerifyNostrAuth(r *http.Request) (*NostrAuth, error) {
+//
+// Checks run cheapest first: kind, signature, timestamp, u/m tags, the
+// allowed signer, then the (capped) body against the payload tag. The event
+// enters the replay cache only once every check passed, so a captured token
+// cannot be burnt by sending it with a wrong URL or body.
+func VerifyNostrAuth(r *http.Request, opts Options) (*NostrAuth, error) {
 	authHeader := r.Header.Get("Authorization")
-	if authHeader == "" {
-		// Fallback to query parameter
-		vals := r.URL.Query()
-		// If proxied, sometimes r.URL.Query() doesn't parse correctly on upgrades
-		if len(vals) == 0 && strings.Contains(r.RequestURI, "?") {
-			parts := strings.Split(r.RequestURI, "?")
-			if len(parts) > 1 {
-				for _, pair := range strings.Split(parts[1], "&") {
-					kv := strings.Split(pair, "=")
-					if len(kv) == 2 && kv[0] == "auth" {
-						authHeader = kv[1]
-						break
-					}
-				}
-			}
-		} else {
-			authHeader = vals.Get("auth")
-		}
-
-		if authHeader == "" {
-			return nil, fmt.Errorf("missing Authorization header or auth query parameter")
-		}
-		
-		// If it's a query param, it might not have the "Nostr " prefix, let's normalize
-		if !strings.HasPrefix(strings.ToLower(authHeader), "nostr ") {
+	if authHeader == "" && opts.AllowQueryToken {
+		authHeader = queryToken(r)
+		// The query form may omit the "Nostr " prefix.
+		if authHeader != "" && !strings.HasPrefix(strings.ToLower(authHeader), "nostr ") {
 			authHeader = "Nostr " + authHeader
 		}
+	}
+	if authHeader == "" {
+		return nil, fmt.Errorf("missing Authorization header")
 	}
 
 	parts := strings.Split(authHeader, " ")
@@ -123,14 +137,6 @@ func VerifyNostrAuth(r *http.Request) (*NostrAuth, error) {
 	now := time.Now().Unix()
 	if int64(event.CreatedAt) < now-authValidityWindowSeconds || int64(event.CreatedAt) > now+authValidityWindowSeconds {
 		return nil, fmt.Errorf("event timestamp expired or too far in future")
-	}
-
-	// 3b. Verify this exact event hasn't been used before (replay
-	// protection). Must come after signature verification so the ID we
-	// dedup on is backed by a valid signature, but GetID() recomputes it
-	// from content regardless, so it can't be spoofed by the client.
-	if err := checkAndRecordReplay(event.GetID(), now); err != nil {
-		return nil, err
 	}
 
 	// 4. Verify URL and Method
@@ -171,14 +177,33 @@ func VerifyNostrAuth(r *http.Request) (*NostrAuth, error) {
 		return nil, fmt.Errorf("event 'm' tag mismatch: expected %s", r.Method)
 	}
 
-	// 5. Verify Payload Hash for methods that carry a body. Without this, a
+	// 5. The signer must be the allowed key before any body is read.
+	if opts.PubKey != "" && event.PubKey != opts.PubKey {
+		return nil, fmt.Errorf("%w: %s", ErrForbidden, event.PubKey)
+	}
+
+	// 6. Verify Payload Hash for methods that carry a body. Without this, a
 	// validly signed auth event for one request body could be replayed
 	// (within the timestamp window, and before the same event ID was seen)
 	// against a different body on the same URL/method.
 	if r.Body != nil && r.Method != http.MethodGet && r.Method != http.MethodHead {
-		bodyBytes, err := io.ReadAll(r.Body)
+		maxBody := opts.MaxBodyBytes
+		if maxBody <= 0 {
+			maxBody = DefaultMaxBodyBytes
+		}
+		if r.ContentLength > maxBody {
+			return nil, ErrBodyTooLarge
+		}
+		bodyBytes, err := io.ReadAll(io.LimitReader(r.Body, maxBody+1))
 		if err != nil {
+			var tooLarge *http.MaxBytesError
+			if errors.As(err, &tooLarge) {
+				return nil, ErrBodyTooLarge
+			}
 			return nil, fmt.Errorf("failed to read request body: %v", err)
+		}
+		if int64(len(bodyBytes)) > maxBody {
+			return nil, ErrBodyTooLarge
 		}
 		r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 
@@ -191,9 +216,33 @@ func VerifyNostrAuth(r *http.Request) (*NostrAuth, error) {
 		}
 	}
 
+	// 7. Verify this exact event hasn't been used before (replay
+	// protection). GetID() recomputes the ID from the signed content, so it
+	// can't be spoofed by the client.
+	if err := checkAndRecordReplay(event.GetID(), now); err != nil {
+		return nil, err
+	}
+
 	return &NostrAuth{
 		PubKey: event.PubKey,
 	}, nil
+}
+
+// queryToken returns the "auth" query parameter, also when a proxy left
+// r.URL.RawQuery empty on an upgrade but kept it in RequestURI.
+func queryToken(r *http.Request) string {
+	if v := r.URL.Query().Get("auth"); v != "" {
+		return v
+	}
+	_, rawQuery, found := strings.Cut(r.RequestURI, "?")
+	if !found {
+		return ""
+	}
+	vals, err := url.ParseQuery(rawQuery)
+	if err != nil {
+		return ""
+	}
+	return vals.Get("auth")
 }
 
 func getFullUrl(r *http.Request) string {
@@ -201,7 +250,7 @@ func getFullUrl(r *http.Request) string {
 	if r.TLS != nil {
 		scheme = "https"
 	}
-	
+
 	// Respect common proxy/load balancer forwarded headers
 	if xForwardedProto := r.Header.Get("X-Forwarded-Proto"); xForwardedProto != "" {
 		scheme = xForwardedProto

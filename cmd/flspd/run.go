@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"fmt"
 
-	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
@@ -247,7 +246,7 @@ func runLspd(cliCtx *cli.Context) error {
 	// Start dashboard HTTP server
 	go func() {
 		log.Info().Msgf("Starting dashboard server on %s", dashboardListenAddr)
-		if err := http.ListenAndServe(dashboardListenAddr, dashSvc); err != nil {
+		if err := transdashboard.NewHTTPServer(dashboardListenAddr, dashSvc).ListenAndServe(); err != nil {
 			log.Error().Err(err).Msg("Dashboard server failed")
 		}
 	}()
