@@ -347,12 +347,15 @@ GitHub release was created.
 **Fix:** filter the download to `pattern: flspd_*`, then re-run the release
 via `workflow_dispatch`.
 
-### T1-7: Release image is amd64-only
+### T1-7: Release image build emulated the Go compiler for arm64
 
-**Change:** the release image no longer builds `linux/arm64`; under QEMU
-emulation it took most of the ~70 min release run. The arm64 binary tarball
-stays (a native Go cross-compile). Re-add arm64 on a native arm runner if an
-arm deployment needs the image.
+**Finding:** under QEMU the `linux/arm64` image build took most of the
+~70 min `v0.0.7-rc.1` release run.
+
+**Fix:** `deploy/Dockerfile`'s builder stage runs on `$BUILDPLATFORM` and
+cross-compiles with `CGO_ENABLED=0` (as the release tarballs already do), so
+only the runtime stage's `apk add` is emulated. One multi-arch tag still
+serves amd64 and arm64. (#30)
 
 ---
 
