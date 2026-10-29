@@ -1,13 +1,17 @@
 package postgres
 
 import (
+	"bytes"
 	"context"
+	"encoding/hex"
 	"testing"
 	"time"
 
 	"github.com/flokiorg/go-flokicoin/chaincfg/chainhash"
 	"github.com/flokiorg/go-flokicoin/wire"
 	"github.com/flowgate-lsp/flspd/core"
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -240,4 +244,23 @@ func TestInterceptStore_GetPaidLsps1Order_ReturnsPreimage(t *testing.T) {
 	require.NotNil(t, order)
 	require.NotNil(t, order.PaymentPreimage, "GetPaidLsps1Order must return the stored preimage")
 	assert.Equal(t, preimage, *order.PaymentPreimage)
+}
+
+func TestRegisterPayment_StoresButNeverLogsThePaymentSecret(t *testing.T) {
+	var buf bytes.Buffer
+	prev := log.Logger
+	log.Logger = zerolog.New(&buf)
+	t.Cleanup(func() { log.Logger = prev })
+
+	store := NewPostgresInterceptStore(testPool)
+	paymentHash := []byte("secret-not-logged-hash-32-bytes!")
+	secret := bytes.Repeat([]byte{0x5e}, 32)
+
+	require.NoError(t, store.RegisterPayment("", "", &openingFeeParamsFixture, []byte("dest"), paymentHash, secret, 2000, 1000, ""))
+
+	_, _, _, _, gotSecret, _, _, _, _, _, err := store.PaymentInfo(paymentHash)
+	require.NoError(t, err)
+	assert.Equal(t, secret, gotSecret, "the secret is stored")
+	assert.Contains(t, buf.String(), hex.EncodeToString(paymentHash), "the payment is still logged")
+	assert.NotContains(t, buf.String(), hex.EncodeToString(secret))
 }
