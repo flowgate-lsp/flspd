@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/flowgate-lsp/flspd/core"
@@ -40,6 +42,11 @@ type Handlers struct {
 	openingStore   ports.OpeningStore
 	historyStore   history.Store
 	configPath     string // Path to nodes.yaml for persistence
+
+	// configMu serializes update_config from building the node list to the
+	// in-memory Store, so a save for one node always includes the save for
+	// another that finished before it (T8-6, R4-F2).
+	configMu sync.Mutex
 
 	// NIP-LSP announcing (T8-2): the relays from NOSTR_ANNOUNCE_RELAYS,
 	// shown read-only, and the check a config update that turns announcing
@@ -676,6 +683,8 @@ func (s *Handlers) handleUpdateConfig(req *lsps.JsonRpcRequest) *lsps.JsonRpcRes
 		return lsps.NewJsonRpcErrorResponse(req.Id, -32602, "Validation failed", err.Error())
 	}
 
+	s.configMu.Lock()
+	defer s.configMu.Unlock()
 	nodes := s.nodesService.GetNodes()
 
 	// The request body never carries the selected node's secrets (they're
@@ -717,9 +726,8 @@ func (s *Handlers) handleUpdateConfig(req *lsps.JsonRpcRequest) *lsps.JsonRpcRes
 			return lsps.NewJsonRpcErrorResponse(req.Id, -32603, "Failed to marshal configuration", err.Error())
 		}
 
-		// Use atomic-like write: write to .tmp and rename
-		tmpPath := s.configPath + ".tmp"
-		err = os.WriteFile(tmpPath, data, 0644)
+		// Write a temporary file next to the config, then rename it over.
+		tmpPath, err := writeTempConfig(s.configPath, data)
 		if err != nil {
 			log.Error().Err(err).Msg("Failed to write temporary config file")
 			return lsps.NewJsonRpcErrorResponse(req.Id, -32603, "Failed to write configuration file", err.Error())
@@ -748,6 +756,31 @@ func (s *Handlers) handleUpdateConfig(req *lsps.JsonRpcRequest) *lsps.JsonRpcRes
 	}
 
 	return lsps.NewJsonRpcResponse(req.Id, map[string]string{"status": "updated"})
+}
+
+// writeTempConfig writes data to a new temporary file in configPath's
+// directory, so the rename over configPath stays on one filesystem, and
+// returns its path. Each call gets its own file.
+func writeTempConfig(configPath string, data []byte) (string, error) {
+	f, err := os.CreateTemp(filepath.Dir(configPath), filepath.Base(configPath)+".*.tmp")
+	if err != nil {
+		return "", err
+	}
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		os.Remove(f.Name())
+		return "", err
+	}
+	if err := f.Chmod(0644); err != nil {
+		f.Close()
+		os.Remove(f.Name())
+		return "", err
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(f.Name())
+		return "", err
+	}
+	return f.Name(), nil
 }
 
 func (s *Handlers) handleGetOrderDetail(req *lsps.JsonRpcRequest) *lsps.JsonRpcResponse {
