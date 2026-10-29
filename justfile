@@ -70,10 +70,7 @@ setup target="all":
         [ -f deploy/nodes.yaml ] || cp deploy/nodes.dev.sample.yaml deploy/nodes.yaml
         [ -f .env ] || cp deploy/compose.env.sample .env
         [ -f data/flnd/flnd.conf ] || cp data/flnd/flnd.conf.sample data/flnd/flnd.conf
-        if [ ! -f data/relay/relay.yaml ]; then
-            mkdir -p data/relay
-            sed "s/__RELAY_PRIVKEY__/$(openssl rand -hex 32)/" deploy/relay.dev.sample.yaml > data/relay/relay.yaml
-        fi
+        "{{just_executable()}}" _relay-config
     }
     frontend() { (cd web && npm install); }
     case "{{target}}" in
@@ -82,6 +79,23 @@ setup target="all":
         all)      backend; frontend ;;
         *) echo "unknown setup target: {{target}} (want: backend|frontend|all)" >&2; exit 1 ;;
     esac
+
+# Write the dev relay's data/relay/relay.yaml from its sample, with a fresh
+# relay key, when it is missing. An older docker-compose.dev.yml mounted it
+# as a file, so Docker may have made an empty directory in its place before
+# setup ran: that directory is removed first (T8-6, R4-F6).
+[private]
+_relay-config:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    f=data/relay/relay.yaml
+    if [ -d "$f" ]; then
+        rmdir "$f" 2>/dev/null || { echo "$f is a directory Docker created before the file existed; remove it (it may need sudo) and run this again" >&2; exit 1; }
+    fi
+    if [ ! -f "$f" ]; then
+        mkdir -p data/relay
+        sed "s/__RELAY_PRIVKEY__/$(openssl rand -hex 32)/" deploy/relay.dev.sample.yaml > "$f"
+    fi
 
 # Start the frontend in development mode but connected to a production/remote backend
 [group('dev')]
@@ -93,7 +107,7 @@ frontend-dev-prod url:
 # + postgres + frontend.
 #   up       start the stack or a specific service (ensures the shared
 #            "flowgate-integration" network other product stacks join for
-#            integration testing exists first)
+#            integration testing, and the dev relay's config, exist first)
 #   down     stop the stack
 #   restart  restart the stack or a specific service
 #   ps       show service status
@@ -111,7 +125,7 @@ docker action *args:
     }
     case "{{action}}" in
         network) ensure_network ;;
-        up)      ensure_network; {{COMPOSE}} up "$@" -d ;;
+        up)      ensure_network; "{{just_executable()}}" _relay-config; {{COMPOSE}} up "$@" -d ;;
         down)    {{COMPOSE}} down ;;
         restart) {{COMPOSE}} restart "$@" ;;
         ps)      {{COMPOSE}} ps ;;

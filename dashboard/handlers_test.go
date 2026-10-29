@@ -624,6 +624,45 @@ func TestHandleUpdateConfig_EditsOnlyTheSelectedNode(t *testing.T) {
 	}
 }
 
+// T8-6 (R4-F2): saves for two nodes at once each rebuilt the file from the
+// in-memory list before the other's Store, so the file kept only one edit
+// while memory held both, and both wrote the same .tmp path.
+func TestHandleUpdateConfig_ConcurrentSavesKeepBothNodes(t *testing.T) {
+	mockNodes, nodeA, nodeB := twoNodeFleet()
+	configPath := filepath.Join(t.TempDir(), "nodes.yaml")
+	s := NewHandlers(mockNodes, nil, nil, nil, configPath)
+	idA, idB := hex.EncodeToString(nodeA.NodeId), hex.EncodeToString(nodeB.NodeId)
+
+	for round := range 50 {
+		nameA, nameB := fmt.Sprintf("A-%d", round), fmt.Sprintf("B-%d", round)
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		for _, req := range []*lsps.JsonRpcRequest{updateConfigReq(t, idA, nameA), updateConfigReq(t, idB, nameB)} {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				<-start
+				resp := s.handleUpdateConfig(req)
+				assert.Nil(t, resp.Error)
+			}()
+		}
+		close(start)
+		wg.Wait()
+
+		data, err := os.ReadFile(configPath)
+		require.NoError(t, err)
+		var persisted []*config.NodeConfig
+		require.NoError(t, yaml.Unmarshal(data, &persisted), "round %d: the file is valid YAML", round)
+		require.Len(t, persisted, 2)
+		require.Equal(t, []string{nameA, nameB}, []string{persisted[0].Name, persisted[1].Name}, "round %d: the file holds both saves", round)
+		require.Equal(t, nameA, nodeA.NodeConfig.Load().Name)
+		require.Equal(t, nameB, nodeB.NodeConfig.Load().Name)
+	}
+	matches, err := filepath.Glob(configPath + "*.tmp")
+	require.NoError(t, err)
+	assert.Empty(t, matches, "no temporary file is left behind")
+}
+
 func TestHandleUpdateConfig_FleetNeedsAKnownNode(t *testing.T) {
 	mockNodes, nodeA, nodeB := twoNodeFleet()
 	configPath := filepath.Join(t.TempDir(), "nodes.yaml")

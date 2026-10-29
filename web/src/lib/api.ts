@@ -1,5 +1,18 @@
 import { withNode, type FleetNode } from './nodes';
 
+/** JSON-RPC "Method not found": a backend older than the method. */
+export const METHOD_NOT_FOUND = -32601;
+
+/** A JSON-RPC error answer, with its code. */
+export class RpcError extends Error {
+  readonly code: number;
+  constructor(code: number, message: string) {
+    super(message);
+    this.name = 'RpcError';
+    this.code = code;
+  }
+}
+
 export class DashboardAPI {
   private baseUrl: string;
   private authUrl: string;
@@ -42,7 +55,7 @@ export class DashboardAPI {
 
     const data = await response.json();
     if (data.error) {
-      throw new Error(data.error.message);
+      throw new RpcError(data.error.code, data.error.message);
     }
 
     return data.result;

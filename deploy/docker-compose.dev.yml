@@ -112,16 +112,17 @@ services:
       - flowgate-integration
 
   # Local Nostr relay for the dev node's NIP-LSP announcement (config from
-  # deploy/relay.dev.sample.yaml, written by `just setup backend`). Also on
-  # flowgate-integration, so a lokihub dev stack can read it as
-  # ws://flspd-dev-relay:5500.
+  # deploy/relay.dev.sample.yaml, written to data/relay/relay.yaml by `just
+  # setup backend` and `just docker up`). Also on flowgate-integration, so a
+  # lokihub dev stack can read it as ws://flspd-dev-relay:5500. Only the
+  # directory is mounted: a file mount of a missing relay.yaml would make
+  # Docker create a directory in its place (T8-6, R4-F6).
   relay:
     image: ghcr.io/ohstr/ncli:rc
     container_name: flspd-dev-relay
     restart: unless-stopped
-    command: ["relay", "--config", "/config/relay.yaml"]
+    command: ["relay", "--config", "/data/relay.yaml"]
     volumes:
-      - ./data/relay/relay.yaml:/config/relay.yaml:ro
       - ./data/relay:/data
     networks:
       - flspd-dev
