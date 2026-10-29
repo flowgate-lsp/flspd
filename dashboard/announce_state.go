@@ -107,17 +107,14 @@ func (s *Handlers) announceStateResponse(node *core.Node, st *core.AnnounceState
 	return resp
 }
 
-// announceNode returns the node the dashboard edits (the first one, as
-// get_config and update_config assume), or an error response.
+// announceNode returns the node req selects (selectNode), or an error
+// response.
 func (s *Handlers) announceNode(req *lsps.JsonRpcRequest) (*core.Node, *lsps.JsonRpcResponse) {
 	if s.announceState == nil {
 		return nil, lsps.NewJsonRpcErrorResponse(req.Id, -32000, "Announcement state unavailable", nil)
 	}
-	nodes := s.nodesService.GetNodes()
-	if len(nodes) == 0 {
-		return nil, lsps.NewJsonRpcErrorResponse(req.Id, -32000, "No nodes configured", nil)
-	}
-	return nodes[0], nil
+	node, _, errResp := s.selectNode(req)
+	return node, errResp
 }
 
 func (s *Handlers) handleGetAnnounceState(req *lsps.JsonRpcRequest) *lsps.JsonRpcResponse {

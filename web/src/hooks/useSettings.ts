@@ -2,7 +2,8 @@ import { useState, useEffect, useMemo } from 'react';
 import { useAuth } from './useAuth';
 import { DashboardAPI } from '../lib/api';
 
-export const useSettings = () => {
+// node is the targeted fleet node; null waits for a choice.
+export const useSettings = (node: string | null) => {
   const { user, getAuthHeader } = useAuth();
   const [config, setConfig] = useState<any>(null);
   // NOSTR_ANNOUNCE_RELAYS, read-only (server env), for the announce card.
@@ -19,7 +20,8 @@ export const useSettings = () => {
   const refreshConfig = async () => {
     try {
       setLoading(true);
-      const data = await api.getConfig();
+      if (!node) return;
+      const data = await api.getConfig(node);
       setConfig(data.config);
       setAnnounceRelays(Array.isArray(data.announce_relays) ? data.announce_relays : []);
     } catch (err: any) {
@@ -33,7 +35,8 @@ export const useSettings = () => {
     try {
       setSaving(true);
       setError(null);
-      await api.updateConfig(newConfig);
+      if (!node) throw new Error('Choose a node first');
+      await api.updateConfig(newConfig, node);
       setConfig(newConfig);
       return true;
     } catch (err: any) {
@@ -45,10 +48,10 @@ export const useSettings = () => {
   };
 
   useEffect(() => {
-    if (user) {
+    if (user && node) {
       refreshConfig();
     }
-  }, [user]);
+  }, [user, node]);
 
   return { config, announceRelays, loading, saving, error, refreshConfig, updateConfig };
 };

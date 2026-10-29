@@ -1,10 +1,14 @@
 package dashboard
 
 import (
+	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -19,6 +23,7 @@ import (
 	"github.com/flowgate-lsp/flspd/platform/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
 )
 
@@ -550,9 +555,10 @@ func TestHandleGetConfig_StripsSecrets(t *testing.T) {
 // C-2: update_config used to marshal only the single edited node back to
 // nodes.yaml, silently dropping every other configured node on a
 // multi-node deployment.
-func TestHandleUpdateConfig_PreservesOtherNodes(t *testing.T) {
+func twoNodeFleet() (*MockNodesService, *core.Node, *core.Node) {
 	mockNodes := new(MockNodesService)
 	nodeA := &core.Node{
+		NodeId: append([]byte{0x02}, bytes.Repeat([]byte{0xaa}, 32)...),
 		NodeConfig: config.NewNodeConfigRef(&config.NodeConfig{
 			Name:                   "Node A",
 			NodePubkey:             "02aaa...",
@@ -561,45 +567,105 @@ func TestHandleUpdateConfig_PreservesOtherNodes(t *testing.T) {
 		}),
 	}
 	nodeB := &core.Node{
+		NodeId: append([]byte{0x03}, bytes.Repeat([]byte{0xbb}, 32)...),
 		NodeConfig: config.NewNodeConfigRef(&config.NodeConfig{
 			Name:                   "Node B",
-			NodePubkey:             "02bbb...",
+			NodePubkey:             "03bbb...",
 			TargetConf:             6,
 			ChannelMinimumFeeMloki: 1000,
 		}),
 	}
 	mockNodes.On("GetNodes").Return([]*core.Node{nodeA, nodeB})
+	return mockNodes, nodeA, nodeB
+}
 
-	configPath := "/tmp/nodes-c2-test.yaml"
-	defer func() { _ = os.Remove(configPath) }()
-
-	s := NewHandlers(mockNodes, nil, nil, nil, configPath)
-
-	updateReq := struct {
-		Config config.NodeConfig `json:"config"`
-	}{
-		Config: config.NodeConfig{
-			Name:                   "Node A Renamed",
-			NodePubkey:             "02aaa...",
+func updateConfigReq(t *testing.T, node, name string) *lsps.JsonRpcRequest {
+	t.Helper()
+	body, err := json.Marshal(map[string]any{
+		"node": node,
+		"config": config.NodeConfig{
+			Name:                   name,
 			TargetConf:             6,
 			ChannelMinimumFeeMloki: 1000,
 		},
+	})
+	require.NoError(t, err)
+	return &lsps.JsonRpcRequest{Id: json.RawMessage(`1`), Method: "update_config", Params: body}
+}
+
+// C-2 with the node selector: editing the selected node keeps the others,
+// in the file and in memory.
+func TestHandleUpdateConfig_EditsOnlyTheSelectedNode(t *testing.T) {
+	for _, target := range []string{"A", "B"} {
+		t.Run(target, func(t *testing.T) {
+			mockNodes, nodeA, nodeB := twoNodeFleet()
+			configPath := filepath.Join(t.TempDir(), "nodes.yaml")
+			s := NewHandlers(mockNodes, nil, nil, nil, configPath)
+
+			edited, other := nodeA, nodeB
+			if target == "B" {
+				edited, other = nodeB, nodeA
+			}
+			otherName := other.NodeConfig.Load().Name
+			resp := s.handleUpdateConfig(updateConfigReq(t, hex.EncodeToString(edited.NodeId), "Renamed"))
+			require.Nil(t, resp.Error)
+
+			data, err := os.ReadFile(configPath)
+			require.NoError(t, err)
+			var persisted []*config.NodeConfig
+			require.NoError(t, yaml.Unmarshal(data, &persisted))
+			require.Len(t, persisted, 2, "both nodes should still be present in the persisted file")
+			names := []string{persisted[0].Name, persisted[1].Name}
+			assert.Contains(t, names, "Renamed")
+			assert.Contains(t, names, otherName)
+			assert.Equal(t, "Renamed", edited.NodeConfig.Load().Name)
+			assert.Equal(t, otherName, other.NodeConfig.Load().Name, "the other node is untouched")
+		})
 	}
-	body, err := json.Marshal(updateReq)
-	assert.NoError(t, err)
+}
 
-	req := &lsps.JsonRpcRequest{Id: json.RawMessage(`1`), Method: "update_config", Params: body}
-	resp := s.handleUpdateConfig(req)
-	assert.Nil(t, resp.Error)
+func TestHandleUpdateConfig_FleetNeedsAKnownNode(t *testing.T) {
+	mockNodes, nodeA, nodeB := twoNodeFleet()
+	configPath := filepath.Join(t.TempDir(), "nodes.yaml")
+	s := NewHandlers(mockNodes, nil, nil, nil, configPath)
 
-	data, err := os.ReadFile(configPath)
-	assert.NoError(t, err)
+	for name, node := range map[string]string{"no selector": "", "unknown node": "02" + strings.Repeat("cc", 32)} {
+		t.Run(name, func(t *testing.T) {
+			resp := s.handleUpdateConfig(updateConfigReq(t, node, "Renamed"))
+			require.NotNil(t, resp.Error)
+			assert.Equal(t, -32602, resp.Error.Code)
+			assert.Equal(t, "Node A", nodeA.NodeConfig.Load().Name)
+			assert.Equal(t, "Node B", nodeB.NodeConfig.Load().Name)
+			_, err := os.Stat(configPath)
+			assert.True(t, os.IsNotExist(err), "nothing persisted")
+		})
+	}
+}
 
-	var persisted []*config.NodeConfig
-	assert.NoError(t, yaml.Unmarshal(data, &persisted))
-	assert.Len(t, persisted, 2, "both nodes should still be present in the persisted file")
-	assert.Equal(t, "Node A Renamed", persisted[0].Name)
-	assert.Equal(t, "Node B", persisted[1].Name, "the second node must survive editing the first")
+func TestHandleUpdateConfig_SingleNodeNeedsNoSelector(t *testing.T) {
+	mockNodes := new(MockNodesService)
+	only := &core.Node{NodeId: []byte{0x02, 0x01}, NodeConfig: config.NewNodeConfigRef(&config.NodeConfig{Name: "Only", TargetConf: 6, ChannelMinimumFeeMloki: 1000})}
+	mockNodes.On("GetNodes").Return([]*core.Node{only})
+	s := NewHandlers(mockNodes, nil, nil, nil, "")
+
+	resp := s.handleUpdateConfig(updateConfigReq(t, "", "Renamed"))
+	require.Nil(t, resp.Error)
+	assert.Equal(t, "Renamed", only.NodeConfig.Load().Name)
+
+	resp = s.handleGetConfig(&lsps.JsonRpcRequest{Id: json.RawMessage(`2`), Method: "get_config"})
+	require.Nil(t, resp.Error)
+}
+
+func TestHandleListNodes_ListsTheFleet(t *testing.T) {
+	mockNodes, nodeA, nodeB := twoNodeFleet()
+	s := NewHandlers(mockNodes, nil, nil, nil, "")
+	resp := s.Route(&lsps.JsonRpcRequest{Id: json.RawMessage(`1`), Method: "list_nodes"})
+	require.Nil(t, resp.Error)
+	nodes := resp.Result.(map[string]any)["nodes"].([]NodeView)
+	assert.Equal(t, []NodeView{
+		{NodeID: hex.EncodeToString(nodeA.NodeId), Name: "Node A"},
+		{NodeID: hex.EncodeToString(nodeB.NodeId), Name: "Node B"},
+	}, nodes)
 }
 
 // TestNodeConfig_ConcurrentReadWriteNoRace is the regression test for C-3:

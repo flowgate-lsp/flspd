@@ -249,3 +249,51 @@ func TestHandleUpdateConfig_TriggersPublisher(t *testing.T) {
 	require.NotNil(t, resp.Error)
 	assert.Equal(t, 1, pub.triggers, "a refused update does not trigger")
 }
+
+func fleetAnnounceHandlers(t *testing.T) (*Handlers, *fakeAnnounceStore, *core.Node, *core.Node) {
+	t.Helper()
+	on := func(name string) *config.NodeConfigRef {
+		return config.NewNodeConfigRef(&config.NodeConfig{Name: name, Announce: &config.AnnounceConfig{Enabled: true, Addrs: []string{"203.0.113.7:9735"}}})
+	}
+	n1 := &core.Node{NodeId: []byte{0x02, 0x01}, NodeConfig: on("Node 1")}
+	n2 := &core.Node{NodeId: []byte{0x03, 0x02}, NodeConfig: on("Node 2")}
+	mockNodes := new(MockNodesService)
+	mockNodes.On("GetNodes").Return([]*core.Node{n1, n2})
+	s := NewHandlers(mockNodes, nil, nil, nil, "")
+	store := &fakeAnnounceStore{states: map[string]*core.AnnounceState{}}
+	s.SetAnnounceState(store, nil)
+	return s, store, n1, n2
+}
+
+func TestAnnounceState_PausingNode2ChangesOnlyNode2(t *testing.T) {
+	s, store, n1, n2 := fleetAnnounceHandlers(t)
+
+	got, rpcErr := call(t, s, "set_announce_state", `{"action":"pause","node":"0302"}`)
+	require.Nil(t, rpcErr)
+	assert.Equal(t, "0302", got.NodePubkey)
+	assert.Equal(t, "paused", got.Status)
+
+	st1, _ := store.GetAnnounceState(context.Background(), n1.NodeId)
+	st2, _ := store.GetAnnounceState(context.Background(), n2.NodeId)
+	assert.Equal(t, core.AnnounceOpen, st1.Status, "node 1 untouched")
+	assert.Equal(t, core.AnnouncePaused, st2.Status)
+
+	got, rpcErr = call(t, s, "get_announce_state", `{"node":"0201"}`)
+	require.Nil(t, rpcErr)
+	assert.Equal(t, "open", got.Status)
+}
+
+func TestAnnounceState_FleetRefusesMissingOrUnknownNode(t *testing.T) {
+	s, store, _, _ := fleetAnnounceHandlers(t)
+	for _, tc := range []struct{ method, params string }{
+		{"set_announce_state", `{"action":"pause"}`},
+		{"set_announce_state", `{"action":"pause","node":"02ff"}`},
+		{"get_announce_state", ""},
+		{"recheck_announcement", `{"node":"02ff"}`},
+	} {
+		_, rpcErr := call(t, s, tc.method, tc.params)
+		require.NotNil(t, rpcErr, "%s %s", tc.method, tc.params)
+		assert.Equal(t, -32602, rpcErr.Code)
+	}
+	assert.Empty(t, store.states, "no node changed")
+}

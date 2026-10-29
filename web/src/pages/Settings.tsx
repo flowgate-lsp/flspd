@@ -9,6 +9,8 @@ import {
 } from 'lucide-react';
 import { useSettings } from '../hooks/useSettings';
 import { useAnnounceState } from '../hooks/useAnnounceState';
+import { useNodes } from '../hooks/useNodes';
+import type { FleetNode } from '../lib/nodes';
 import { useUnit, type DisplayUnit } from '../contexts/UnitContext';
 import { formatAmount, formatInput, cn } from '../lib/utils';
 import { computeOpeningFeeLoki } from '../lib/feeCalc';
@@ -195,10 +197,31 @@ function withTieredDefaults(cfg: any): any {
   return next;
 }
 
+// Picks the fleet node the settings and announcement actions apply to.
+const NodeSelector: React.FC<{ nodes: FleetNode[]; node: string | null; onChoose: (id: string) => void }> = ({ nodes, node, onChoose }) => (
+  <label className="flex flex-col gap-1 text-[10px] font-mono uppercase tracking-widest text-on-surface-variant">
+    Node
+    <select
+      aria-label="Node"
+      value={node ?? ''}
+      onChange={(e) => onChoose(e.target.value)}
+      className="p-3 rounded-2xl bg-white/5 border border-outline text-white text-xs normal-case tracking-normal"
+    >
+      <option value="" disabled>Choose a node</option>
+      {nodes.map((n) => (
+        <option key={n.node_id} value={n.node_id}>
+          {(n.name || 'node') + ' · ' + n.node_id.slice(0, 12)}
+        </option>
+      ))}
+    </select>
+  </label>
+);
+
 export const Settings: React.FC = () => {
-  const { config, announceRelays, loading, saving, error, refreshConfig, updateConfig } = useSettings();
+  const fleet = useNodes();
+  const { config, announceRelays, loading, saving, error, refreshConfig, updateConfig } = useSettings(fleet.node);
   const [announceForm, setAnnounceForm] = useState<AnnounceForm>(toAnnounceForm(null));
-  const announceState = useAnnounceState();
+  const announceState = useAnnounceState(fleet.node);
 
   const handleAnnounceAction = async (action: AnnounceAction) => {
     if (action === 'unlist' && !window.confirm('Unlist this LSP? The announcement will tell wallets it stopped selling; flspd still accepts orders. Resume lists it again.')) {
@@ -254,6 +277,15 @@ export const Settings: React.FC = () => {
     }
   };
 
+  // A fleet: the per-node settings wait for the operator to pick a node.
+  if (fleet.nodes && fleet.nodes.length > 1 && !fleet.node) {
+    return (
+      <div className="p-4 md:p-10 max-w-6xl mx-auto">
+        <NodeSelector nodes={fleet.nodes} node={null} onChoose={fleet.choose} />
+      </div>
+    );
+  }
+
   if (loading && !formData) {
     return (
       <div className="h-[60vh] flex flex-col items-center justify-center gap-4">
@@ -295,6 +327,9 @@ export const Settings: React.FC = () => {
         </div>
 
         <div className="flex gap-4 w-full md:w-auto relative z-10">
+          {fleet.nodes && fleet.nodes.length > 1 && (
+            <NodeSelector nodes={fleet.nodes} node={fleet.node} onChoose={(id) => { setFormData(null); fleet.choose(id); }} />
+          )}
           <button
             onClick={refreshConfig}
             className="group/refresh p-4 rounded-2xl bg-white/5 border border-outline text-white hover:bg-white/10 transition-all active:scale-95 flex items-center justify-center"

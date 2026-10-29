@@ -139,6 +139,8 @@ func (s *Handlers) Route(req *lsps.JsonRpcRequest) *lsps.JsonRpcResponse {
 		return s.handleGetRadarData(req)
 	case "get_analytics":
 		return s.handleGetAnalytics(req)
+	case "list_nodes":
+		return s.handleListNodes(req)
 	case "get_config":
 		return s.handleGetConfig(req)
 	case "update_config":
@@ -635,12 +637,12 @@ func stripConfigSecrets(cfg *config.NodeConfig) (map[string]interface{}, error) 
 }
 
 func (s *Handlers) handleGetConfig(req *lsps.JsonRpcRequest) *lsps.JsonRpcResponse {
-	nodes := s.nodesService.GetNodes()
-	if len(nodes) == 0 {
-		return lsps.NewJsonRpcErrorResponse(req.Id, -32000, "No nodes configured", nil)
+	node, _, errResp := s.selectNode(req)
+	if errResp != nil {
+		return errResp
 	}
-	// Return the first node's config, with secrets stripped (C-1).
-	safeConfig, err := stripConfigSecrets(nodes[0].NodeConfig.Load())
+	// The selected node's config, with secrets stripped (C-1).
+	safeConfig, err := stripConfigSecrets(node.NodeConfig.Load())
 	if err != nil {
 		log.Error().Err(err).Msg("Dashboard: failed to prepare config for response")
 		return lsps.NewJsonRpcErrorResponse(req.Id, -32603, "Internal error", nil)
@@ -659,6 +661,10 @@ func (s *Handlers) handleUpdateConfig(req *lsps.JsonRpcRequest) *lsps.JsonRpcRes
 	var params struct {
 		Config config.NodeConfig `json:"config"`
 	}
+	target, targetIdx, errResp := s.selectNode(req)
+	if errResp != nil {
+		return errResp
+	}
 
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		return lsps.NewJsonRpcErrorResponse(req.Id, -32602, "Invalid params", err.Error())
@@ -671,18 +677,12 @@ func (s *Handlers) handleUpdateConfig(req *lsps.JsonRpcRequest) *lsps.JsonRpcRes
 	}
 
 	nodes := s.nodesService.GetNodes()
-	if len(nodes) == 0 {
-		return lsps.NewJsonRpcErrorResponse(req.Id, -32000, "No nodes configured", nil)
-	}
 
-	// The dashboard only edits the first node today (same assumption
-	// handleGetConfig already makes) — but the request body never carries
-	// this node's secrets (they're stripped on the way out, C-1), so
-	// preserve them from the current in-memory config rather than
-	// clobbering them with the zero values an operator's edit wouldn't
-	// have included.
+	// The request body never carries the selected node's secrets (they're
+	// stripped on the way out, C-1), so preserve them from its current
+	// in-memory config rather than clobbering them with zero values.
 	newConfig := params.Config
-	current := nodes[0].NodeConfig.Load()
+	current := target.NodeConfig.Load()
 	newConfig.FlspdPrivateKey = current.FlspdPrivateKey
 	newConfig.Tokens = current.Tokens
 	newConfig.Lnd = current.Lnd
@@ -704,13 +704,12 @@ func (s *Handlers) handleUpdateConfig(req *lsps.JsonRpcRequest) *lsps.JsonRpcRes
 		// []*config.NodeConfig{&newConfig} single-element write here would
 		// silently drop every other configured node from the file on a
 		// multi-node deployment. Build the full list from the live
-		// in-memory nodes, with only the edited node (index 0, matching
-		// the read side above) replaced.
+		// in-memory nodes, with only the selected node replaced.
 		configs := make([]*config.NodeConfig, len(nodes))
 		for idx, n := range nodes {
 			configs[idx] = n.NodeConfig.Load()
 		}
-		configs[0] = &newConfig
+		configs[targetIdx] = &newConfig
 
 		data, err := yaml.Marshal(configs)
 		if err != nil {
@@ -740,7 +739,7 @@ func (s *Handlers) handleUpdateConfig(req *lsps.JsonRpcRequest) *lsps.JsonRpcRes
 	// atomically swaps in the new config rather than mutating the shared
 	// struct in place, so concurrent readers on the HTLC hot path (the
 	// interceptor, the settlement service) never see a torn read (C-3).
-	nodes[0].NodeConfig.Store(&newConfig)
+	target.NodeConfig.Store(&newConfig)
 
 	// An announced value may have changed: let the publisher compare now
 	// rather than at its next poll.

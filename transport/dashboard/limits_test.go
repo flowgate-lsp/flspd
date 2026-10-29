@@ -158,3 +158,33 @@ func TestNewHTTPServer_PromptHeadersAreServed(t *testing.T) {
 	defer func() { _ = resp.Body.Close() }()
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 }
+
+// countingRouter records whether any request reached the dashboard methods.
+type countingRouter struct{ calls int }
+
+func (c *countingRouter) Route(*lsps.JsonRpcRequest) *lsps.JsonRpcResponse {
+	c.calls++
+	return lsps.NewJsonRpcResponse(nil, "ok")
+}
+
+// A non-admin selecting a node is refused like any other non-admin call:
+// before the body is read and before any method runs.
+func TestServeHTTP_NonAdminNodeActionRefusedUnread(t *testing.T) {
+	sk, _ := newTestKeypair(t)
+	_, adminPK := newTestKeypair(t)
+	router := &countingRouter{}
+	srv := NewServer(adminPK, router, &stubNodesService{})
+
+	body := []byte(`{"jsonrpc":"2.0","id":1,"method":"set_announce_state","params":{"action":"unlist","node":"0302"}}`)
+	url := "http://example.com/dashboard"
+	cr := &countingReader{r: bytes.NewReader(body)}
+	r := httptest.NewRequest(http.MethodPost, url, cr)
+	r.Header.Set("Authorization", buildAuthHeader(t, sk, http.MethodPost, url, auth.ComputePayloadHash(body)))
+	w := httptest.NewRecorder()
+
+	srv.ServeHTTP(w, r)
+
+	assert.Equal(t, http.StatusForbidden, w.Code)
+	assert.Zero(t, cr.n)
+	assert.Zero(t, router.calls)
+}
