@@ -197,6 +197,19 @@ function withTieredDefaults(cfg: any): any {
   return next;
 }
 
+// A message in place of the settings, with a retry.
+const StatusPanel: React.FC<{ message: string; onRetry: () => void }> = ({ message, onRetry }) => (
+  <div className="h-[60vh] flex flex-col items-center justify-center gap-4 px-4 text-center">
+    <p role="alert" className="text-xs font-mono text-error break-words max-w-xl">{message}</p>
+    <button
+      onClick={onRetry}
+      className="flex items-center gap-2 px-6 py-3 rounded-2xl bg-white/5 border border-outline text-white text-xs font-mono uppercase tracking-widest hover:bg-white/10 transition-all active:scale-95"
+    >
+      <RefreshCw className="w-4 h-4" /> Retry
+    </button>
+  </div>
+);
+
 // Picks the fleet node the settings and announcement actions apply to.
 const NodeSelector: React.FC<{ nodes: FleetNode[]; node: string | null; onChoose: (id: string) => void }> = ({ nodes, node, onChoose }) => (
   <label className="flex flex-col gap-1 text-[10px] font-mono uppercase tracking-widest text-on-surface-variant">
@@ -237,11 +250,11 @@ export const Settings: React.FC = () => {
   const [infoModal, setInfoModal] = useState<{ label: string; explanation: string } | null>(null);
   const [previewPaymentLoki, setPreviewPaymentLoki] = useState(1_000_000);
 
+  // Both forms follow the targeted node's loaded config, and are cleared
+  // with it when the node changes (T8-6, R4-F3).
   useEffect(() => {
-    if (config) {
-      setFormData(withTieredDefaults(config));
-      setAnnounceForm(toAnnounceForm(config.announce));
-    }
+    setFormData(config ? withTieredDefaults(config) : null);
+    setAnnounceForm(toAnnounceForm(config?.announce ?? null));
   }, [config]);
 
   const handleInputChange = (path: string, value: any) => {
@@ -269,6 +282,7 @@ export const Settings: React.FC = () => {
   };
 
   const handleSave = async () => {
+    if (!formData) return;
     const success = await updateConfig({ ...formData, announce: fromAnnounceForm(announceForm) });
     if (success) {
       void announceState.refresh();
@@ -286,7 +300,22 @@ export const Settings: React.FC = () => {
     );
   }
 
-  if (loading && !formData) {
+  // The node list failed, or there is no node: say so rather than wait for
+  // a config that will never load (T8-6, R4-F1).
+  if (fleet.error || (fleet.nodes && fleet.nodes.length === 0)) {
+    return (
+      <StatusPanel
+        message={fleet.error ? `Could not list the nodes: ${fleet.error}` : 'No node is configured.'}
+        onRetry={fleet.retry}
+      />
+    );
+  }
+
+  if (!formData && error && !loading) {
+    return <StatusPanel message={`Could not load the node's settings: ${error}`} onRetry={refreshConfig} />;
+  }
+
+  if (!formData) {
     return (
       <div className="h-[60vh] flex flex-col items-center justify-center gap-4">
         <Loader2 className="w-10 h-10 text-primary animate-spin" />
@@ -328,7 +357,7 @@ export const Settings: React.FC = () => {
 
         <div className="flex gap-4 w-full md:w-auto relative z-10">
           {fleet.nodes && fleet.nodes.length > 1 && (
-            <NodeSelector nodes={fleet.nodes} node={fleet.node} onChoose={(id) => { setFormData(null); fleet.choose(id); }} />
+            <NodeSelector nodes={fleet.nodes} node={fleet.node} onChoose={fleet.choose} />
           )}
           <button
             onClick={refreshConfig}
@@ -339,7 +368,7 @@ export const Settings: React.FC = () => {
           </button>
           <button
             onClick={handleSave}
-            disabled={saving}
+            disabled={saving || !formData}
             className="flex-1 md:flex-none flex items-center justify-center gap-3 px-10 py-4 rounded-2xl bg-primary text-black font-black uppercase tracking-[0.15em] text-xs hover:shadow-[0_8px_32px_rgba(0,186,255,0.3)] hover:brightness-110 transition-all active:scale-95 disabled:opacity-50"
           >
             {saving ? <Loader2 className="w-5 h-5 animate-spin" /> : <Save className="w-5 h-5" />}

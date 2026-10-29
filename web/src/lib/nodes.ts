@@ -6,6 +6,13 @@ export interface FleetNode {
   name: string;
 }
 
+/**
+ * The target of a backend without list_nodes (before v0.0.7-rc.2): the
+ * per-node calls go without a node param, which such a backend answers for
+ * its first node. The hooks wait only on null.
+ */
+export const UNNAMED_NODE = '';
+
 /** The node the per-node calls target: the chosen one, or the only node. */
 export function targetNode(nodes: FleetNode[] | null, chosen: string | null): string | null {
   if (!nodes) return null;
