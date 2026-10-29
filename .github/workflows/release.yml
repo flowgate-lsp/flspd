@@ -121,7 +121,7 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           # Only the tarballs: build-push-action also uploads a *.dockerbuild
           # record that fails to download and breaks the release.
