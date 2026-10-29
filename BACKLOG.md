@@ -2668,6 +2668,30 @@ and the dashboard's Pause/Unlist follow `nodes[0]`, and the anonymous LSPS2
 menu covers every node's tokens) and partner pricing in that menu (F-L3).
 Both predate the announcement, which repeats the live answers.
 
+### T8-6 — Review fixes for v0.0.7-rc.3 (S)
+
+From the 2026-10-29 code review of PR #32 (v0.0.7-rc.2):
+
+- R4-F1: Settings no longer waits forever when `list_nodes` fails or the
+  fleet is empty; it shows the error with a retry. A backend without
+  `list_nodes` answers Method not found and is targeted without a node
+  param, as before rc.2.
+- R4-F2: `update_config` holds a lock from building the node list to the
+  in-memory Store, and each write gets its own temporary file, so saves for
+  two nodes at once both reach `nodes.yaml`.
+- R4-F3: both Settings forms follow the targeted node's loaded config and
+  clear on a node switch; Save is refused until that node's config loaded.
+- R4-F4, R4-F5: `useSettings` and `useAnnounceState` clear on a node switch
+  and drop answers for a node no longer targeted.
+- R4-F6: the dev relay mounts `data/relay` (config at `/data/relay.yaml`);
+  `just setup backend` and `just docker up` write the config when missing
+  and remove the empty directory an older compose file made.
+- Left from the same review: `lsps.NewHandlers` still takes a fleet-wide
+  `NodesService` and reads `GetNodes()[0]`, so LSP-F8's per-node handlers
+  hold only because run.go passes a one-node view; taking `*core.Node`
+  would make that a compile error. The three hooks each build their own
+  `DashboardAPI` (a shared `useDashboardAPI()` would do).
+
 ---
 
 ## Performance backlog (non-blocking, run in parallel once Phase 1 gate is met)
