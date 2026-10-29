@@ -598,10 +598,9 @@ func normalizeRelay(u string) string {
 	return nostr.NormalizeURL(u)
 }
 
-// maxCreatedAtLead is how far, in seconds, a stored created_at may be ahead
-// of the clock and still be signed after. It is below the future limit
-// relays commonly apply (15 minutes), so the event signed after it is still
-// accepted.
+// maxCreatedAtLead is how far, in seconds, a signed created_at may ever be
+// ahead of the clock. It is below the 15-minute future bound clients and
+// relays apply, so every event flspd signs is accepted when it is sent.
 const maxCreatedAtLead = 10 * 60
 
 // nextCreatedAt is now, or one second after the newest created_at already
@@ -610,15 +609,16 @@ const maxCreatedAtLead = 10 * 60
 // change signed in the same second as the event before it, or after the
 // clock went back, must still be newer.
 //
-// A created_at more than maxCreatedAtLead ahead of now (signed once with the
-// clock far ahead) is not followed: relays that refuse events from the
-// future would refuse every later one too. It is returned as ahead (the
-// largest such value, 0 if none) so the caller can log it; the event is then
-// signed at now, and may lose to that one where a relay kept it.
+// The result is never more than maxCreatedAtLead ahead of now. A created_at
+// that would need more (signed with the clock far ahead, or the clock
+// stepped back further) is not followed; it is returned as ahead (the
+// largest such value, 0 if none) so the caller can log it. The event is then
+// signed at now: clients set the future one aside, and a relay that kept it
+// prefers it until the clock passes it.
 func nextCreatedAt(now int64, last ...int64) (next, ahead int64) {
 	next = now
 	for _, l := range last {
-		if l-now > maxCreatedAtLead {
+		if l+1-now > maxCreatedAtLead {
 			ahead = max(ahead, l)
 			continue
 		}
