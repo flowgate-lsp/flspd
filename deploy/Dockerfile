@@ -3,7 +3,11 @@
 # `alpine` tag, which silently tracks whatever Go release is newest) plus
 # its digest for build reproducibility. Bumped automatically by Dependabot
 # (.github/dependabot.yml, docker ecosystem).
-FROM golang:1.26.10-alpine@sha256:a2012b4a1d1f9f7e9f44e0d39b805a901e856b1dd80b4e6ee4338db547050308 AS builder
+# Runs on the build host's own platform and cross-compiles for the target, so
+# a multi-arch build never emulates the Go compiler.
+FROM --platform=$BUILDPLATFORM golang:1.26.10-alpine@sha256:a2012b4a1d1f9f7e9f44e0d39b805a901e856b1dd80b4e6ee4338db547050308 AS builder
+ARG TARGETOS TARGETARCH
+ENV CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH
 
 # Install build dependencies
 RUN apk add --no-cache git make build-base
