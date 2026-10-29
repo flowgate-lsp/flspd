@@ -44,6 +44,6 @@
     "typescript-eslint": "^8.57.0",
     "vite": "^8.0.1",
     "vitest": "^3.0.7",
-    "wrangler": "^3.109.2"
+    "wrangler": "^4.155.0"
   }
 }
