@@ -87,12 +87,18 @@ func TestAnnouncePublishesCheckedAnnouncement(t *testing.T) {
 	// The 02/03 prefix is resolved by connecting: the matching id is reachable.
 	clientRaw, err := d.RawLightningClient("client")
 	require.NoError(t, err)
+	clientLightning, err := d.LightningClient("client")
+	require.NoError(t, err)
 	require.NoError(t, ConnectPeer(ctx, clientRaw, lspInfo.IdentityPubkey, "flnd-lsp:9735"))
+	lspKey := mustDecodeHex(t, lspInfo.IdentityPubkey)
+	require.Eventually(t, func() bool {
+		connected, err := clientLightning.IsConnected(lspKey)
+		return err == nil && connected
+	}, 20*time.Second, 500*time.Millisecond, "client must connect to lsp")
 
 	// 2. The live LSPS answers are the announced ones.
 	bus, err := NewCustomMessageBus(ctx, clientRaw)
 	require.NoError(t, err)
-	lspKey := mustDecodeHex(t, lspInfo.IdentityPubkey)
 	live := liveAnswers(t, ctx, bus, lspKey)
 	diff := niplsp.CheckLive(first, live)
 	require.True(t, diff.Same(), "live answers differ: missing %v, changed %+v", diff.MissingProtocol, diff.Changed())
