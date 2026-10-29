@@ -52,13 +52,6 @@ func (c vectorClient) options() niplsp.CheckOptions {
 	return niplsp.CheckOptions{Chains: c.Chains, Networks: c.Networks, Now: c.Now}
 }
 
-// needsNewerNiplsp are vector cases of a rule the pinned nmilat does not
-// enforce yet: the 15-minute future bound on created_at (NIP-LSP step 4)
-// arrives in nmilat v0.5.0-rc.45. Delete this map with that pin bump.
-var needsNewerNiplsp = map[string]string{
-	"step 4: created more than 15 minutes ahead of the client's clock": "future created_at bound needs nmilat v0.5.0-rc.45",
-}
-
 func loadLSPVectors(t *testing.T) lspVectors {
 	t.Helper()
 	raw, err := os.ReadFile("testdata/lsp-announcement.json")
@@ -105,9 +98,6 @@ func TestLSPVectors_ParseCases(t *testing.T) {
 	v := loadLSPVectors(t)
 	for _, c := range v.Parse {
 		t.Run(c.Name, func(t *testing.T) {
-			if reason, ok := needsNewerNiplsp[c.Name]; ok {
-				t.Skip(reason)
-			}
 			opts := v.Client.options()
 			if c.Client != nil {
 				opts = c.Client.options()
