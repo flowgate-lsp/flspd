@@ -336,6 +336,17 @@ Verified: `go build/vet/test -race` all green; `docker build` of the
 pinned `Dockerfile` succeeds locally; `actionlint` clean on all workflow
 files; frontend `test`/`build` pass, `lint` runs (non-blocking).
 
+### T1-6: Release job fails downloading the Docker build record
+
+**Finding:** The first `v0.0.7-rc.1` release run (merge of #1) built and
+pushed the image and both tarballs, then failed in `release`:
+`download-artifact` with no filter also pulled the `*.dockerbuild` record
+that `build-push-action` uploads, which failed after 5 retries. No tag or
+GitHub release was created.
+
+**Fix:** filter the download to `pattern: flspd_*`, then re-run the release
+via `workflow_dispatch`.
+
 ---
 
 ## Phase 2 — Fix defects that exist on today's structure
