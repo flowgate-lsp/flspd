@@ -357,6 +357,16 @@ cross-compiles with `CGO_ENABLED=0` (as the release tarballs already do), so
 only the runtime stage's `apk add` is emulated. One multi-arch tag still
 serves amd64 and arm64. (#30)
 
+### T1-8: Cloudflare deploy fails uploading assets (wrangler 3)
+
+**Finding:** after the `frontend/` → `web/` move, the `flsp` Workers build
+needed its root directory set to `web`; the next deploy then failed in
+`wrangler deploy` with API code 10013 on `assets-upload-session`, using
+wrangler 3.114.17.
+
+**Fix:** `web/` moves to wrangler 4 (needs Node 22, pinned in
+`web/.node-version`). No `wrangler.jsonc` change is needed.
+
 ---
 
 ## Phase 2 — Fix defects that exist on today's structure
