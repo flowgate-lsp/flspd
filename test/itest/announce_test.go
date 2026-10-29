@@ -40,7 +40,7 @@ func TestAnnouncePublishesCheckedAnnouncement(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, pg.Start(ctx))
 	t.Cleanup(func() {
-		if err := pg.Stop(ctx); err != nil {
+		if err := pg.Stop(context.Background()); err != nil {
 			t.Logf("stopping postgres: %v", err)
 		}
 	})
