@@ -1,0 +1,28 @@
+# Opt-in: routes the admin dashboard through traefik over TLS.
+#
+#   docker compose -f deploy/docker-compose.prod.yml \
+#     -f deploy/docker-compose.prod.dashboard.yml --project-directory . up -d
+#
+# Without this file the dashboard listens on 127.0.0.1 of the host only.
+# Every admin call is NIP-98 signed by DASHBOARD_ADMIN_PUBKEY, but the token
+# is a bearer credential for 60 s, so it must travel over TLS. Set
+# DASHBOARD_TLS_ENTRYPOINT / DASHBOARD_CERT_RESOLVER to your traefik's names.
+services:
+  flspd:
+    labels:
+      - "traefik.http.routers.flspd-dash.rule=Host(`flspapi.flowgate.to`) && (PathPrefix(`/dashboard`) || PathPrefix(`/dashboard/`))"
+      - "traefik.http.routers.flspd-dash.entrypoints=${DASHBOARD_TLS_ENTRYPOINT:-websecure}"
+      - "traefik.http.routers.flspd-dash.tls=true"
+      - "traefik.http.routers.flspd-dash.tls.certresolver=${DASHBOARD_CERT_RESOLVER:-letsencrypt}"
+      - "traefik.http.routers.flspd-dash.service=flspd-dash"
+      - "traefik.http.services.flspd-dash.loadbalancer.server.port=8080"
+      - "traefik.http.middlewares.dash-strip.stripprefix.prefixes=/dashboard"
+      - "traefik.http.routers.flspd-dash.middlewares=dash-strip"
+
+      # Public, unauthenticated status endpoint the frontend polls to decide
+      # whether to show the login form (same service/port, nothing to strip).
+      - "traefik.http.routers.flspd-info.rule=Host(`flspapi.flowgate.to`) && Path(`/info`)"
+      - "traefik.http.routers.flspd-info.entrypoints=${DASHBOARD_TLS_ENTRYPOINT:-websecure}"
+      - "traefik.http.routers.flspd-info.tls=true"
+      - "traefik.http.routers.flspd-info.tls.certresolver=${DASHBOARD_CERT_RESOLVER:-letsencrypt}"
+      - "traefik.http.routers.flspd-info.service=flspd-dash"
