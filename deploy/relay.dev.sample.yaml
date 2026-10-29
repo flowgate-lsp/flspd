@@ -1,0 +1,11 @@
+# The dev stack's local Nostr relay (docker-compose.dev.yml `relay`), which
+# the dev node's NIP-LSP announcement is published to by default, so it
+# never leaves this host. `just setup backend` copies it to
+# data/relay/relay.yaml with a fresh relay key, so no key is tracked.
+port: 5500
+nip11:
+  name: flspd-dev-relay
+  privkey: __RELAY_PRIVKEY__
+  contact: dev@flspd.local
+store: /data/db/notes.db
+logdir: /data/logs

@@ -141,3 +141,20 @@
   # individually if a deployment needs something else, e.g. requiring the
   # LSP side to start with at least 1 loki:
   # lsps1MinInitialLspBalanceLoki: 1
+
+  # --- NIP-LSP announcement (kind 10735) ---
+  # On in the dev stack: publishes this node's LSPS offer, signed by the node
+  # key, to NOSTR_ANNOUNCE_RELAYS, which docker-compose.dev.yml points at its
+  # local relay (ws://flspd-dev-relay:5500) unless .env sets public relays.
+  # admin.macaroon may call signrpc SignMessage; for a narrower macaroon see
+  # nodes.prod.sample.yaml. Every LSPS value announced comes from the live
+  # LSPS answers, never from here.
+  announce:
+    enabled: true
+    title: "FLSP dev"
+    content: "flspd dev stack: LSPS1, LSPS2 (JIT) and LSPS5."
+    languages: [en]
+    # host:port with an IPv4, a bracketed IPv6 or a v3 onion host, as
+    # clients reach flnd's P2P port; replace with this host's public IP.
+    addrs:
+      - "127.0.0.1:5521"
