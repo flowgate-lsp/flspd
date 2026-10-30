@@ -35,7 +35,7 @@ RUN go build -ldflags "-w -s -X github.com/flowgate-lsp/flspd/platform/build.tag
 RUN go build -ldflags "-w -s -X github.com/flowgate-lsp/flspd/platform/build.tag=${TAG} -X github.com/flowgate-lsp/flspd/platform/build.revision=${COMMIT}" -o /bin/flspd_revenue_cli ./cmd/flspd_revenue_cli
 
 # Runtime Stage
-FROM alpine:latest@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b
+FROM alpine:latest@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a
 
 # Install runtime dependencies
 # ca-certificates: for HTTPS connections
