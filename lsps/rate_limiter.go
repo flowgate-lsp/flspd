@@ -5,8 +5,8 @@ import (
 	"time"
 )
 
-// defaultBurstLimit/defaultBurstWindow: how many mutating LSPS1/2 calls
-// (create_order, buy) one peer may make per window before the burst
+// defaultBurstLimit/defaultBurstWindow: how many mutating LSPS1/2/5 calls
+// (create_order, buy, set_webhook) one peer may make per window before the burst
 // shaper starts rejecting (Phase 7, F-17/T7-7). Deliberately generous --
 // this layer exists to blunt a tight-loop spam script, not to be a
 // legitimate client's normal rate limit; the DB-backed standing cap and

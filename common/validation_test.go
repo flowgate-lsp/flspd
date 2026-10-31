@@ -17,14 +17,20 @@ func mustParseIP(t *testing.T, s string) net.IP {
 
 func TestValidateWebhookUrl(t *testing.T) {
 	tests := []struct {
-		name    string
-		url     string
-		wantErr bool
-		errIs   string
+		name          string
+		url           string
+		allowLoopback bool
+		wantErr       bool
+		errIs         string
 	}{
 		{name: "valid https public host", url: "https://example.com/webhook", wantErr: false},
-		{name: "http on localhost is allowed (dev)", url: "http://localhost/webhook", wantErr: false},
-		{name: "http on 127.0.0.1 is allowed (dev)", url: "http://127.0.0.1/webhook", wantErr: false},
+		{name: "http on localhost is rejected by default", url: "http://localhost/webhook", wantErr: true, errIs: "unsupported_protocol"},
+		{name: "http on 127.0.0.1 is rejected by default", url: "http://127.0.0.1:8080/webhook", wantErr: true, errIs: "unsupported_protocol"},
+		{name: "http on localhost is allowed with the dev flag", url: "http://localhost/webhook", allowLoopback: true, wantErr: false},
+		{name: "http on 127.0.0.1 is allowed with the dev flag", url: "http://127.0.0.1/webhook", allowLoopback: true, wantErr: false},
+		{name: "the dev flag does not admit http on other hosts", url: "http://10.0.0.1/webhook", allowLoopback: true, wantErr: true, errIs: "unsupported_protocol"},
+		{name: "https on a loopback address is rejected", url: "https://127.0.0.1/webhook", wantErr: true, errIs: "private ip"},
+		{name: "https on the unspecified address is rejected", url: "https://0.0.0.0/webhook", wantErr: true, errIs: "private ip"},
 		{name: "plain http on a public host is rejected", url: "http://example.com/webhook", wantErr: true, errIs: "unsupported_protocol"},
 		{name: "not a url at all", url: "://not-a-url", wantErr: true},
 		{name: "https with no hostname", url: "https:///path", wantErr: true},
@@ -32,7 +38,7 @@ func TestValidateWebhookUrl(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := ValidateWebhookUrl(tt.url)
+			err := ValidateWebhookUrl(tt.url, tt.allowLoopback)
 			if tt.wantErr {
 				assert.Error(t, err)
 				if tt.errIs != "" {
@@ -54,6 +60,9 @@ func TestIsPrivateIP(t *testing.T) {
 		private bool
 	}{
 		{"127.0.0.1", true},
+		{"0.0.0.0", true},          // unspecified: connecting to it reaches the local host
+		{"::", true},               // IPv6 unspecified
+		{"::ffff:127.0.0.1", true}, // IPv4-mapped loopback
 		{"10.0.0.1", true},
 		{"10.255.255.255", true},
 		{"172.16.0.1", true},
@@ -65,8 +74,8 @@ func TestIsPrivateIP(t *testing.T) {
 		{"169.254.1.1", true}, // link-local
 		{"8.8.8.8", false},
 		{"1.1.1.1", false},
-		{"::1", true},       // IPv6 loopback
-		{"fd00::1", true},   // IPv6 unique local
+		{"::1", true},          // IPv6 loopback
+		{"fd00::1", true},      // IPv6 unique local
 		{"2001:db8::1", false}, // IPv6 public documentation range
 	}
 
