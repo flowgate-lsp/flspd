@@ -301,3 +301,52 @@ func TestLsps2Buy_F17_FleetCeilingZero_MeansDisabled(t *testing.T) {
 
 	require.Nil(t, resp.Error)
 }
+
+// TestLsps2GetInfo_ReadBurstLimitExceeded_RejectsBeforeGetNodes (R-LSP-5)
+// pins the read limiter at the top of Route: unlike the mutating burst
+// limiter, it guards every method -- including the unauthenticated read
+// lsps2.get_info, whose menu signs an ECDSA promise per fee setting per token
+// per node. A peer past the read allowance is rejected (-32603) before Route's
+// protocol gate even calls GetNodes, so none of that signing runs.
+func TestLsps2GetInfo_ReadBurstLimitExceeded_RejectsBeforeGetNodes(t *testing.T) {
+	mockNodes := new(MockNodesService)
+	nodeCfg := &config.NodeConfig{JitEnabled: true, MinPaymentSizeMloki: 20_000_000}
+	require.NoError(t, nodeCfg.Validate())
+	mockNodes.On("GetNodes").Return([]*core.Node{{NodeConfig: config.NewNodeConfigRef(nodeCfg)}}).Maybe()
+	mockOpening := new(MockOpeningService)
+	mockOpening.On("GetFeeParamsMenu", mock.Anything, mock.Anything).Return([]*core.OpeningFeeParams{}, nil).Maybe()
+	server := NewHandlers(Config{}, new(MockLndClient), mockNodes, mockOpening, new(MockLiquidityManager), new(MockNotificationService), nil)
+
+	req := &JsonRpcRequest{Id: "1", Method: "lsps2.get_info"}
+	peer := []byte("read_flood_peer")
+
+	countGetNodes := func() int {
+		n := 0
+		for _, c := range mockNodes.Calls {
+			if c.Method == "GetNodes" {
+				n++
+			}
+		}
+		return n
+	}
+
+	for i := range defaultReadLimit {
+		resp := server.Route(req, peer)
+		if resp.Error != nil {
+			require.NotEqual(t, -32603, resp.Error.Code, "call %d is within the read allowance", i+1)
+		}
+	}
+	require.Positive(t, countGetNodes(), "the allowed reads reached GetNodes")
+	before := countGetNodes()
+
+	resp := server.Route(req, peer)
+	require.NotNil(t, resp.Error, "the read past the allowance is rejected")
+	require.Equal(t, -32603, resp.Error.Code)
+	require.Equal(t, before, countGetNodes(), "a read-limited call is rejected before GetNodes")
+
+	// A different peer keeps its own window.
+	other := server.Route(req, []byte("another_peer"))
+	if other.Error != nil {
+		require.NotEqual(t, -32603, other.Error.Code, "a different peer is not affected by read_flood_peer's window")
+	}
+}

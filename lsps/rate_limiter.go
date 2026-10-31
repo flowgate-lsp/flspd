@@ -14,6 +14,11 @@ import (
 const (
 	defaultBurstLimit  = 20
 	defaultBurstWindow = 10 * time.Second
+	// The read limiter is looser than the mutating burst limiter: reads are the
+	// hot per-purchase path (lsps2.get_info), so the cap only has to stop a
+	// flood, not shape normal traffic.
+	defaultReadLimit  = 60
+	defaultReadWindow = 10 * time.Second
 )
 
 // peerBurstLimiter is a simple fixed-window per-peer request counter: O(1)
