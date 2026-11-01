@@ -74,6 +74,10 @@ type Config struct {
 	EnableLsps5Https                    bool   // Enable HTTPS webhook transport
 	EnableLsps5Nostr                    bool   // Enable Nostr notification transport
 	Lsps5NostrPubkey                    string // Hex-encoded Nostr public key for notifications
+	// Lsps5AllowLoopbackWebhooks admits plain-http webhooks on localhost /
+	// 127.0.0.1. Local development and tests only; never enable it on a
+	// node reachable by untrusted peers.
+	Lsps5AllowLoopbackWebhooks bool
 }
 
 // Handlers implements the LSPS0/1/2/5 protocol methods: parsing a

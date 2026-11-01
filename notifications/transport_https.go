@@ -3,26 +3,92 @@ package notifications
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"syscall"
 	"time"
 
 	btcec "github.com/flokiorg/go-flokicoin/crypto"
+	"github.com/flowgate-lsp/flspd/common"
 	"github.com/flowgate-lsp/flspd/lightning"
 	"github.com/flowgate-lsp/flspd/platform/logging"
 	"github.com/rs/zerolog/log"
 )
 
+// webhookTimeout bounds one whole webhook delivery (connect, TLS, request,
+// response headers and body).
+const webhookTimeout = 30 * time.Second
+
 // HTTPSTransport implements NotificationTransport for HTTPS webhook delivery.
 // It sends bLIP-55 compliant JSON-RPC 2.0 notifications with signed headers.
 type HTTPSTransport struct {
 	nodePrivKey interface{} // *btcec.PrivateKey
+	client      *http.Client
 }
 
-// NewHTTPSTransport creates a new HTTPS webhook transport
+// NewHTTPSTransport creates a new HTTPS webhook transport whose client
+// refuses to connect to private or loopback addresses and does not follow
+// redirects.
 func NewHTTPSTransport(nodePrivKey interface{}) *HTTPSTransport {
 	return &HTTPSTransport{
 		nodePrivKey: nodePrivKey,
+		client:      newWebhookClient(false),
+	}
+}
+
+// newWebhookClient builds the client used for webhook delivery. Webhook URLs
+// are client-supplied and only validated at registration; the hostname is
+// resolved again here, so the address policy is enforced on the actual IP
+// being dialled. Redirects are not followed (a 3xx is a failed delivery).
+// allowLoopback admits loopback addresses for local development and tests
+// (LSPS5_ALLOW_LOOPBACK_WEBHOOKS); other private ranges stay refused.
+func newWebhookClient(allowLoopback bool) *http.Client {
+	dialer := &net.Dialer{
+		Timeout:   10 * time.Second,
+		KeepAlive: 30 * time.Second,
+		Control:   webhookDialControl(allowLoopback),
+	}
+	transport := &http.Transport{
+		// No proxy: a proxy would dial the target on our behalf and bypass
+		// the address check below.
+		Proxy:                 nil,
+		DialContext:           dialer.DialContext,
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          100,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+	}
+	return &http.Client{
+		Transport: transport,
+		Timeout:   webhookTimeout,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+}
+
+// webhookDialControl runs after DNS resolution, immediately before each
+// connect, with the literal IP being dialled.
+func webhookDialControl(allowLoopback bool) func(network, address string, c syscall.RawConn) error {
+	return func(network, address string, _ syscall.RawConn) error {
+		host, _, err := net.SplitHostPort(address)
+		if err != nil {
+			return fmt.Errorf("%w: %v", ErrWebhookAddressNotAllowed, err)
+		}
+		ip := net.ParseIP(host)
+		if ip == nil {
+			return fmt.Errorf("%w: %s", ErrWebhookAddressNotAllowed, host)
+		}
+		if allowLoopback && ip.IsLoopback() {
+			return nil
+		}
+		if common.IsPrivateIP(ip) {
+			return fmt.Errorf("%w: %s", ErrWebhookAddressNotAllowed, ip)
+		}
+		return nil
 	}
 }
 
@@ -101,7 +167,7 @@ func (t *HTTPSTransport) Send(ctx context.Context, webhookURL string, method str
 		Str("signature", signature).
 		Msg("HTTPSTransport: sending request")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := t.client.Do(req)
 	if err != nil {
 		log.Error().
 			Err(err).

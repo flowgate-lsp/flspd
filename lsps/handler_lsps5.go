@@ -42,6 +42,16 @@ type Lsps5SetWebhookResponse struct {
 }
 
 func (s *Handlers) handleLsps5SetWebhook(req *JsonRpcRequest, peer []byte) *JsonRpcResponse {
+	peerId := hex.EncodeToString(peer)
+
+	// Checked before anything else, as in lsps1.create_order and
+	// lsps2.buy: set_webhook does DNS resolution, a DB write and an
+	// outbound webhook_registered delivery, so a burst from one peer must
+	// not reach any of that.
+	if !s.burstLimiter.Allow(peerId) {
+		return NewJsonRpcErrorResponse(req.Id, -32603, "Rate limit exceeded, please retry later", nil)
+	}
+
 	var params Lsps5SetWebhookRequest
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		log.Trace().
@@ -96,7 +106,7 @@ func (s *Handlers) handleLsps5SetWebhook(req *JsonRpcRequest, peer []byte) *Json
 		if !s.config.EnableLsps5Https {
 			return NewJsonRpcErrorResponse(req.Id, Lsps5ErrorUnsupportedProtocol, "https_transport_disabled", nil)
 		}
-		if err := common.ValidateWebhookUrl(params.Webhook); err != nil {
+		if err := common.ValidateWebhookUrl(params.Webhook, s.config.Lsps5AllowLoopbackWebhooks); err != nil {
 			log.Warn().
 				Err(err).
 				Str("component", string(logging.LogComponentLSPS5)).
@@ -133,8 +143,6 @@ func (s *Handlers) handleLsps5SetWebhook(req *JsonRpcRequest, peer []byte) *Json
 			Msg("LSPS5: set_webhook unsupported transport")
 		return NewJsonRpcErrorResponse(req.Id, -32602, "unsupported_transport", nil)
 	}
-
-	peerId := hex.EncodeToString(peer)
 
 	existingWebhooks, err := s.openingService.GetLsps5Webhooks(peerId)
 	if err != nil {

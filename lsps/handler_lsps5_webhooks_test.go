@@ -250,3 +250,49 @@ func TestHandleLsps5RemoveWebhook_NotFound(t *testing.T) {
 	require.NotNil(t, resp.Error)
 	assert.Equal(t, Lsps5ErrorAppNameNotFound, resp.Error.Code)
 }
+
+// set_webhook resolves a client-supplied hostname, writes to the DB and
+// fires an outbound delivery, so it must sit behind the same per-peer burst
+// limiter as lsps1.create_order and lsps2.buy, checked before any of that
+// work. Push is disabled here so every allowed call stops at a cheap,
+// distinct error code, and the store is never touched.
+func TestHandleLsps5SetWebhook_BurstLimitExceeded_RejectsBeforeAnyWork(t *testing.T) {
+	mockOS := new(MockOpeningService)
+	server := newLsps5TestServer(Config{EnableLsps5Https: false}, mockOS, new(MockNotificationService))
+	req := setWebhookReq(t, "app", "https://example.com", "push")
+
+	for i := range defaultBurstLimit {
+		resp := server.handleLsps5SetWebhook(req, testPeerBytes)
+		require.NotNil(t, resp.Error)
+		require.Equal(t, Lsps5ErrorUnsupportedProtocol, resp.Error.Code, "call %d should be within the burst allowance", i+1)
+	}
+
+	resp := server.handleLsps5SetWebhook(req, testPeerBytes)
+	require.NotNil(t, resp.Error, "the call exceeding the burst allowance must be rejected")
+	assert.Equal(t, -32603, resp.Error.Code)
+
+	other, _ := hex.DecodeString("02aabbccddeeff00112233445566778899aabbccddeeff0011223344556677")
+	otherResp := server.handleLsps5SetWebhook(req, other)
+	require.NotNil(t, otherResp.Error)
+	assert.Equal(t, Lsps5ErrorUnsupportedProtocol, otherResp.Error.Code, "a different peer must not be affected")
+	mockOS.AssertNotCalled(t, "GetLsps5Webhooks", mock.Anything)
+}
+
+// Loopback http webhooks are a development convenience: a node without the
+// dev flag must refuse them, and the flag must restore them.
+func TestHandleLsps5SetWebhook_LoopbackHTTP_RequiresDevFlag(t *testing.T) {
+	server := newLsps5TestServer(Config{EnableLsps5Https: true, Lsps5MaxWebhooks: 10}, new(MockOpeningService), new(MockNotificationService))
+	resp := server.handleLsps5SetWebhook(setWebhookReq(t, "app", "http://127.0.0.1:9000/hook", "push"), testPeerBytes)
+	require.NotNil(t, resp.Error)
+	assert.Equal(t, Lsps5ErrorUnsupportedProtocol, resp.Error.Code)
+
+	mockOS := new(MockOpeningService)
+	mockOS.On("GetLsps5Webhooks", testPeerId).Return([]*core.Lsps5Webhook{}, nil)
+	mockOS.On("RegisterLsps5Webhook", mock.Anything).Return(nil)
+	mockNotif := new(MockNotificationService)
+	mockNotif.On("NotifyWebhookRegistered", testPeerId, mock.Anything).Return(true).Maybe()
+	dev := newLsps5TestServer(Config{EnableLsps5Https: true, Lsps5MaxWebhooks: 10, Lsps5AllowLoopbackWebhooks: true}, mockOS, mockNotif)
+	resp = dev.handleLsps5SetWebhook(setWebhookReq(t, "app", "http://127.0.0.1:9000/hook", "push"), testPeerBytes)
+	require.Nil(t, resp.Error)
+	mockOS.AssertCalled(t, "RegisterLsps5Webhook", mock.Anything)
+}

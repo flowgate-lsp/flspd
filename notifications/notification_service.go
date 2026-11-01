@@ -67,6 +67,17 @@ func (s *NotificationService) SetNodePrivKey(privKey interface{}) {
 	}
 }
 
+// SetAllowLoopbackWebhooks lets the HTTPS transport deliver to loopback
+// addresses (LSPS5_ALLOW_LOOPBACK_WEBHOOKS). Local development and tests
+// only; call it during startup, before Start.
+func (s *NotificationService) SetAllowLoopbackWebhooks(allow bool) {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	if t, ok := s.transports[TransportTypePush].(*HTTPSTransport); ok {
+		t.client = newWebhookClient(allow)
+	}
+}
+
 func (s *NotificationService) Start(ctx context.Context) {
 	// Start retry worker
 	go s.runWorker(ctx)

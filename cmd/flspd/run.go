@@ -185,6 +185,14 @@ func runLspd(cliCtx *cli.Context) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	notificationService := notifications.NewNotificationService(openingStore, nodesService, notificationsStore)
 
+	// Development/test only: admit plain-http LSPS5 webhooks on localhost
+	// and let delivery reach loopback addresses.
+	allowLoopbackWebhooks, _ := strconv.ParseBool(os.Getenv("LSPS5_ALLOW_LOOPBACK_WEBHOOKS"))
+	if allowLoopbackWebhooks {
+		log.Warn().Msg("LSPS5_ALLOW_LOOPBACK_WEBHOOKS is set: loopback webhooks are accepted (development only)")
+		notificationService.SetAllowLoopbackWebhooks(true)
+	}
+
 	// Configure Nostr transport if private key is provided
 	lspNostrPrivKey := os.Getenv("LSP_NOSTR_PRIVATE_KEY")
 	if lspNostrPrivKey != "" {
@@ -359,6 +367,7 @@ func runLspd(cliCtx *cli.Context) error {
 			EnableLsps5Https:                    true,
 			EnableLsps5Nostr:                    lspNostrPrivKey != "",
 			Lsps5NostrPubkey:                    lspNostrPubkey,
+			Lsps5AllowLoopbackWebhooks:          allowLoopbackWebhooks,
 		}
 
 		liquidityManager := lsps.NewLiquidityManager(client, openingStore)

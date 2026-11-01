@@ -9,17 +9,24 @@ import (
 	"github.com/nbd-wtf/go-nostr/nip19"
 )
 
-// ValidateWebhookUrl checks if the provided URL string is valid, uses HTTP/HTTPS,
+// ValidateWebhookUrl checks if the provided URL string is valid, uses HTTPS,
 // and does not point to a private or loopback IP address.
-func ValidateWebhookUrl(rawUrl string) error {
+//
+// allowLoopbackHTTP additionally admits plain-http URLs on localhost or
+// 127.0.0.1. It exists only for local development and tests (see
+// LSPS5_ALLOW_LOOPBACK_WEBHOOKS) and must stay false in production.
+//
+// This is a registration-time check only: the hostname is resolved again
+// when a notification is delivered, so the delivery transport must enforce
+// the same address policy at connect time (see IsPrivateIP).
+func ValidateWebhookUrl(rawUrl string, allowLoopbackHTTP bool) error {
 	u, err := url.Parse(rawUrl)
 	if err != nil {
 		return fmt.Errorf("invalid url format: %w", err)
 	}
 
 	if u.Scheme != "https" {
-		// We allow http for localhost for development and testing
-		if u.Scheme == "http" && (u.Hostname() == "localhost" || u.Hostname() == "127.0.0.1") {
+		if allowLoopbackHTTP && u.Scheme == "http" && (u.Hostname() == "localhost" || u.Hostname() == "127.0.0.1") {
 			return nil
 		}
 		return fmt.Errorf("unsupported_protocol: url scheme must be https")
@@ -45,8 +52,14 @@ func ValidateWebhookUrl(rawUrl string) error {
 	return nil
 }
 
+// IsPrivateIP reports whether ip is an address a webhook must never reach:
+// loopback, unspecified, link-local, or a private (RFC 1918 / ULA) range.
+func IsPrivateIP(ip net.IP) bool {
+	return isPrivateIP(ip)
+}
+
 func isPrivateIP(ip net.IP) bool {
-	if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+	if ip.IsLoopback() || ip.IsUnspecified() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
 		return true
 	}
 

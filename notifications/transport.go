@@ -42,4 +42,7 @@ var (
 	ErrInvalidPrivateKey  = fmt.Errorf("invalid private key type")
 	ErrWebhookFailed      = fmt.Errorf("webhook delivery failed")
 	ErrNostrPublishFailed = fmt.Errorf("nostr publish failed")
+	// ErrWebhookAddressNotAllowed: the webhook host resolved to an address
+	// delivery refuses to connect to (private, loopback, link-local).
+	ErrWebhookAddressNotAllowed = fmt.Errorf("webhook address not allowed")
 )
