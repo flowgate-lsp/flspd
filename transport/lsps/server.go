@@ -22,6 +22,14 @@ import (
 
 const LspsMessageId = 51610
 
+// defaultMaxInFlight bounds the LSPS handler goroutines running at once. A peer
+// (or a flood of peers) sending custom messages faster than they are handled
+// cannot spawn unbounded goroutines and exhaust CPU or the DB pool: a message
+// arriving while the cap is reached is dropped and the peer may retry. Per-peer
+// rate limits are dodged with fresh BOLT8 keys, so this global cap is the
+// backstop that holds regardless.
+const defaultMaxInFlight = 64
+
 // MessageClient is the subset of the lnd client the subscription loop
 // itself needs -- receiving and replying to LSPS custom messages. Handlers
 // (the business-logic side) has its own, different lnd-client dependency
@@ -53,6 +61,7 @@ type Server struct {
 	quit     chan struct{}
 	quitOnce sync.Once
 	wg       sync.WaitGroup
+	sem      chan struct{}
 }
 
 func NewServer(messageClient MessageClient, handlers Router) *Server {
@@ -60,6 +69,7 @@ func NewServer(messageClient MessageClient, handlers Router) *Server {
 		messageClient: messageClient,
 		handlers:      handlers,
 		quit:          make(chan struct{}),
+		sem:           make(chan struct{}, defaultMaxInFlight),
 	}
 }
 
@@ -130,8 +140,20 @@ func (s *Server) subscribeAndListen() error {
 		}
 
 		if msg.Type == LspsMessageId {
-			// Process in a goroutine to not block the receiver
-			go s.handleMessage(msg)
+			// Process in a goroutine to not block the receiver, but bound how
+			// many run at once: a message arriving while the in-flight cap is
+			// reached is dropped rather than spawning an unbounded goroutine.
+			select {
+			case s.sem <- struct{}{}:
+				go func() {
+					defer func() { <-s.sem }()
+					s.handleMessage(msg)
+				}()
+			default:
+				log.Warn().
+					Str("component", string(logging.LogComponentLSPS0)).
+					Msg("LSPS: in-flight handler cap reached, dropping custom message")
+			}
 		}
 	}
 }

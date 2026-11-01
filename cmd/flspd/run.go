@@ -376,6 +376,7 @@ func runLspd(cliCtx *cli.Context) error {
 			log.Fatal().Err(err).Msgf("LSPS handlers for %s", nodeLabel(nodeCfg))
 		}
 		go lspsHandlers.BurstLimiter().StartEvictionLoop(ctx.Done(), BurstLimiterEvictionInterval)
+		go lspsHandlers.ReadLimiter().StartEvictionLoop(ctx.Done(), BurstLimiterEvictionInterval)
 		if signer, err := services.NewAnnouncementSigner(node); err != nil {
 			log.Error().Err(err).Msg("NIP-LSP: no announcement signer for node; it cannot announce")
 		} else {

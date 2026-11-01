@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strconv"
@@ -104,6 +105,13 @@ type Handlers struct {
 	// the restart-durable layers; this one only needs to shape bursts
 	// within one process's uptime.
 	burstLimiter *peerBurstLimiter
+	// readLimiter is a second, looser per-peer shaper applied to EVERY method
+	// at the top of Route -- including the read methods (lsps2.get_info,
+	// lsps1.get_info/get_order, lsps0.*, lsps5 reads) that burstLimiter leaves
+	// unguarded. A no-channel peer flooding lsps2.get_info otherwise drives
+	// N_nodes x N_tokens x N_settings ECDSA signs per call; this caps the rate
+	// before any GetNodes/signing work runs.
+	readLimiter *peerBurstLimiter
 }
 
 // BurstLimiter exposes the per-peer burst shaper so callers (cmd/flspd's
@@ -111,6 +119,12 @@ type Handlers struct {
 // peerBurstLimiter.StartEvictionLoop.
 func (s *Handlers) BurstLimiter() *peerBurstLimiter {
 	return s.burstLimiter
+}
+
+// ReadLimiter exposes the per-peer read shaper so the startup wiring can run
+// its periodic eviction loop -- see peerBurstLimiter.StartEvictionLoop.
+func (s *Handlers) ReadLimiter() *peerBurstLimiter {
+	return s.readLimiter
 }
 
 // checkFleetCeilingAndLiquidity enforces the fleet-wide pending-reservation
@@ -192,6 +206,7 @@ func NewHandlers(
 		notificationService: notificationService,
 		orderWatcher:        orderWatcher,
 		burstLimiter:        newPeerBurstLimiter(defaultBurstLimit, defaultBurstWindow),
+		readLimiter:         newPeerBurstLimiter(defaultReadLimit, defaultReadWindow),
 	}
 }
 
@@ -250,6 +265,13 @@ func NewJsonRpcErrorResponse(id interface{}, code int, message string, data inte
 // once it has a *JsonRpcRequest, and does nothing else with the method
 // name itself.
 func (s *Handlers) Route(req *JsonRpcRequest, peer []byte) *JsonRpcResponse {
+	// Every method -- reads included -- passes a generous per-peer read limiter
+	// before any work, so a peer flooding an unauthenticated read like
+	// lsps2.get_info cannot drive unbounded ECDSA signing / DB reads. This sits
+	// above the lsps2. protocol gate below, which already calls GetNodes.
+	if !s.readLimiter.Allow(hex.EncodeToString(peer)) {
+		return NewJsonRpcErrorResponse(req.Id, -32603, "Rate limit exceeded, please retry later", nil)
+	}
 	// A protocol this node does not list in list_protocols is not served,
 	// so the live answers match the listed (and announced) protocols: LSPS2
 	// while JIT channels are off (F8-Q1).

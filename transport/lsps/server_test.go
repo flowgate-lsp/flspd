@@ -261,3 +261,66 @@ func TestStop_IsIdempotent(t *testing.T) {
 		t.Fatal("calling Stop twice must not hang or panic")
 	}
 }
+
+// blockingRouter blocks in Route until release is closed, recording how many
+// handlers are in flight at once so a test can prove the server caps them.
+type blockingRouter struct {
+	mu       sync.Mutex
+	inFlight int
+	maxSeen  int
+	entered  int
+	release  chan struct{}
+}
+
+func (r *blockingRouter) Route(req *lspslogic.JsonRpcRequest, _ []byte) *lspslogic.JsonRpcResponse {
+	r.mu.Lock()
+	r.inFlight++
+	r.entered++
+	if r.inFlight > r.maxSeen {
+		r.maxSeen = r.inFlight
+	}
+	r.mu.Unlock()
+	<-r.release
+	r.mu.Lock()
+	r.inFlight--
+	r.mu.Unlock()
+	return lspslogic.NewJsonRpcResponse(req.Id, map[string]string{"ok": "true"})
+}
+
+// TestServer_BoundsConcurrentHandlers (R-LSP-5) pins the in-flight cap: a flood
+// of custom messages arriving faster than they are handled spawns at most
+// defaultMaxInFlight handler goroutines at once; the rest are dropped, not
+// queued into unbounded goroutines.
+func TestServer_BoundsConcurrentHandlers(t *testing.T) {
+	const extra = 16
+	mockLnd := new(mockMessageClient)
+	mockLnd.On("SendCustomMessage", mock.Anything, mock.Anything).Return(&lnrpc.SendCustomMessageResponse{}, nil).Maybe()
+
+	msgs := make([]*lnrpc.CustomMessage, 0, defaultMaxInFlight+extra)
+	for i := 0; i < defaultMaxInFlight+extra; i++ {
+		msgs = append(msgs, lspsMessage([]byte{0x01}, lspslogic.JsonRpcRequest{JsonRpc: "2.0", Method: "lsps2.get_info", Id: "req"}))
+	}
+	stream := &fakeCustomMessagesStream{messages: msgs, recvErr: status.Error(codes.Canceled, "context canceled")}
+	mockLnd.On("SubscribeCustomMessages", mock.Anything, mock.Anything).Return(stream, nil)
+
+	router := &blockingRouter{release: make(chan struct{})}
+	server := NewServer(mockLnd, router)
+	server.quit = make(chan struct{})
+
+	require.NoError(t, server.subscribeAndListen())
+
+	require.Eventually(t, func() bool {
+		router.mu.Lock()
+		defer router.mu.Unlock()
+		return router.inFlight == defaultMaxInFlight
+	}, 2*time.Second, 5*time.Millisecond, "the in-flight cap's worth of handlers should be running at once")
+
+	// Give any erroneously-spawned extra handler a chance to appear.
+	time.Sleep(50 * time.Millisecond)
+	router.mu.Lock()
+	assert.LessOrEqual(t, router.maxSeen, defaultMaxInFlight, "no more than the in-flight cap may run concurrently")
+	assert.Equal(t, defaultMaxInFlight, router.entered, "messages past the cap are dropped, not spawned")
+	router.mu.Unlock()
+
+	close(router.release) // let the blocked handlers finish
+}
