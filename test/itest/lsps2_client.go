@@ -293,12 +293,16 @@ func CreateJitInvoice(ctx context.Context, clientRaw lnrpc.LightningClient, buyR
 // against picking a worse/stale route. Pass 0 to fall back to normal
 // pathfinding.
 func PayInvoice(ctx context.Context, router routerrpc.RouterClient, bolt11 string, outgoingChanId uint64, timeout time.Duration) (*lnrpc.Payment, error) {
+	var outgoingChanIds []uint64
+	if outgoingChanId != 0 {
+		outgoingChanIds = []uint64{outgoingChanId}
+	}
 	stream, err := router.SendPaymentV2(ctx, &routerrpc.SendPaymentRequest{
-		PaymentRequest: bolt11,
-		TimeoutSeconds: int32(timeout.Seconds()),
-		FeeLimitMsat:   500_000_000, // generous ceiling; this is a 1-2 hop regtest payment
-		MaxParts:       1,           // JIT resolution expects the full amount in one HTLC, not split MPP shards
-		OutgoingChanId: outgoingChanId,
+		PaymentRequest:  bolt11,
+		TimeoutSeconds:  int32(timeout.Seconds()),
+		FeeLimitMsat:    500_000_000, // generous ceiling; this is a 1-2 hop regtest payment
+		MaxParts:        1,           // JIT resolution expects the full amount in one HTLC, not split MPP shards
+		OutgoingChanIds: outgoingChanIds,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("starting payment: %w", err)
