@@ -14,7 +14,7 @@ require (
 	github.com/golang-migrate/migrate/v4 v4.20.1
 	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0
 	github.com/jackc/pgtype v1.14.4
-	github.com/jackc/pgx/v5 v5.9.2
+	github.com/jackc/pgx/v5 v5.11.0
 	github.com/nbd-wtf/go-nostr v0.52.3
 	github.com/ohstr/nmilat v0.5.0-rc.45
 	github.com/rs/zerolog v1.35.1
