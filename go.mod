@@ -48,7 +48,7 @@ require (
 	github.com/distribution/reference v0.6.0 // indirect
 	github.com/docker/cli v29.2.0+incompatible // indirect
 	github.com/docker/go-units v0.5.0 // indirect
-	github.com/ethereum/go-ethereum v1.13.15 // indirect
+	github.com/ethereum/go-ethereum v1.15.8 // indirect
 	github.com/felixge/httpsnoop v1.1.0 // indirect
 	github.com/flokiorg/flokicoin-neutrino v0.17.2 // indirect
 	github.com/flokiorg/go-socks v0.0.0-20170105172521-4720035b7bfd // indirect
@@ -148,7 +148,7 @@ require (
 	github.com/decred/dcrd/crypto/blake256 v1.1.0 // indirect
 	github.com/decred/dcrd/lru v1.1.3 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
-	github.com/ecies/go/v2 v2.0.8
+	github.com/ecies/go/v2 v2.0.11
 	github.com/fergusstrange/embedded-postgres v1.33.0 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang/snappy v0.0.5-0.20220116011046-fa5810519dcb // indirect
